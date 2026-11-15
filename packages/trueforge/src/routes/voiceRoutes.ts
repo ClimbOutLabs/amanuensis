@@ -11,9 +11,11 @@ import { createRoute, z } from '@hono/zod-openapi';
 
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
+  ConnectVoiceRequestSchema,
   MAX_SPEAK_TEXT_CHARS,
   SpeakVoiceRequestSchema,
   VoiceStatusResponseSchema,
+  VoiceTicketResponseSchema,
   VoiceTranscriptionResponseSchema,
 } from '../schemas/voice';
 import { OpenApiTag } from './openapiTags';
@@ -24,7 +26,7 @@ export const transcribeVoiceRoute = createRoute({
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'Transcribe a voice recording',
   description:
-    'Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected.',
+    'Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected. Each person may make a limited number of voice requests per minute, shared with spoken replies.',
   'x-fern-sdk-group-name': ['voice'],
   'x-fern-sdk-method-name': 'transcribe',
   request: {
@@ -50,6 +52,10 @@ export const transcribeVoiceRoute = createRoute({
     413: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Audio body over the 30 MB limit.',
+    },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Too many requests; wait for the Retry-After seconds.',
     },
     503: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -120,6 +126,49 @@ export const speakVoiceRoute = createRoute({
     503: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'The voice on this computer is off or still starting.',
+    },
+  },
+});
+
+export const connectVoiceRoute = createRoute({
+  method: 'post',
+  path: '/connect',
+  tags: [OpenApiTag.AGENT_SESSIONS],
+  summary: 'Open a live voice conversation',
+  description:
+    'Checks that the chat belongs to the caller and voice mode is ready, then returns a single-use ticket for the voice WebSocket. The WebSocket itself is not described here.',
+  'x-fern-sdk-group-name': ['voice'],
+  'x-fern-sdk-method-name': 'connect',
+  request: {
+    body: {
+      content: { 'application/json': { schema: ConnectVoiceRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: VoiceTicketResponseSchema } },
+      description: 'A ticket and the path of the voice WebSocket.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The request is missing the chat.',
+    },
+    401: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Authentication required.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The chat was not found.',
+    },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Too many requests; wait for the Retry-After seconds.',
+    },
+    503: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Voice mode is off, or speech to text, the voice or the listening model is not ready.',
     },
   },
 });

@@ -31,6 +31,8 @@ describe('SqliteRepositoryStore', () => {
             subject_display_name: created_by,
           }),
           source: null,
+          is_incognito: 0,
+          private_expires_at: null,
           agent_id: null,
           agent_name: null,
           agent_spec: jsonbBind({ model: { name: 'local/test' }, instructions: 'test' }),

@@ -31,7 +31,7 @@ import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runti
 import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 import type { McpServerManifest } from '../../schemas/mcpServer';
-import type { ModelProviderManifest } from '../../schemas/modelProvider';
+import type { ModelProviderCheck, ModelProviderManifest } from '../../schemas/modelProvider';
 import type {
   SandboxBuildMetadata,
   SandboxBuildStatus,
@@ -42,8 +42,20 @@ import type { SkillManifest } from '../../schemas/skill';
 import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
 import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
+import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
+import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
+import type { PersonTimezoneTable } from '../personTimezoneStore';
+import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
+import type { ReachSettingsTable } from '../reachSettingsStore';
+import type { RecallExclusionTable } from '../recallExclusionStore';
+import type {
+  TelegramConnectionTable,
+  TelegramPendingApprovalTable,
+  TelegramPendingReplyTable,
+} from '../telegramStore';
+import type { TextContactTable, TextSendCountTable, TextWordTable } from '../textContactStore';
 
 /**
  * Trace-level state for one thread at one turn (`turn_thread.checkpoint`).
@@ -122,6 +134,10 @@ export interface SessionTable {
    * partial WHERE external_id IS NOT NULL).
    */
   external_id: string | null;
+  /** A private chat, fixed at create. */
+  is_incognito: boolean;
+  /** When a private chat is deleted; null exactly when `is_incognito` is false (`session_private_expiry_check`). */
+  private_expires_at: Date | null;
   /** top: caller-owned opaque extension; never mixed with store state */
   custom: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>> | null;
   /** Caller-owned metadata; always present (DEFAULT '{}'). */
@@ -317,14 +333,14 @@ export interface ChatSearchDocumentTable {
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
-/** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
+/** "Always allow everywhere" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
 export interface McpToolGrantTable {
   tenant_id: string;
   created_by: string;
   mcp_server_name: string;
   tool_name: string;
-  /** Connector host the grant was given for; null for a connector with no URL. */
-  mcp_server_host: string | null;
+  /** What the grant binds to: the connector's setup digest (`connectorGrantBinding`), or null for a source with none. */
+  connector_binding: string | null;
   created_at: Date;
 }
 
@@ -368,6 +384,19 @@ export interface TokenFactoryUsageTable {
   usage_date: string;
   used_tokens: number;
   updated_at: Date;
+}
+
+/** Token counts of a deleted chat's model calls; no session id, no words. PRIMARY KEY (tenant_id, event_id). */
+export interface DeletedChatModelUsageTable {
+  tenant_id: string;
+  event_id: string;
+  created_by_subject_id: string;
+  model_id: string;
+  display_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number | null;
+  created_at: Date;
 }
 
 /** One row per UTC day and upstream model id; not tenant-scoped. */
@@ -643,6 +672,8 @@ export interface ModelProviderTable {
   name: string;
   /** ModelProvider document; replaced whole on every upsert */
   manifest: JSONColumnType<ModelProviderManifest, ModelProviderManifest, ModelProviderManifest>;
+  /** Outcome of the save-time connection check; null when no check has run */
+  last_check: JSONColumnType<ModelProviderCheck, ModelProviderCheck | null, ModelProviderCheck | null> | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -660,6 +691,12 @@ export interface SkillTable {
   manifest: JSONColumnType<SkillManifest, SkillManifest, SkillManifest>;
   /** The person's approved site list for this skill's network access, or null when not approved */
   network_approval: JSONColumnType<string[], string[], string[]> | null;
+  /** The code version the approval is pinned to, or null when there is no pin */
+  network_approval_code_sha: string | null;
+  /** Sites the person allowed one by one for this skill */
+  network_allowed_hosts: JSONColumnType<string[], string[], string[]>;
+  /** Sites the person turned down for this skill */
+  network_denied_hosts: JSONColumnType<string[], string[], string[]>;
   created_at: Date;
   updated_at: Date;
 }
@@ -985,9 +1022,23 @@ export interface Database {
   space_folder_assignment: SpaceFolderAssignmentTable;
   sentinel_audit: SentinelAuditTable;
   brief_item_completion: BriefItemCompletionTable;
+  recall_exclusion: RecallExclusionTable;
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
+  reach_settings: ReachSettingsTable;
+  person_timezone: PersonTimezoneTable;
+  text_contact: TextContactTable;
+  phone_call: PhoneCallTable;
+  text_send_count: TextSendCountTable;
+  text_word: TextWordTable;
+  noticing_event: NoticingEventTable;
+  noticing_checkpoint: NoticingCheckpointTable;
+  reach_lease: ReachLeaseTable;
   push_subscription: PushSubscriptionTable;
+  local_user: LocalUserTable;
+  telegram_connection: TelegramConnectionTable;
+  telegram_pending_reply: TelegramPendingReplyTable;
+  telegram_pending_approval: TelegramPendingApprovalTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;
@@ -1026,4 +1077,5 @@ export interface Database {
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;
+  deleted_chat_model_usage: DeletedChatModelUsageTable;
 }

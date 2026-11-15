@@ -1,3 +1,4 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createLogger } from 'winston';
 import {
   RemoteMCP,
@@ -6,14 +7,15 @@ import {
   defaultSentinelServices,
   type ToolSource,
 } from '../../../src/core';
+import { CALDAV_UNKNOWN_ID_NOTE } from '../../../src/core/calendar/caldav/toolResults';
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
-import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import type { SentinelServices } from '../../../src/core/permissions/context';
+import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
 jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
@@ -23,9 +25,12 @@ jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
   return { __esModule: true as const, ...actual, connectRemoteMcp: jest.fn() };
 });
 
+import { everyMailDraftApproved } from '../fixtures/approvedMailDrafts';
 const mockConnect = jest.mocked(connectRemoteMcp);
 const noopLogger = createLogger({ silent: true });
 const SERVER_NAME = 'notes';
+/** What the test connector's grants bind to, as the host would set it from the connector record. */
+const GRANT_BINDING = 'binding-of-the-notes-connector';
 
 function makeToolSet(params: {
   tools: ToolSchema[];
@@ -33,13 +38,15 @@ function makeToolSet(params: {
   requireApprovalForTools?: string[];
   firstParty?: boolean;
   serverName?: string;
+  answer?: CallToolResult;
 }): ToolSet {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
       sessionId: null,
       listTools: () => Promise.resolve({ tools: params.tools }),
-      callTool: callParams => Promise.resolve({ content: [{ type: 'text', text: `called ${callParams.name}` }] }),
+      callTool: callParams =>
+        Promise.resolve(params.answer ?? { content: [{ type: 'text', text: `called ${callParams.name}` }] }),
       close: () => Promise.resolve(),
     }),
   );
@@ -47,6 +54,7 @@ function makeToolSet(params: {
     name: params.serverName ?? SERVER_NAME,
     id: params.serverName ?? SERVER_NAME,
     url: 'https://mcp.example.com/mcp',
+    grantBinding: GRANT_BINDING,
     headers: {},
     logger: noopLogger,
     tracing: NOOP_AGENT_TRACING,
@@ -96,14 +104,18 @@ const destructiveRead: ToolSchema = {
 const unannotated: ToolSchema = { name: 'poke_note', description: 'Does something.', inputSchema: schema };
 
 function servicesWithGrants(toolNames: string[]): SentinelServices {
-  const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  // The draft step counts as done here, so a send reaches its own card; the draft-first tests use a real record.
+  const services = {
+    ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    mail_approved_drafts: everyMailDraftApproved,
+  };
   for (const tool_name of toolNames) {
     void services.tool_grants.recordToolGrant({
       tenant_id: 't1',
       created_by: 'u1',
       mcp_server_name: SERVER_NAME,
       tool_name,
-      mcp_server_host: 'mcp.example.com',
+      connector_binding: GRANT_BINDING,
     });
   }
   return services;
@@ -190,14 +202,22 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     expect(remediation?.message).not.toMatch(/card/i);
   });
 
-  it('refuses a standing grant when the server hints escalate the tier, but lets the chat answer once', async () => {
-    const info = await makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) }).toolCallInfo({
+  it('refuses a standing grant when the server hints escalate the tier, and offers the chat answer only for a named place', async () => {
+    const toolSet = makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) });
+    const unnamed = await toolSet.toolCallInfo({ name: 'archive_note', arguments: {} });
+    expect(unnamed.tier).toBe(3);
+    // The connector's own address is on the card, but it is the same for every call, so it names no place.
+    expect(unnamed.tier3_card?.destination_host).not.toBeNull();
+    expect(allowsChatApproval(unnamed)).toBe(false);
+    expect(allowsToolGrant(unnamed)).toBe(false);
+
+    const named = await toolSet.toolCallInfo({
       name: 'archive_note',
-      arguments: {},
+      arguments: { url: 'https://notes.example.com/team' },
     });
-    expect(info.tier).toBe(3);
-    expect(allowsChatApproval(info)).toBe(true);
-    expect(allowsToolGrant(info)).toBe(false);
+    expect(named.tier).toBe(3);
+    expect(allowsChatApproval(named)).toBe(true);
+    expect(allowsToolGrant(named)).toBe(false);
   });
 
   it('runs a tool the user always allows at Tier 1, without approval, and audits the run exactly once', async () => {
@@ -538,7 +558,7 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     expect(response).not.toHaveProperty('approvalRequired');
   });
 
-  it('asks before reading with mark as read set, with the card for that change', async () => {
+  it('never asks about marking mail read on a content read, whatever the switch says', async () => {
     const email = makeToolSet({
       tools: [contentTool],
       services: servicesWithGrants([]),
@@ -549,11 +569,10 @@ describe("the operator's own Email sidecar, with the annotations the mail server
       name: 'get_emails_content',
       arguments: { email_ids: ['e1'], mark_as_read: true },
     });
-    expect(info).toMatchObject({ tier: 3, tier_reason: 'mail_mark_as_read', is_approval_required: true });
-    expect(info.approval_token_id).toEqual(expect.any(String));
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'mail_read', is_approval_required: false });
   });
 
-  it('asks before marking when the choice arrives spelled as text through the call_tool wrapper', async () => {
+  it('never asks about marking mail read when the switch arrives spelled as text through the call_tool wrapper', async () => {
     const email = makeToolSet({
       tools: [contentTool],
       services: servicesWithGrants([]),
@@ -569,8 +588,7 @@ describe("the operator's own Email sidecar, with the annotations the mail server
         input: { email_ids: ['e1'], mark_as_read: 'true' },
       },
     });
-    expect(info).toMatchObject({ tier: 3, tier_reason: 'mail_mark_as_read', is_approval_required: true });
-    expect(info.approval_token_id).toEqual(expect.any(String));
+    expect(info).toMatchObject({ tier: 1, tier_reason: 'mail_read', is_approval_required: false });
   });
 
   it.each([
@@ -632,6 +650,105 @@ describe("the operator's own Email sidecar, with the annotations the mail server
     expect(info).toMatchObject({ tier: 1, tier_reason: 'caldav_private_read', is_approval_required: false });
   });
 
+  it('answers a made-up calendar id with the one thing to do next', async () => {
+    const getEvent: ToolSchema = {
+      name: 'get_event',
+      description: 'Reads one event.',
+      inputSchema: schema,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    };
+    const calendar = makeToolSet({
+      tools: [getEvent],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Calendar',
+      answer: {
+        isError: true,
+        content: [{ type: 'text', text: 'caldav-mcp: "guess@caldav-mcp" is not an id this server issued.' }],
+      },
+    });
+    const response = await calendar.callTool({ name: 'get_event', arguments: { id: 'guess@caldav-mcp' } });
+    expect(response).toMatchObject({
+      result: { isError: true, content: [{ type: 'text', text: CALDAV_UNKNOWN_ID_NOTE }] },
+    });
+  });
+
+  it('reads the message a forward names, and shows it on the card', async () => {
+    const forwardTool: ToolSchema = { ...sendTool, name: 'forward_email', description: 'Forwards an email.' };
+    const email = makeToolSet({
+      tools: [forwardTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+      answer: {
+        content: [],
+        structuredContent: {
+          emails: [
+            {
+              email_id: '41',
+              sender: 'Pippa Reed <pippa@example.com>',
+              subject: 'Roof repair quote',
+              body: 'The quote is 1,200 for the whole roof.',
+              attachments: ['quote.pdf'],
+            },
+          ],
+        },
+      },
+    });
+    const forward = await email.toolCallInfo({
+      name: 'forward_email',
+      arguments: { email_id: '41', recipients: ['dana@example.org'] },
+    });
+    expect(forward.is_approval_required).toBe(true);
+    expect(forward.tier3_card?.email).toMatchObject({
+      subject: 'Fwd: Roof repair quote',
+      forwards: {
+        from: 'Pippa Reed <pippa@example.com>',
+        body: 'The quote is 1,200 for the whole roof.',
+        attachments: ['quote.pdf'],
+      },
+    });
+  });
+
+  it('asks about a forward with the plain listing when its message cannot be read', async () => {
+    const forwardTool: ToolSchema = { ...sendTool, name: 'forward_email', description: 'Forwards an email.' };
+    const email = makeToolSet({
+      tools: [forwardTool],
+      services: servicesWithGrants([]),
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const forward = await email.toolCallInfo({
+      name: 'forward_email',
+      arguments: { email_id: '41', recipients: ['dana@example.org'] },
+    });
+    expect(forward.is_approval_required).toBe(true);
+    expect(forward.tier3_card?.email ?? null).toBeNull();
+    expect(forward.tier3_card?.outbound_text).toContain('41');
+  });
+
+  it('keeps a forward as a draft on its first approval, and sends it on the second', async () => {
+    const forwardTool: ToolSchema = { ...sendTool, name: 'forward_email', description: 'Forwards an email.' };
+    const email = makeToolSet({
+      tools: [forwardTool],
+      services: {
+        ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+        mail_listed_addresses: () => Promise.resolve(['dana@example.org']),
+      },
+      firstParty: true,
+      serverName: 'Email',
+    });
+    const call = { name: 'forward_email', arguments: { email_id: '41', recipients: ['dana@example.org'] } };
+
+    expect(await email.toolCallInfo(call)).toMatchObject({ tier_reason: 'mail_draft', is_approval_required: true });
+    const kept = await email.callTool(call, { status: 'allow' });
+    expect(kept).toMatchObject({ result: { content: [{ text: expect.stringContaining('kept as a draft') }] } });
+
+    expect(await email.toolCallInfo(call)).toMatchObject({ tier_reason: 'mail_send', is_approval_required: true });
+    const sent = await email.callTool(call, { status: 'allow' });
+    expect(sent).toMatchObject({ result: { content: [{ text: 'called forward_email' }] } });
+  });
+
   it('still asks before sending, and no answer covers a send', async () => {
     const email = makeToolSet({
       tools: [sendTool],
@@ -668,13 +785,13 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
         created_by: 'u1',
         mcp_server_name: 'Calendar',
         tool_name,
-        mcp_server_host: 'mcp.example.com',
+        connector_binding: GRANT_BINDING,
       });
     }
     return services;
   }
 
-  it('runs a granted calendar write with no card under the default gate', async () => {
+  it('asks for a calendar write under the default gate, also when it was granted for every chat', async () => {
     const calendar = makeToolSet({
       tools: [createEvent],
       services: calendarServices(['create_event']),
@@ -685,17 +802,19 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
       name: 'create_event',
       arguments: { summary: 'Lunch', start: '2026-10-22T12:00', end: '2026-10-22T13:00' },
     });
-    expect(info).toMatchObject({ tier: 1, tier_reason: 'mcp_tool_grant', is_approval_required: false });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'caldav_calendar_change', is_approval_required: true });
   });
 
-  it('still asks for a destructive calendar call, granted or not', async () => {
+  it('refuses a destructive calendar call whose event cannot be read, granted or not', async () => {
     const calendar = makeToolSet({
       tools: [deleteEvent],
       services: calendarServices(['delete_event']),
       firstParty: true,
       serverName: 'Calendar',
     });
+    // The fake calendar answers get_event with no event, so the delete cannot be described:
+    // it is refused outright rather than carded, and no grant is consulted first.
     const info = await calendar.toolCallInfo({ name: 'delete_event', arguments: { id: 'evt-1' } });
-    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: false });
   });
 });

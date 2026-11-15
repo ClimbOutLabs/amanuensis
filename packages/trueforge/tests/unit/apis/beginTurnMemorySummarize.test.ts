@@ -69,17 +69,14 @@ class CountingGlobalSettingsStore implements IGlobalSettingsStore {
 
 describe('beginTurnExecution turn-summarization wiring', () => {
   const originalSummarize = configuration.MEMORY_SUMMARIZE;
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalNebiusKey = configuration.NEBIUS_API_KEY;
 
   beforeEach(() => {
     configuration.MEMORY_SUMMARIZE = false;
-    configuration.MEMORY_BACKEND = 'markdown';
   });
 
   afterEach(() => {
     configuration.MEMORY_SUMMARIZE = originalSummarize;
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.NEBIUS_API_KEY = originalNebiusKey;
   });
 
@@ -103,6 +100,8 @@ describe('beginTurnExecution turn-summarization wiring', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const record = await sessionStore.getSession({ tenant_id: TENANT_ID, session_id: 's1' });
     if (record === undefined) {
@@ -141,6 +140,7 @@ describe('beginTurnExecution turn-summarization wiring', () => {
         userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
         deps: {
           mcpCatalog: McpCatalog.loadShipped(),
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           globalSettingsStore: store,
           tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessionStore,
@@ -216,16 +216,6 @@ describe('beginTurnExecution turn-summarization wiring', () => {
 
     const { summarize } = await beginTurnWithStore(store);
 
-    expect(summarize).toBeUndefined();
-  });
-
-  it('summarization stays off on a non-markdown backend even when enabled', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    const store = await storeWithOverride('true');
-
-    const { summarize } = await beginTurnWithStore(store);
-
-    // The markdown-only gate is preserved: the experimental backend retains verbatim.
     expect(summarize).toBeUndefined();
   });
 

@@ -11,11 +11,32 @@ describe("CalendarClient", () => {
         const rawRequestBody = { email: "email", password: "password", provider_key: "provider_key" };
         const rawResponseBody = {
             data: {
+                accounts: [
+                    {
+                        calendar_url: "calendar_url",
+                        email: "email",
+                        is_default: true,
+                        provider_key: "provider_key",
+                        state: "connected",
+                        username: "username",
+                    },
+                ],
                 available: true,
                 calendar_url: "calendar_url",
+                default_address: "default_address",
                 email: "email",
                 provider_key: "provider_key",
-                providers: [{ help_hint: "help_hint", help_url: null, key: "key", name: "name", server_url: null }],
+                providers: [
+                    {
+                        account_url_template: null,
+                        help_hint: "help_hint",
+                        help_url: null,
+                        key: "key",
+                        name: "name",
+                        server_url: null,
+                        setup_steps: ["setup_steps"],
+                    },
+                ],
                 state: "connected",
                 username: "username",
             },
@@ -37,17 +58,30 @@ describe("CalendarClient", () => {
         });
         expect(response).toEqual({
             data: {
+                accounts: [
+                    {
+                        calendarUrl: "calendar_url",
+                        email: "email",
+                        isDefault: true,
+                        providerKey: "provider_key",
+                        state: "connected",
+                        username: "username",
+                    },
+                ],
                 available: true,
                 calendarUrl: "calendar_url",
+                defaultAddress: "default_address",
                 email: "email",
                 providerKey: "provider_key",
                 providers: [
                     {
+                        accountUrlTemplate: null,
                         helpHint: "help_hint",
                         helpUrl: null,
                         key: "key",
                         name: "name",
                         serverUrl: null,
+                        setupSteps: ["setup_steps"],
                     },
                 ],
                 state: "connected",
@@ -155,14 +189,35 @@ describe("CalendarClient", () => {
     test("remove_account (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = {};
         const rawResponseBody = {
             data: {
+                accounts: [
+                    {
+                        calendar_url: "calendar_url",
+                        email: "email",
+                        is_default: true,
+                        provider_key: "provider_key",
+                        state: "connected",
+                        username: "username",
+                    },
+                ],
                 available: true,
                 calendar_url: "calendar_url",
+                default_address: "default_address",
                 email: "email",
                 provider_key: "provider_key",
-                providers: [{ help_hint: "help_hint", help_url: null, key: "key", name: "name", server_url: null }],
+                providers: [
+                    {
+                        account_url_template: null,
+                        help_hint: "help_hint",
+                        help_url: null,
+                        key: "key",
+                        name: "name",
+                        server_url: null,
+                        setup_steps: ["setup_steps"],
+                    },
+                ],
                 state: "connected",
                 username: "username",
             },
@@ -171,6 +226,7 @@ describe("CalendarClient", () => {
         server
             .mockEndpoint()
             .delete("/api/v1/user/settings/calendar")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(200)
             .jsonBody(rawResponseBody)
@@ -179,17 +235,30 @@ describe("CalendarClient", () => {
         const response = await client.settings.calendar.removeAccount();
         expect(response).toEqual({
             data: {
+                accounts: [
+                    {
+                        calendarUrl: "calendar_url",
+                        email: "email",
+                        isDefault: true,
+                        providerKey: "provider_key",
+                        state: "connected",
+                        username: "username",
+                    },
+                ],
                 available: true,
                 calendarUrl: "calendar_url",
+                defaultAddress: "default_address",
                 email: "email",
                 providerKey: "provider_key",
                 providers: [
                     {
+                        accountUrlTemplate: null,
                         helpHint: "help_hint",
                         helpUrl: null,
                         key: "key",
                         name: "name",
                         serverUrl: null,
+                        setupSteps: ["setup_steps"],
                     },
                 ],
                 state: "connected",
@@ -201,12 +270,13 @@ describe("CalendarClient", () => {
     test("remove_account (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = {};
         const rawResponseBody = { error: { message: "message" } };
 
         server
             .mockEndpoint()
             .delete("/api/v1/user/settings/calendar")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(401)
             .jsonBody(rawResponseBody)
@@ -220,12 +290,13 @@ describe("CalendarClient", () => {
     test("remove_account (3)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = {};
         const rawResponseBody = { error: { message: "message" } };
 
         server
             .mockEndpoint()
             .delete("/api/v1/user/settings/calendar")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(403)
             .jsonBody(rawResponseBody)
@@ -239,12 +310,13 @@ describe("CalendarClient", () => {
     test("remove_account (4)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = {};
         const rawResponseBody = { error: { message: "message" } };
 
         server
             .mockEndpoint()
             .delete("/api/v1/user/settings/calendar")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(502)
             .jsonBody(rawResponseBody)
@@ -255,17 +327,209 @@ describe("CalendarClient", () => {
         }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
     });
 
+    test("set_default_account (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = {
+            data: {
+                accounts: [
+                    {
+                        calendar_url: "calendar_url",
+                        email: "email",
+                        is_default: true,
+                        provider_key: "provider_key",
+                        state: "connected",
+                        username: "username",
+                    },
+                ],
+                available: true,
+                calendar_url: "calendar_url",
+                default_address: "default_address",
+                email: "email",
+                provider_key: "provider_key",
+                providers: [
+                    {
+                        account_url_template: null,
+                        help_hint: "help_hint",
+                        help_url: null,
+                        key: "key",
+                        name: "name",
+                        server_url: null,
+                        setup_steps: ["setup_steps"],
+                    },
+                ],
+                state: "connected",
+                username: "username",
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/calendar/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.calendar.setDefaultAccount({
+            address: "address",
+        });
+        expect(response).toEqual({
+            data: {
+                accounts: [
+                    {
+                        calendarUrl: "calendar_url",
+                        email: "email",
+                        isDefault: true,
+                        providerKey: "provider_key",
+                        state: "connected",
+                        username: "username",
+                    },
+                ],
+                available: true,
+                calendarUrl: "calendar_url",
+                defaultAddress: "default_address",
+                email: "email",
+                providerKey: "provider_key",
+                providers: [
+                    {
+                        accountUrlTemplate: null,
+                        helpHint: "help_hint",
+                        helpUrl: null,
+                        key: "key",
+                        name: "name",
+                        serverUrl: null,
+                        setupSteps: ["setup_steps"],
+                    },
+                ],
+                state: "connected",
+                username: "username",
+            },
+        });
+    });
+
+    test("set_default_account (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/calendar/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.calendar.setDefaultAccount({
+                address: "address",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("set_default_account (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/calendar/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.calendar.setDefaultAccount({
+                address: "address",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("set_default_account (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/calendar/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.calendar.setDefaultAccount({
+                address: "address",
+            });
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+
+    test("set_default_account (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/calendar/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(502)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.calendar.setDefaultAccount({
+                address: "address",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
+    });
+
     test("get_status (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
         const rawResponseBody = {
             data: {
+                accounts: [
+                    {
+                        calendar_url: "calendar_url",
+                        email: "email",
+                        is_default: true,
+                        provider_key: "provider_key",
+                        state: "connected",
+                        username: "username",
+                    },
+                ],
                 available: true,
                 calendar_url: "calendar_url",
+                default_address: "default_address",
                 email: "email",
                 provider_key: "provider_key",
-                providers: [{ help_hint: "help_hint", help_url: null, key: "key", name: "name", server_url: null }],
+                providers: [
+                    {
+                        account_url_template: null,
+                        help_hint: "help_hint",
+                        help_url: null,
+                        key: "key",
+                        name: "name",
+                        server_url: null,
+                        setup_steps: ["setup_steps"],
+                    },
+                ],
                 state: "connected",
                 username: "username",
             },
@@ -282,17 +546,30 @@ describe("CalendarClient", () => {
         const response = await client.settings.calendar.getStatus();
         expect(response).toEqual({
             data: {
+                accounts: [
+                    {
+                        calendarUrl: "calendar_url",
+                        email: "email",
+                        isDefault: true,
+                        providerKey: "provider_key",
+                        state: "connected",
+                        username: "username",
+                    },
+                ],
                 available: true,
                 calendarUrl: "calendar_url",
+                defaultAddress: "default_address",
                 email: "email",
                 providerKey: "provider_key",
                 providers: [
                     {
+                        accountUrlTemplate: null,
                         helpHint: "help_hint",
                         helpUrl: null,
                         key: "key",
                         name: "name",
                         serverUrl: null,
+                        setupSteps: ["setup_steps"],
                     },
                 ],
                 state: "connected",

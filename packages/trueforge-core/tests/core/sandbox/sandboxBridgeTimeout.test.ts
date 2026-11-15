@@ -10,6 +10,8 @@ function makeSandbox(options: {
   mcpRequestTimeoutMs: number;
   mcpConnectTimeoutMs: number;
   transport?: CodeModeTransport;
+  /** Whether the provider says it offers a Code Mode bridge. Left out, it says nothing. */
+  declaresCodeMode?: boolean;
 }): {
   sandbox: Sandbox;
   execCalls: SandboxExecParams[];
@@ -18,6 +20,7 @@ function makeSandbox(options: {
   const transport = options.transport;
   const provider: SandboxProvider = {
     type: 'test',
+    ...(options.declaresCodeMode === undefined ? {} : { supportsCodeMode: options.declaresCodeMode }),
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     createSandbox: () => Promise.resolve({ sandboxId: 'test-tenant.sandbox-1' }),
@@ -95,6 +98,7 @@ describe('Code Mode timeouts', () => {
       mcpRequestTimeoutMs: 90_000,
       mcpConnectTimeoutMs: 30_000,
       transport,
+      declaresCodeMode: true,
     });
     sandbox.configureCodeMode([makeMockIMCPServer({ name: 'github', preload: true })]);
 
@@ -109,6 +113,26 @@ describe('Code Mode timeouts', () => {
     expect(init?.command).toContain('sudo -n ln -sf');
     expect(init?.command).toContain('/usr/local/bin/mcp-client');
     expect(init?.command).not.toContain('/opt/tfy/mcp-client/bin/mcp-client');
+  });
+
+  it('gives no bridge to a provider that does not say it offers one', async () => {
+    const start = jest.fn();
+    const transport: CodeModeTransport = {
+      getClientInstall: () => ({
+        content: '#!/usr/bin/env python3\nprint("mock")\n',
+        remotePath: '/opt/tfy/mcp-client/mcp_client.py',
+        pathBinSymlink: '/usr/local/bin/mcp-client',
+      }),
+      start,
+      stop: () => Promise.resolve(),
+    };
+    const { sandbox, execCalls } = makeSandbox({ mcpRequestTimeoutMs: 90_000, mcpConnectTimeoutMs: 30_000, transport });
+    sandbox.configureCodeMode([makeMockIMCPServer({ name: 'github', preload: true })]);
+
+    const call = await execAgentCommand(sandbox, execCalls);
+
+    expect(start).not.toHaveBeenCalled();
+    expect(Object.keys(call.env ?? {}).filter(name => name.startsWith('TFY_'))).toEqual([]);
   });
 
   it('leaves the exec timeout to the provider default', async () => {

@@ -6,15 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PersonaProvider, type Persona, type PersonaApi } from '@/components/PersonaContext.js';
 import { SpokenReplyProvider } from '@/components/SpokenReplyContext.js';
 import { SpokenReplyContainer } from '@/containers/SpokenReplyContainer.js';
-import { SERVER_VOICE_STORAGE_KEY, SPEAK_VOICE_REPLIES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
+import {
+  READ_WHOLE_MESSAGES_STORAGE_KEY,
+  SERVER_VOICE_STORAGE_KEY,
+  SPEAK_VOICE_REPLIES_STORAGE_KEY,
+} from '@/utils/speechReplyPreferences.js';
 import type { ServerVoiceApi } from '@/utils/spokenReplyPlayer.js';
 import {
   armSpokenReply,
   clearDraftFromVoice,
   disarmSpokenReply,
-  getHandsFree,
   markDraftFromVoice,
-  setHandsFree,
   takeDraftFromVoice,
 } from '@/utils/voiceTurn.js';
 import { personaApiStubs } from '../personaApiStubs.js';
@@ -29,8 +31,11 @@ import { RuntimeHarness } from './RuntimeHarness.js';
 
 const { threadRunning, approvals } = vi.hoisted(() => {
   const threadRunning = { value: false };
-  // Approval cards come from the sentinel provider; speech only reads the card's plain sentence.
-  const approvals: Record<string, { card: { plain_what: string } }> = {};
+  // Approval cards come from the sentinel provider; speech only reads the card's headline.
+  const approvals: Record<
+    string,
+    { card: { plain_what: string; copy?: { headline: string; consequence: string | null; reason: string | null } } }
+  > = {};
   return { threadRunning, approvals };
 });
 
@@ -134,7 +139,6 @@ describe('SpokenReplyContainer', () => {
     stopSpokenReply();
     removeSpeechSynthesis();
     clearDraftFromVoice();
-    setHandsFree('off');
     window.localStorage.clear();
     threadRunning.value = false;
   });
@@ -249,8 +253,33 @@ describe('SpokenReplyContainer', () => {
     expect(spokenTexts(synthesis)).toEqual([`${words.slice(0, 60).join(' ')}. The rest is on screen.`]);
   });
 
+  it('reads a long answer to the end when whole messages are on', async () => {
+    window.localStorage.setItem(READ_WHOLE_MESSAGES_STORAGE_KEY, 'true');
+    const words = Array.from({ length: 80 }, (_, index) => `word${String(index)}`);
+    await sendAndFinish({ fromVoice: true, reply: [{ type: 'text', text: words.join(' ') }] });
+
+    expect(spokenTexts(synthesis)).toEqual([words.join(' ')]);
+  });
+
+  it('stops a whole-message readout early when the person switches chats', async () => {
+    window.localStorage.setItem(READ_WHOLE_MESSAGES_STORAGE_KEY, 'true');
+    const words = Array.from({ length: 80 }, (_, index) => `word${String(index)}`);
+    const rerender = await sendAndFinish({ fromVoice: true, reply: [{ type: 'text', text: words.join(' ') }] });
+    expect(synthesis.speak).toHaveBeenCalledTimes(1);
+
+    rerender(thread({ messages: [], running: false, threadId: 'chat-b' }));
+    await settle();
+
+    expect(synthesis.cancel).toHaveBeenCalled();
+  });
+
   it('speaks one short OK line for a reply that waits on an approval, and approves nothing', async () => {
-    approvals['call-approval'] = { card: { plain_what: 'Send the email to Sam Rivera.' } };
+    approvals['call-approval'] = {
+      card: {
+        plain_what: 'Send the email to Sam Rivera.',
+        copy: { headline: 'Send the email to Sam Rivera.', consequence: null, reason: null },
+      },
+    };
     const respond = vi.fn<(options: RespondToToolApprovalOptions) => void>();
     const prompt = [userMessage('Email Sam')];
     const { rerender } = render(thread({ messages: [], running: false, onRespondToToolApproval: respond }));
@@ -301,49 +330,6 @@ describe('SpokenReplyContainer', () => {
     ).resolves.toBeDefined();
     expect(synthesis.speak).not.toHaveBeenCalled();
   });
-
-  it('a hands-free conversation listens again only once the reply has been read aloud', async () => {
-    await sendAndFinishHandsFree();
-    expect(getHandsFree()).toBe('answering');
-
-    await act(async () => {
-      for (const call of synthesis.speak.mock.calls) call[0].finish();
-    });
-    await settle();
-    expect(getHandsFree()).toBe('listen-due');
-  });
-
-  it('a hands-free conversation listens again at once when there is nothing to read', async () => {
-    window.localStorage.setItem(SPEAK_VOICE_REPLIES_STORAGE_KEY, 'false');
-
-    await sendAndFinishHandsFree();
-
-    expect(getHandsFree()).toBe('listen-due');
-  });
-
-  it('switching chats ends a hands-free conversation', async () => {
-    const { rerender } = render(thread({ messages: [], running: false, threadId: 'chat-a' }));
-    await settle();
-    setHandsFree('answering');
-
-    rerender(thread({ messages: [], running: false, threadId: 'chat-b' }));
-    await settle();
-
-    expect(getHandsFree()).toBe('off');
-  });
-
-  async function sendAndFinishHandsFree() {
-    const { rerender } = render(thread({ messages: [], running: false }));
-    setHandsFree('answering');
-    markDraftFromVoice();
-    armSpokenReply({ fromVoice: takeDraftFromVoice(), text: PROMPT });
-    const prompt = [userMessage(PROMPT)];
-    const reply = [{ type: 'text' as const, text: 'Hello there.' }];
-    rerender(thread({ messages: prompt, running: true }));
-    await settle();
-    rerender(thread({ messages: [...prompt, assistantMessage(reply)], running: false }));
-    await settle();
-  }
 });
 
 describe('SpokenReplyContainer with personas', () => {

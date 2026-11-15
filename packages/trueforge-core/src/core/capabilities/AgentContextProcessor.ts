@@ -68,6 +68,15 @@ export interface PostToolCallAgentContextProcessor {
 }
 
 // NOTE: Not saved in Redis, Not saved in AgentThread in memory. Not persisted accross Agent Loop.
+/** What an ephemeral processor knows about the model call it shapes. */
+export interface PreLLMEphemeralCall {
+  /** Whether this call's model reads images; a picture added for one that does not is replaced by a note. */
+  modelSupportsVision: boolean;
+}
+
 export interface PreLLMEphemeralAgentContextProcessor {
-  processPreLLMEphemeral(input: ChatCompletionMessageParam[]): ChatCompletionMessageParam[] | undefined;
+  processPreLLMEphemeral(
+    input: ChatCompletionMessageParam[],
+    call: PreLLMEphemeralCall,
+  ): ChatCompletionMessageParam[] | undefined;
 }

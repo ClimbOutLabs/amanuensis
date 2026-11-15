@@ -12,15 +12,53 @@ const STATUS_BODY = {
     username: 'owner-login',
     calendar_url: 'https://caldav.fastmail.com/dav/',
     provider_key: 'fastmail',
+    accounts: [
+      {
+        email: 'owner@example.invalid',
+        username: 'owner-login',
+        calendar_url: 'https://caldav.fastmail.com/dav/',
+        provider_key: 'fastmail',
+        state: 'connected',
+        is_default: true,
+      },
+      {
+        email: 'work@example.invalid',
+        username: 'work@example.invalid',
+        calendar_url: 'https://caldav.example.invalid/dav/',
+        provider_key: 'other',
+        state: 'connected',
+        is_default: false,
+      },
+    ],
+    default_address: 'owner@example.invalid',
     providers: [
+      {
+        key: 'google',
+        name: 'Google',
+        server_url: null,
+        account_url_template: 'https://calendar.google.com/calendar/dav/{email}/',
+        help_url: 'https://support.google.com/accounts/answer/185833',
+        help_hint: 'Google: make an app password.',
+        setup_steps: ['Turn on 2-Step Verification.', 'Make an app password.'],
+      },
       {
         key: 'fastmail',
         name: 'Fastmail',
         server_url: 'https://caldav.fastmail.com/dav/',
+        account_url_template: null,
         help_url: 'https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords',
         help_hint: 'Fastmail: make an app password.',
+        setup_steps: [],
       },
-      { key: 'other', name: 'Other', server_url: null, help_url: null, help_hint: 'Ask your provider.' },
+      {
+        key: 'other',
+        name: 'Other',
+        server_url: null,
+        account_url_template: null,
+        help_url: null,
+        help_hint: 'Ask your provider.',
+        setup_steps: [],
+      },
     ],
   },
 };
@@ -65,9 +103,16 @@ describe('createCalendarSetupApi', () => {
     expect(status.email).toBe('owner@example.invalid');
     expect(status.username).toBe('owner-login');
     expect(status.calendarUrl).toBe('https://caldav.fastmail.com/dav/');
-    expect(status.providers[0]?.serverUrl).toBe('https://caldav.fastmail.com/dav/');
-    expect(status.providers[0]?.helpUrl).toContain('fastmail.help');
-    expect(status.providers[1]?.helpUrl).toBeNull();
+    expect(status.providers[0]?.accountUrlTemplate).toBe('https://calendar.google.com/calendar/dav/{email}/');
+    expect(status.providers[0]?.setupSteps).toEqual(['Turn on 2-Step Verification.', 'Make an app password.']);
+    expect(status.providers[1]?.serverUrl).toBe('https://caldav.fastmail.com/dav/');
+    expect(status.providers[1]?.helpUrl).toContain('fastmail.help');
+    expect(status.providers[1]?.setupSteps).toEqual([]);
+    expect(status.providers[2]?.helpUrl).toBeNull();
+    expect(status.accounts.map(account => account.email)).toEqual(['owner@example.invalid', 'work@example.invalid']);
+    expect(status.accounts[0]?.isDefault).toBe(true);
+    expect(status.accounts[1]?.calendarUrl).toBe('https://caldav.example.invalid/dav/');
+    expect(status.defaultAddress).toBe('owner@example.invalid');
   });
 
   it('saves with snake_case on the wire, the session cookie, and no bearer header', async () => {
@@ -111,6 +156,19 @@ describe('createCalendarSetupApi', () => {
     expect(seen[0]?.method).toBe('DELETE');
     expect(seen[0]?.body).toBe('{}');
     expect(JSON.stringify(seen[0]?.headers)).toContain('application/json');
+  });
+
+  it('remove with an address sends it in the body, and set default posts to the default route', async () => {
+    const { api, seen } = apiWith(async () =>
+      reply({ data: { ...STATUS_BODY.data, state: 'not_connected', email: null, username: null, calendar_url: null } }),
+    );
+    await api.removeCalendarAccount('work@example.invalid');
+    expect(seen[0]?.method).toBe('DELETE');
+    expect(JSON.parse(seen[0]?.body ?? '{}')).toEqual({ address: 'work@example.invalid' });
+    await api.setDefaultCalendarAccount('work@example.invalid');
+    expect(seen[1]?.method).toBe('POST');
+    expect(seen[1]?.url).toBe('http://harness.test/api/v1/user/settings/calendar/default');
+    expect(JSON.parse(seen[1]?.body ?? '{}')).toEqual({ address: 'work@example.invalid' });
   });
 
   it('passes the server plain error line through, and nothing else', async () => {

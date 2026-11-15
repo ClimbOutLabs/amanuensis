@@ -42,10 +42,6 @@ Override individual design tokens to change colors and other visual properties: 
 
 Set tokens separately for light and dark mode so both schemes stay consistent without per-component CSS.
 
-<Note>
-The fastest way to try tokens is the [UI Config App](https://ui.trueforge.dev/). Change colors in the preview, then copy the generated config into your app.
-</Note>
-
 
 ```json Token Object
 {
@@ -64,6 +60,8 @@ The fastest way to try tokens is the [UI Config App](https://ui.trueforge.dev/).
 ```
 
 Values above are an example brand override, not the built-in preset defaults.
+
+The chat text size setting scales the text tokens (`textXs`, `textSm`, `textBase`, `textLg`, `textXl`, `text2xl`) instead of replacing them. Text sizes you set here therefore keep their proportions at every chat text size.
 
 ### All tokens
 

@@ -21,6 +21,7 @@ import {
   STEP_BUDGET_SPENT_MESSAGE,
   unfinishedNotice,
 } from '../../../src/core/runtime/replyBudget';
+import { SANDBOX_EXEC_TOOL_NAME, SANDBOX_MCP_SERVER_ID } from '../../../src/core/sandbox/Sandbox';
 import { EDIT_SPACE_TOOL_NAME } from '../../../src/core/spaces/toolContract';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
@@ -306,6 +307,60 @@ describe('reply step budget', () => {
       expect(model.requests[8]?.tools).toBeUndefined();
       expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBeUndefined();
       expect(JSON.stringify(model.requests[8]?.messages)).not.toContain('which space, or which files in the sandbox');
+    });
+  });
+
+  describe('sandbox commands', () => {
+    function makeSandboxToolSet(): IToolSet {
+      const toolSet = makeMockIMCPServer({
+        name: SANDBOX_MCP_SERVER_ID,
+        preload: true,
+        tools: [
+          {
+            name: SANDBOX_EXEC_TOOL_NAME,
+            description: 'Run a command',
+            inputSchema: OBJECT_INPUT_SCHEMA,
+            preload: true,
+          },
+        ],
+      });
+      jest.mocked(toolSet.toolCallInfo).mockImplementation(params =>
+        Promise.resolve({
+          type: 'truefoundry-system',
+          mcp_server_id: toolSet.id,
+          mcp_server_name: toolSet.name,
+          original_tool_name: params.name,
+          is_approval_required: false,
+        }),
+      );
+      jest.mocked(toolSet.callTool).mockImplementation(() => Promise.resolve(toolResultResponse({ text: '1 failed' })));
+      return toolSet;
+    }
+    const testRun = (step: number) =>
+      toolCallStream({
+        id: `exec-${String(step)}`,
+        name: SANDBOX_EXEC_TOOL_NAME,
+        args: { intent: 'run the tests', purpose: 'verify', command: `npm test -- --shard=${String(step)}` },
+      });
+
+    it('a command that ran does not spend the step, so a fix-and-test loop runs past 8 steps', async () => {
+      const model = scriptedModel(step => (step <= 10 ? testRun(step) : finalAnswerStream()));
+
+      const { thread } = await runThread({ toolSet: makeSandboxToolSet(), create: model.create });
+
+      expect(model.requests).toHaveLength(11);
+      expect(model.requests[9]?.tools).toBeDefined();
+      expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBe(10);
+    });
+
+    it('command runs stop at the same cap as file edits', async () => {
+      const model = scriptedModel(step => testRun(step));
+
+      const { thread } = await runThread({ toolSet: makeSandboxToolSet(), create: model.create });
+
+      expect(thread.turnToolCallLedger.progressRefundsByThread.get('main')).toBe(MAX_PROGRESS_STEP_REFUNDS);
+      expect(model.requests).toHaveLength(8 + MAX_PROGRESS_STEP_REFUNDS + 1);
+      expect(model.requests.at(-1)?.tools).toBeUndefined();
     });
   });
 

@@ -1,9 +1,12 @@
 import { z } from '@hono/zod-openapi';
-import { REFLECT_BUDGETS } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
 const SandboxCapabilitySchema = z
   .object({
     enabled: z.boolean().describe('Whether a sandbox provider is configured for this tenant.'),
+    reason: z
+      .string()
+      .optional()
+      .describe('Why the sandbox is off, in plain words; present only when it is off and a reason is known.'),
   })
   .openapi('SandboxCapability');
 
@@ -22,6 +25,16 @@ const SettingsCapabilitySchema = z
   })
   .openapi('SettingsCapability');
 
+export const SignInCapabilitySchema = z
+  .object({
+    mode: z
+      .enum(['local', 'oidc', 'standalone', 'truefoundry'])
+      .describe('How this instance signs people in. `local` means Aman keeps one email and password itself.'),
+  })
+  .openapi('SignInCapability');
+
+export type SignInCapability = z.infer<typeof SignInCapabilitySchema>;
+
 /**
  * Local voice input availability. `enabled` reflects the latest non-blocking
  * STT sidecar `/healthz` probe: true only once the sidecar answered with a
@@ -38,11 +51,10 @@ export const VoiceCapabilitySchema = z
 export type VoiceCapability = z.infer<typeof VoiceCapabilitySchema>;
 
 /**
- * Read-only status of the memory recall screen. The screen is a separate subsystem from the
- * memory provider: it classifies recalled memory as it would be injected into the model's
- * context. The classifier sidecar's URL and token are operator-configured via `MEMORY_SCREEN_*`
- * environment variables; whether screening actually runs is a per-bank user setting
- * (`screen_enabled` in Settings > Memory), which defaults to `MEMORY_SCREEN_ENABLED` when unset.
+ * Read-only status of the memory recall screen: it classifies recalled memory as it would be
+ * injected into the model's context. The classifier sidecar's URL and token are
+ * operator-configured via `MEMORY_SCREEN_*` environment variables; whether screening actually
+ * runs is the Settings > Memory switch, which defaults to `MEMORY_SCREEN_ENABLED` when unset.
  * `enabled` here is the effective state after applying both.
  *
  * Deliberately non-sensitive: `enabled`, `configured` and `threshold` is all the Settings status
@@ -99,12 +111,11 @@ export const ToolOutputScreenCapabilitySchema = z
 
 /**
  * The server-wide memory defaults (`MEMORY_*`) as the process resolved them, so Settings > Memory
- * can report the real backend and where memories live instead of guessing.
- * Tuning numbers, the backend type, and the resolved Markdown memory directory; no credentials.
+ * can report where memories live instead of guessing.
+ * Tuning numbers and the resolved Markdown memory directory; no credentials.
  */
 const MemoryDefaultsCapabilitySchema = z
   .object({
-    backend: z.enum(['markdown', 'hindsight']).describe('`MEMORY_BACKEND` as resolved.'),
     markdown_dir: z
       .string()
       .optional()
@@ -115,15 +126,7 @@ const MemoryDefaultsCapabilitySchema = z
     recall_query_window: z.number().int().describe('`MEMORY_RECALL_QUERY_WINDOW` as resolved.'),
     recall_min_score: z.number().describe('`MEMORY_RECALL_MIN_SCORE` as resolved.'),
     recall_max_items: z.number().int().describe('`MEMORY_RECALL_MAX_ITEMS` as resolved.'),
-    recall_max_entities: z.number().int().describe('`MEMORY_RECALL_MAX_ENTITIES` as resolved.'),
     prerecall_gate_enabled: z.boolean().describe('`MEMORY_PRERECALL_GATE_ENABLED` as resolved.'),
-    curated_enabled: z.boolean().describe('`MEMORY_CURATED_ENABLED` as resolved.'),
-    curated_max_models: z.number().int().describe('`MEMORY_CURATED_MAX_MODELS` as resolved.'),
-    curated_max_tokens: z.number().int().describe('`MEMORY_CURATED_MAX_TOKENS` as resolved.'),
-    reflect_enabled: z.boolean().describe('`MEMORY_REFLECT_ENABLED` as resolved.'),
-    reflect_budget: z.enum(REFLECT_BUDGETS).describe('`MEMORY_REFLECT_BUDGET` as resolved.'),
-    reflect_max_tokens: z.number().int().describe('`MEMORY_REFLECT_MAX_TOKENS` as resolved.'),
-    reflect_timeout_ms: z.number().int().describe('`MEMORY_REFLECT_TIMEOUT_MS` as resolved.'),
   })
   .openapi('MemoryDefaultsCapability');
 
@@ -221,6 +224,7 @@ const CapabilitiesDataSchema = z
     memory_defaults: MemoryDefaultsCapabilitySchema,
     memory_embeddings: MemoryEmbeddingsCapabilitySchema,
     sandbox_isolation: SandboxIsolationCapabilitySchema,
+    sign_in: SignInCapabilitySchema,
     build: BuildIdentitySchema,
   })
   .openapi('CapabilitiesData');

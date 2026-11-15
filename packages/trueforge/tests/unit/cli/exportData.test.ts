@@ -311,6 +311,8 @@ describe('aman export-data against a real database', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
   }
 

@@ -313,7 +313,7 @@ describe('email images', () => {
         ...ref,
         request: { source: { kind: 'email', tool_call_id: 'mail-1' }, approved: false },
       }),
-    ).resolves.toEqual({ status: 'ask', count: 2, host: null });
+    ).resolves.toEqual({ status: 'ask', count: 2, host: null, url: null });
     expect(env.fetched).toEqual([]);
   });
 
@@ -413,6 +413,7 @@ describe('reply images', () => {
       status: 'ask',
       count: 1,
       host: 'example.com',
+      url: returned,
     });
     expect(env.fetched).toEqual([]);
     expect(env.audits).toEqual([]);
@@ -445,6 +446,21 @@ describe('reply images', () => {
     const results = await Promise.all(links.map(url => env.service.showTurnImages(asking(url))));
     expect(results.every(result => result.status === 'ask')).toBe(true);
     expect(env.fetched).toEqual([]);
+  });
+
+  it('names the whole address a reply image would load, the same one it then loads', async () => {
+    const written = 'https://EXAMPLE.com/p.png?who=maya@example.com&ref=order-42';
+    const env = setup({ events: [modelMessage({ id: 'e1', content: `![x](${written})` })] });
+    const asked = await env.service.showTurnImages(asking(written));
+    expect(asked).toEqual({
+      status: 'ask',
+      count: 1,
+      host: 'example.com',
+      url: 'https://example.com/p.png?who=maya@example.com&ref=order-42',
+    });
+    expect(env.fetched).toEqual([]);
+    await env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: written }, approved: true } });
+    expect(env.fetched).toEqual([asked.status === 'ask' ? asked.url : undefined]);
   });
 
   it('blocks a link that carries a server secret, even after approval', async () => {

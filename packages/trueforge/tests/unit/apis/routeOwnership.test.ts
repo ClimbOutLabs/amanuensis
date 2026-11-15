@@ -27,15 +27,13 @@ const SECRET = 'alice-private-marker-7f3a91';
 
 const TURN_TIMEOUT_MS = 60_000;
 
-/** Routes anyone may call without signing in: liveness, the sign-in pages, provider callbacks and API docs. */
+/** Routes anyone may call without signing in: liveness, the sign-in pages and provider callbacks. */
 const PUBLIC_ROUTES = new Set([
   'GET /healthz',
   'GET /api/v1/auth/login',
   'GET /api/v1/auth/callback',
   'POST /api/v1/auth/logout',
   'GET /api/v1/mcp-servers/oauth/callback',
-  'GET /api/v1/docs',
-  'GET /api/v1/openapi.json',
 ]);
 
 /** Routes that answer any signed-in user for an id they did not create, because the record is shared on purpose. */
@@ -113,7 +111,6 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
     let seeded: Seeded;
     let memoryDir: string;
     const originalMemory = {
-      backend: configuration.MEMORY_BACKEND,
       directory: configuration.MEMORY_MARKDOWN_DIR,
       embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED,
       summarize: configuration.MEMORY_SUMMARIZE,
@@ -180,7 +177,6 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
 
     beforeAll(async () => {
       memoryDir = await mkdtemp(path.join(tmpdir(), 'tfy-ownership-memory-'));
-      configuration.MEMORY_BACKEND = 'markdown';
       configuration.MEMORY_MARKDOWN_DIR = memoryDir;
       configuration.MEMORY_EMBEDDINGS_ENABLED = false;
       configuration.MEMORY_SUMMARIZE = false;
@@ -367,7 +363,6 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
     }, 120_000);
 
     afterAll(async () => {
-      configuration.MEMORY_BACKEND = originalMemory.backend;
       configuration.MEMORY_MARKDOWN_DIR = originalMemory.directory;
       configuration.MEMORY_EMBEDDINGS_ENABLED = originalMemory.embeddings;
       configuration.MEMORY_SUMMARIZE = originalMemory.summarize;
@@ -995,6 +990,18 @@ function describeRouteOwnership(engine: OwnershipEngine): void {
         }
       }
       expect(open).toEqual([]);
+    });
+
+    it('serves the API docs and the OpenAPI spec to a signed-in caller', async () => {
+      if (server === undefined) {
+        return;
+      }
+      const spec = await call({ user: ALICE, path: '/api/v1/openapi.json' });
+      expect(spec.status).toBe(200);
+      const specBody = await bodyOf(spec);
+      expect(JSON.stringify(specBody.json)).toContain('/api/v1/sessions');
+      const docs = await call({ user: ALICE, path: '/api/v1/docs' });
+      expect(docs.status).toBe(200);
     });
   });
 }

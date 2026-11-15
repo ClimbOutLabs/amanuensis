@@ -1,0 +1,49 @@
+name: Help guide
+
+# A pull request that changes a screen people see must change the help topic that covers it,
+# or carry the `help: no change needed` label. Its own workflow, so adding or removing the
+# label re-runs only this check, not the whole CI.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  help-changed-with-screens:
+    name: Help changed with screens
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository code
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      # No dependency install: the check only reads the diff and the labels.
+      - name: Check the help changed with the screens
+        if: github.event_name == 'pull_request'
+        env:
+          HELP_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HELP_PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/check-help-pr.mjs
+
+      # The merge queue re-runs required checks; the pull request already passed this one.
+      - name: Merge queue
+        if: github.event_name == 'merge_group'
+        run: echo "Checked on the pull request."

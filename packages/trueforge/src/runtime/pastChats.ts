@@ -15,6 +15,7 @@ import {
   vaultReadNamespaces,
   type VaultScope,
 } from './memory/markdownMemoryFiles';
+import { sessionKeepsNothing } from './privateChat';
 
 const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
@@ -131,7 +132,10 @@ export async function searchPastChats(deps: {
   });
 }
 
-/** Drops every hit whose chat cannot be shown to belong to the person, checked against the chat record itself. */
+/**
+ * Drops every hit whose chat cannot be shown to belong to the person, checked against the chat
+ * record itself, and every hit from a private chat, which is never indexed but is checked here too.
+ */
 export async function keepOwnChatHits(deps: {
   sessionStore: Pick<PastChatsSessionReader, 'getSession'>;
   tenantId: string;
@@ -141,7 +145,7 @@ export async function keepOwnChatHits(deps: {
   const kept: ChatSearchHit[] = [];
   for (const hit of deps.hits) {
     const session = await deps.sessionStore.getSession({ tenant_id: deps.tenantId, session_id: hit.session_id });
-    if (session?.created_by_subject.subject_id === deps.userRef) {
+    if (session?.created_by_subject.subject_id === deps.userRef && !sessionKeepsNothing({ session })) {
       kept.push(hit);
     }
   }

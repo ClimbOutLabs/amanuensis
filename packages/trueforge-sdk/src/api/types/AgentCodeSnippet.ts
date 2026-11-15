@@ -3,7 +3,6 @@
 import type * as TrueForge from "../index.js";
 
 export interface AgentCodeSnippet {
-    icon: string;
     labelName: string;
     language: string;
     sampleCode: TrueForge.AgentCodeSnippetSampleCode;

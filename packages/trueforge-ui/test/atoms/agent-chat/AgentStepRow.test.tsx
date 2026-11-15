@@ -148,4 +148,18 @@ describe('AgentStepRow', () => {
     expect(statusTextEl).toHaveClass('min-w-0');
     expect(statusTextEl.closest('div')).not.toHaveClass('shrink-0');
   });
+
+  it('keeps a long failure to a few lines in the header, with the whole text still there', () => {
+    const stack = [
+      'Error: request failed with status 500',
+      ...Array.from({ length: 40 }, (_, i) => `    at frame${String(i)} (server.js:${String(i)}:1)`),
+    ].join('\n');
+
+    render(<TestSubject title="fetch" status="error" statusText={stack} dataTestPrefix="fetch" />);
+
+    const statusTextEl = screen.getByTestId('fetch-status-text');
+    expect(statusTextEl).toHaveClass('line-clamp-3');
+    expect(statusTextEl.textContent).toBe(stack);
+    expect(statusTextEl).toHaveAttribute('title', stack);
+  });
 });

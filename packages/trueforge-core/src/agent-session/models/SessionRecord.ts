@@ -33,6 +33,10 @@ export interface SessionRecord<TCustom extends object = Record<string, never>> {
    * How the session was created. Null for interactive sessions.
    */
   source: SessionSource | null;
+  /** A private chat: nothing from it is remembered, and it is deleted when closed or expired. Set only at create. */
+  is_incognito: boolean;
+  /** When a private chat is deleted if it is not closed first. Null exactly when `is_incognito` is false. */
+  private_expires_at: Date | null;
   /**
    * Session tip — used for `previous_turn_id: 'auto'` resolution and turn
    * listing anchors. Advanced only by `createTurn` (atomic link).
@@ -47,7 +51,7 @@ export interface SessionRecord<TCustom extends object = Record<string, never>> {
    * updateSession, and createTurn — never on reads.
    */
   last_activity_timestamp_ms: number;
-  /** Server-derived grants created by "Always allow this here". */
+  /** Server-derived grants created by "Always allow in this chat". */
   approval_grants: string[];
   /** Host-owned ordered task state, persisted outside the model context. */
   task_checklist: TaskChecklist;

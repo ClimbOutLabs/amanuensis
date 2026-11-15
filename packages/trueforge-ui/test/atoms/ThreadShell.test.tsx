@@ -1,8 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import { createRef } from 'react';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { MessageGroup, ThreadComposerAreaShell, ThreadRootShell, ThreadViewportShell } from '@/atoms/ThreadShell.js';
+import { ThemeProvider } from '@/theme/ThemeProvider.js';
+import { CHAT_FONT_SIZE_STORAGE_KEY } from '@/utils/chatFontSizePreference.js';
 
 describe('ThreadRootShell', () => {
   it('merges host styles over defaults and forwards its ref and attributes', () => {
@@ -30,6 +32,74 @@ describe('ThreadRootShell', () => {
     expect(width).toBe(
       'min(calc(48rem + var(--thread-extra-left, 0rem) + var(--thread-extra-right, 0rem)), 100% - 2rem)',
     );
+  });
+});
+
+describe('ThreadRootShell chat text size', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('sets no text scale at the default size, so the chat renders as it does today', () => {
+    render(<ThreadRootShell data-testid="thread-root" />);
+
+    const root = screen.getByTestId('thread-root');
+    expect(root.style.getPropertyValue('--text-base')).toBe('');
+    expect(root.style.getPropertyValue('--text-sm')).toBe('');
+    expect(root.style.getPropertyValue('--thread-max-width')).not.toBe('');
+  });
+
+  it('puts the picked size on the thread root as the chat type scale', () => {
+    window.localStorage.setItem(CHAT_FONT_SIZE_STORAGE_KEY, 'larger');
+    render(<ThreadRootShell data-testid="thread-root" />);
+
+    const root = screen.getByTestId('thread-root');
+    expect(root.style.getPropertyValue('--text-base')).toBe('1.0625rem');
+    expect(root.style.getPropertyValue('--text-sm')).toBe('0.9208rem');
+    expect(root.style.getPropertyValue('--text-2xl')).toBe('1.7rem');
+  });
+
+  it('scales the host theme text sizes instead of replacing them with fixed sizes', () => {
+    window.localStorage.setItem(CHAT_FONT_SIZE_STORAGE_KEY, 'larger');
+    render(
+      <ThemeProvider theme={{ tokens: { textBase: '1.25rem' } }}>
+        <ThreadRootShell data-testid="thread-root" />
+      </ThemeProvider>,
+    );
+
+    const root = screen.getByTestId('thread-root');
+    expect(root.style.getPropertyValue('--text-base')).toBe('1.4167rem');
+  });
+
+  it('scales a host text size given in another unit with calc()', () => {
+    window.localStorage.setItem(CHAT_FONT_SIZE_STORAGE_KEY, 'largest');
+    render(
+      <ThemeProvider theme={{ tokens: { textBase: '16px' } }}>
+        <ThreadRootShell data-testid="thread-root" />
+      </ThemeProvider>,
+    );
+
+    const root = screen.getByTestId('thread-root');
+    expect(root.style.getPropertyValue('--text-base')).toBe('calc(16px * 1.2667)');
+    expect(root.style.getPropertyValue('--text-sm')).toBe('1.0292rem');
+  });
+
+  it('puts a smaller scale on the thread root when a smaller size is picked', () => {
+    window.localStorage.setItem(CHAT_FONT_SIZE_STORAGE_KEY, 'smaller');
+    render(<ThreadRootShell data-testid="thread-root" />);
+
+    const root = screen.getByTestId('thread-root');
+    expect(root.style.getPropertyValue('--text-base')).toBe('0.875rem');
+  });
+
+  it('lets a host style win over the picked size, as it does over the thread defaults', () => {
+    window.localStorage.setItem(CHAT_FONT_SIZE_STORAGE_KEY, 'larger');
+    const hostStyle = Object.assign({ color: 'red' }, { '--text-base': '2rem' });
+    render(<ThreadRootShell data-testid="thread-root" style={hostStyle} />);
+
+    const root = screen.getByTestId('thread-root');
+    expect(root.style.getPropertyValue('--text-base')).toBe('2rem');
+    expect(root.style.getPropertyValue('--text-sm')).toBe('0.9208rem');
   });
 });
 

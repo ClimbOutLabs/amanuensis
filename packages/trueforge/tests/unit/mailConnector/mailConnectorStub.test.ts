@@ -13,7 +13,7 @@ import { ToolSelectorPolicy } from '@truefoundry/trueforge-core/core/mcp/ToolSel
 
 import { asTransport } from '../../fixtures/inertMcpServer';
 
-/** The sidecar's 21 tools, as the research on the pinned release listed them. 13 are not offered. */
+/** The sidecar's 21 tools, as the research on the pinned release listed them. 12 are not offered. */
 const SIDECAR_TOOL_NAMES = [
   ...MAIL_CONNECTOR_TOOL_NAMES,
   'list_available_accounts',
@@ -22,7 +22,6 @@ const SIDECAR_TOOL_NAMES = [
   'list_allowed_senders',
   'set_email_flags',
   'set_email_tags',
-  'mark_emails_as_read',
   'create_mailbox',
   'save_to_mailbox',
   'delete_emails',
@@ -99,7 +98,7 @@ describe('Email connector against a scripted sidecar', () => {
     expect(tools.map(tool => tool.name).sort()).toEqual([...SIDECAR_TOOL_NAMES].sort());
   });
 
-  it('the model is offered exactly the 8 Email tools, and each name exists on the sidecar', async () => {
+  it('the model is offered exactly the 9 Email tools, and each name exists on the sidecar', async () => {
     const { tools } = await connection.listTools();
     const selector = policy();
     const offered = selector.filterAndAnnotate(tools.map(tool => ({ ...tool, preload: true })));
@@ -107,12 +106,12 @@ describe('Email connector against a scripted sidecar', () => {
     expect(selector.missingEnableLiterals(tools.map(tool => ({ ...tool, preload: true })))).toEqual([]);
   });
 
-  it('the 13 hidden tools cannot be called, and every offered tool can', async () => {
+  it('the 12 hidden tools cannot be called, and every offered tool can', async () => {
     const { tools } = await connection.listTools();
     const selector = policy();
     selector.filterAndAnnotate(tools.map(tool => ({ ...tool, preload: true })));
     const hidden = SIDECAR_TOOL_NAMES.filter(name => !MAIL_CONNECTOR_TOOL_NAMES.some(allowed => allowed === name));
-    expect(hidden).toHaveLength(13);
+    expect(hidden).toHaveLength(12);
     for (const name of hidden) {
       await expect(selector.isAllowed(name, () => Promise.resolve(undefined))).resolves.toBe(false);
     }

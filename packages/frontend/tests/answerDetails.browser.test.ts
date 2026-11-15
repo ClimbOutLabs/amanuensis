@@ -6,6 +6,7 @@ import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -53,10 +54,14 @@ test('answer details open and close from the keyboard', { timeout: 180_000 }, as
     await page.keyboard.press('Enter');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
     assert.equal(await usage.isVisible(), true, 'Enter did not open the details');
+    await page.screenshot({ path: await featureShotPath({ surface: 'screen:answer-details', step: 'open' }) });
 
     await page.keyboard.press('Space');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
     assert.equal(await usage.isVisible(), false, 'Space did not close the details');
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:answer-details' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();

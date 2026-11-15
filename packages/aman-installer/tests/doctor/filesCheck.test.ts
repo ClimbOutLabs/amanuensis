@@ -130,6 +130,7 @@ test('a folder whose listing joins read rights with commas is judged open', asyn
     runner,
     localAppDataDir: LOCAL_APP_DATA,
     selfExePath: 'C:\\Users\\Friend\\Downloads\\aman-windows-x64.exe',
+    selfPid: 4242,
   });
   const checks = await runDoctorChecks(world.deps, { local: false, files: true });
   const record = filesRecord(checks.records);

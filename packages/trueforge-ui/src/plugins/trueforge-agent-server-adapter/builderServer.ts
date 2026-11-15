@@ -4,7 +4,7 @@
  */
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { AgentBuilderServer, AgentLibraryEntry, ModelSelection, SearchAgentsParams } from '../../server/types.js';
-import { toSameOriginCatalogLogoUrl } from '../../utils/catalogLogo.js';
+import { catalogLogoSrc } from '../../utils/catalogLogo.js';
 import { AGENTS_PAGE_DEFAULT, clampAgentsPageSize, drainAgentsList, listAgentsPage } from './agentsList.js';
 import { toUiConnectorFromReadEntry, toUiTool } from './catalogs/connectorCatalog.js';
 import { toHarnessAgentSpec, toUiAgentSpec } from './chatServer.js';
@@ -16,16 +16,26 @@ export type CreateHarnessBuilderServerOptions = CreateTrueForgeClientOptions & {
   client?: TrueForge;
 };
 
-/** Well-known catalog entries key logos by `type` (same as configured provider resource name). */
-export function modelProviderLogosByName(
-  catalog: readonly TrueForgeApi.CatalogModelProvider[],
-): ReadonlyMap<string, string> {
+/**
+ * Well-known catalog entries key logos by `type` (same as configured provider resource name).
+ * Values are ready for `<CatalogLogo src>`: same-origin for a logo the catalog names, else bundled.
+ */
+export function modelProviderLogosByName({
+  catalog,
+  baseUrl,
+}: {
+  catalog: readonly TrueForgeApi.CatalogModelProvider[];
+  baseUrl: string;
+}): ReadonlyMap<string, string> {
   const logos = new Map<string, string>();
   for (const entry of catalog) {
-    if (entry.type === 'custom' || entry.logo === undefined) {
+    if (entry.type === 'custom') {
       continue;
     }
-    logos.set(entry.type, entry.logo);
+    const logo = catalogLogoSrc({ logo: entry.logo, kind: 'model', name: entry.type, baseUrl });
+    if (logo !== undefined) {
+      logos.set(entry.type, logo);
+    }
   }
   return logos;
 }
@@ -80,13 +90,10 @@ export function createHarnessBuilderServer(
           () => [],
         ),
       ]);
-      const logosByName = modelProviderLogosByName(catalogEntries);
+      const logosByName = modelProviderLogosByName({ catalog: catalogEntries, baseUrl: options.baseUrl ?? '/' });
       return modelsBody.data.map(model => {
-        const catalogLogo = logosByName.get(model.provider.name);
-        if (catalogLogo === undefined) return toModelSelection({ model });
-        // The app shell only allows same-origin images, so the picker cannot load the asset host directly.
-        const logo = toSameOriginCatalogLogoUrl({ logo: catalogLogo, baseUrl: options.baseUrl ?? '/' });
-        return toModelSelection({ model, logo });
+        const logo = logosByName.get(model.provider.name);
+        return logo === undefined ? toModelSelection({ model }) : toModelSelection({ model, logo });
       });
     },
     // Skills require a configured sandbox provider; keep the picker empty when skill capability is off.

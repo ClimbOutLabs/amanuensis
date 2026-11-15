@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
@@ -14,14 +14,14 @@ import { SANDBOX_EXEC_TOOL_NAME, Sandbox } from '../../../src/core/sandbox/Sandb
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { fakeGithub, makeCerts, type SeenRequest } from './fakeGithub';
+import { hostToolsPresent } from './hostTools';
 
 // Assembled at runtime so secret scanners do not mistake the synthetic value for a real token.
 const TOKEN = ['ghp', 'SyntheticTokenForTestsOnly0123456789'].join('_');
 const GIT = '/usr/bin/git';
-const HAS_TOOLS = ['/usr/bin/git', '/usr/bin/env', '/usr/bin/flock', '/usr/bin/openssl'].every(path =>
-  existsSync(path),
-);
-const describeWithTools = HAS_TOOLS ? describe : describe.skip;
+const describeWithTools = hostToolsPresent([GIT, '/usr/bin/env', '/usr/bin/flock', '/usr/bin/openssl'])
+  ? describe
+  : describe.skip;
 
 /** Runs commands in a real shell, routing github.com through the fake and trusting its test CA. */
 function makeProvider(input: { root: string; proxyPort: number }): SandboxProvider {

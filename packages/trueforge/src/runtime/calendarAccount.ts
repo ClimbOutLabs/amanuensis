@@ -4,6 +4,7 @@
  * its plain lines, and how a save request is resolved against the presets.
  */
 import {
+  CALDAV_GOOGLE_PROVIDER_KEY,
   CALDAV_OTHER_NEEDS_ADDRESS_MESSAGE,
   CALDAV_OTHER_PROVIDER_KEY,
   caldavEmailProblem,
@@ -13,7 +14,7 @@ import {
   caldavProviderPreset,
   caldavUrlProblem,
   caldavUserProblem,
-  GOOGLE_ADDRESS_MESSAGE,
+  GMAIL_NEEDS_GOOGLE_PROVIDER_MESSAGE,
   isGoogleMailAddress,
 } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
 import type { Logger } from 'winston';
@@ -41,7 +42,7 @@ export const CALENDAR_SERVER_UNREACHABLE_MESSAGE =
 export const CALENDAR_CERTIFICATE_MESSAGE =
   "That calendar server's security certificate was not accepted. Use the address your provider gives you and try again.";
 export const CALENDAR_REDIRECT_MESSAGE =
-  'That calendar address sends you to a different server. Use the address your provider gives you and try again.';
+  'That calendar address sends you on to another address. Use the exact address your provider gives you and try again.';
 export const CALENDAR_ADDRESS_NOT_ALLOWED_MESSAGE =
   'That calendar address cannot be used here. Use the address your provider gives you.';
 export const CALENDAR_DETAILS_UNUSABLE_MESSAGE =
@@ -104,8 +105,10 @@ function invalidFieldMessage(body: unknown): string {
 const calendarKind: ConnectorAccountKind<PublicCalendarAccount> = {
   label: 'Calendar',
   parseAccount: parseAgentAccount,
+  accountKey: account => account.email,
   connectorUnreachableMessage: CALENDAR_CONNECTOR_UNREACHABLE_MESSAGE,
   statusUnreachableMessage: CALENDAR_STATUS_UNREACHABLE_MESSAGE,
+  unknownAccountMessage: 'That calendar account is not connected. Connect it first, then try again.',
   saveRefusal: body => {
     switch (agentErrorKind(body)) {
       case 'sign_in_refused':
@@ -147,8 +150,8 @@ function resolveCalendarAccountSave(
   if (emailProblem !== null) {
     return { ok: false, message: emailProblem };
   }
-  if (isGoogleMailAddress(request.email)) {
-    return { ok: false, message: GOOGLE_ADDRESS_MESSAGE };
+  if (isGoogleMailAddress(request.email) && request.provider_key !== CALDAV_GOOGLE_PROVIDER_KEY) {
+    return { ok: false, message: GMAIL_NEEDS_GOOGLE_PROVIDER_MESSAGE };
   }
   if (caldavProviderPreset(request.provider_key) === undefined) {
     return { ok: false, message: 'That calendar provider is not on the list. Pick one and try again.' };
@@ -202,9 +205,20 @@ export async function saveCalendarAccount(
   return calendarClient.save(deps, resolved.payload);
 }
 
-/** Removes the saved account through the agent; the password is deleted for good. */
-export function removeCalendarAccount(deps: ConnectorAccountClientDeps): Promise<CalendarAccountState> {
-  return calendarClient.remove(deps);
+/**
+ * Removes saved accounts through the agent; their passwords are deleted for good. With an email address,
+ * only that account goes; without one, every account goes.
+ */
+export function removeCalendarAccount(deps: ConnectorAccountClientDeps, email?: string): Promise<CalendarAccountState> {
+  return calendarClient.remove(deps, email);
+}
+
+/** Makes one saved account the default: the one new events land on unless they say otherwise. */
+export function setCalendarDefaultAccount(
+  deps: ConnectorAccountClientDeps,
+  email: string,
+): Promise<CalendarAccountState> {
+  return calendarClient.setDefault(deps, email);
 }
 
 /**

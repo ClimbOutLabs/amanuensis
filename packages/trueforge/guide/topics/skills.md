@@ -1,11 +1,113 @@
 ---
 id: skills
-title: Learning new skills
-covers:
+title: Skills
+covers: settings:skills, route:skill, approval:skill
 ---
 
-Aman can learn a new skill. For example, ask it to learn how to turn a photo of a receipt into a line in your expense list.
+A skill is a set of step-by-step instructions that teaches Aman a particular job, such as writing release notes or following a checklist. Turn on the skills you want, then switch them on in the chats that need them.
 
-Skills run in the sandbox, so the sandbox must be set up first. Open Settings, then Skills to see the skills Aman has, to add one, or to turn one off.
+How to get there: Click **More** in the left bar, then **Settings**, then **Skills**.
 
-The "Learn new skills" card only appears once the sandbox is ready.
+=== "Computer"
+
+    ![The Skills page in Settings, with enabled and available skills](../../../../docs/screenshots/app/skills-page-desktop.png)
+
+=== "Phone"
+
+    ![The Skills page in Settings, with enabled and available skills](../../../../docs/screenshots/app/skills-page-phone.png)
+
+!!! note "Before you start"
+
+    Skills run in the sandbox, a closed-off workspace where Aman can run code. Set up the sandbox first. See [Run code](code.md).
+
+## Turn on a skill
+
+1. Find the skill under Available. Type in **Search skills** to narrow the list.
+2. Click **Enable**. The skill moves up to Enabled.
+
+If the skill sends requests to websites, Aman shows them first. Click **Add skill and allow websites** to add it, or **Cancel** to leave it off.
+
+## Use a skill in a chat
+
+1. In the chat, click **Add files and tools** beside the message box.
+2. Click **Add-ons**, then the **Skills** tab. The list opens just above the message box. If you have many skills, type in **Search skills** to find one.
+3. Select the skill.
+
+When a skill is on for a chat, Aman reads its instructions when the job comes up. Reading them doesn't ask you.
+
+Some skills come with their own scripts. Aman runs them in the sandbox, from the skill's folder. A skill's own script runs without asking, because you installed the skill. It asks first when the sandbox can reach the internet, or when Aman edited one of the skill's files in that chat.
+
+A skill script that needs a website or an extra package can't get it on its own. Aman skips a skill's own install steps and uses the packages the sandbox already has. When a package is missing, Aman tells you which one instead of trying workarounds. On an installed Aman, you can add a Python package with `aman doctor sandbox --add-python` and the package's name.
+
+## Add your own skill from GitHub
+
+1. Click **Import from GitHub**.
+2. Fill in **Name** and **Description**, so you can recognize the skill later.
+3. In **Repository URL**, paste the web address of the GitHub project that holds the skill.
+4. In **Folder containing the SKILL.md**, type the folder that holds the skill's instructions file, such as skills/release-notes.
+5. In **Branch**, type the branch to use, such as main.
+6. Click **Check skill**. Aman reads the skill's files and lists the websites it sends requests to. Nothing in the skill runs while Aman reads it.
+7. Read the list. Click **Add skill and allow websites** to add the skill and let it reach those websites, and no others. When the skill sends no requests, the button says **Add skill**.
+
+You need to fill in every box. If you change the address, folder or branch after checking, click **Check skill** again.
+
+Aman saves the skill at the exact version it checked, so later changes to the branch don't reach you. You can't add the skill without its websites. If the skill's files change before you click add, nothing is added, and Aman asks you to check again.
+
+## Add a skill from a chat
+
+You can also ask Aman in a chat to add a skill.
+
+1. In a chat, say which skill you want, or paste its GitHub address, such as "add the skill at github.com/acme/skills/tree/main/skills/release-notes".
+2. A card shows the skill before anything is added: its name, what it's for, where it comes from, the exact version and the websites it sends requests to. Aman reads the name and description from the skill itself, and finds the websites by reading its files.
+3. Click **Allow** to add it and let it reach those websites, or **Not now** to skip it. This card asks every time.
+
+After you allow it, the skill is on for that chat from your next message. It also shows in Settings, under Skills, where you can remove it.
+
+!!! warning "Add only skills you trust"
+
+    A skill is instructions written by someone else. Add one only if you trust where it comes from.
+
+From a chat, Aman can only add a skill. It can't change or remove one, and a skill that wants to reach sites still needs your OK before it reaches any of them. Only skills in a public GitHub repository can be added from a chat. An incognito chat can't add a skill, and neither can a scheduled run.
+
+## Turn a skill off
+
+Click **Remove** on the skill's row under Enabled. For a skill you imported, Aman asks first: click **Remove skill**. You can import it again later.
+
+## Let a skill reach the internet
+
+Some skills need to reach certain websites. When you add one, Aman lists them and adding the skill allows them. A skill added before Aman did this lists its sites in Settings, under Skills, until you answer:
+
+- Click **Allow** to let chats using this skill reach those sites, and no others.
+- Click **Don’t allow** to keep it offline. Click **Review the sites** to decide again later.
+- To take access back, click **Remove network access**.
+
+### When a skill asks in a chat
+
+The first time a skill that names sites runs in a chat, a card asks if it may reach those sites. Nothing is reached until you answer.
+
+- **Allow** lets the skill reach those sites in this chat only.
+- **Always allow for this skill** lets it reach them in every chat.
+- **Deny** turns them down. Aman does not ask about them again for that skill.
+
+If a skill tries a site it did not name, the connection is stopped and a card asks about that one site.
+
+An approval covers the skill's code as it is when you say yes. If the skill's code changes later, the approval ends and a card asks again.
+
+Some site names use letters from other alphabets. The card then shows the name in brackets as it is really written, for example `pаypal.com (xn--pypal-4ve.com)`. Check that name before you answer, because such letters can make a site look like a familiar one.
+
+To change an answer later, open Settings, then Skills. A skill that names sites shows them there. Click **Remove network access** to take back an Always allow. Next to a site you allowed or turned down one by one, click **Clear** to take back that answer.
+
+!!! warning
+
+    A skill with internet access can send any of your data to the sites it lists. Aman can't see what a site does with it, so only allow this for a skill you trust. A skill can never reach an email service, such as Gmail or Outlook, or a service that forwards messages by email. Aman blocks those sites even if you allow the rest, and marks them Blocked. Google and Microsoft run email on the same sites as their other services, so skills can't reach Google Drive, Google Calendar or Microsoft OneDrive either. Email only goes out through Aman, and you approve each one.
+
+## Good to know
+
+- Aman only reads a skill's full instructions when it decides the skill fits the job, so skills you don't need cost nothing.
+- For how skills are built and where they come from, see [Skills setup](../../../../docs/skills.mdx).
+
+## Related
+
+- [Run code](code.md)
+- [Agents](agents.md)
+- [Connectors](../../../../docs/mcp-servers.mdx)

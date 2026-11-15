@@ -46,6 +46,7 @@ describe('importing approval cards written before recipients carried names', () 
       tool_calls: [
         {
           tier3_card: {
+            copy: null,
             email: {
               to: [{ name: '', address: 'grace@example.com' }],
               cc: [{ name: '', address: 'lin@example.com' }],

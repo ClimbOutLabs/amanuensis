@@ -27,11 +27,27 @@ export const ListSessionAuditLogResponseSchema = z
   })
   .openapi('ListSessionAuditLogResponse');
 
+/**
+ * A time bound in the one form the store saves times in (UTC, with milliseconds). SQLite compares saved times as
+ * text, so a bound with an offset or without milliseconds would cut the log at the wrong place.
+ */
+const AuditTimeBoundSchema = z.iso.datetime({ offset: true }).transform(value => new Date(value).toISOString());
+
 export const ListUserAuditLogRequestQuerySchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(100).optional().default(50),
     page_token: z.string().optional().describe('Token from the previous page; omit for the newest entries.'),
     outcome: SentinelAuditRecordSchema.shape.outcome.optional().describe('Only entries with this outcome.'),
+    from: AuditTimeBoundSchema.optional().describe(
+      'Only entries at or after this time. The caller sends the start of a day in its own timezone.',
+    ),
+    to: AuditTimeBoundSchema.optional().describe(
+      'Only entries before this time. The caller sends the start of the day after its last shown day.',
+    ),
+  })
+  .refine(query => query.from === undefined || query.to === undefined || query.from < query.to, {
+    message: 'The start date must be before the end date. Pick an earlier start date.',
+    path: ['from'],
   })
   .openapi('ListUserAuditLogRequestQuery');
 
@@ -39,6 +55,10 @@ export const UserAuditRecordSchema = z
   .object({
     ...SentinelAuditRecordSchema.shape,
     chat_exists: z.boolean().describe('False once the chat the entry came from has been deleted.'),
+    session_title: z
+      .string()
+      .nullable()
+      .describe('Title of the chat the entry came from; null when the chat is deleted or has no title yet.'),
   })
   .openapi('UserAuditRecord');
 

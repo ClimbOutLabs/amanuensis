@@ -433,7 +433,7 @@ export class McpServersClient {
     }
 
     /**
-     * Runs one live recall against the Hindsight REST API behind this connector, the surface host-enforced memory actually calls. That is not the MCP endpoint `auth_status` reflects, and it may validate a different credential. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason. The same check runs on every create or replace that sets `manifest.memory_provider: true`.
+     * Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.
      *
      * @param {string} name - MCP server name.
      * @param {McpServersClient.RequestOptions} requestOptions - Request-specific configuration.
@@ -443,19 +443,19 @@ export class McpServersClient {
      * @throws {@link errors.TrueForgeTimeoutError}
      *
      * @example
-     *     await client.mcpServers.memoryCheck("name")
+     *     await client.mcpServers.homeAssistantCheck("name")
      */
-    public memoryCheck(
+    public homeAssistantCheck(
         name: string,
         requestOptions?: McpServersClient.RequestOptions,
-    ): core.HttpResponsePromise<TrueForge.MemoryProviderCheckResponse> {
-        return core.HttpResponsePromise.fromPromise(this.__memoryCheck(name, requestOptions));
+    ): core.HttpResponsePromise<TrueForge.HomeAssistantCheckResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__homeAssistantCheck(name, requestOptions));
     }
 
-    private async __memoryCheck(
+    private async __homeAssistantCheck(
         name: string,
         requestOptions?: McpServersClient.RequestOptions,
-    ): Promise<core.WithRawResponse<TrueForge.MemoryProviderCheckResponse>> {
+    ): Promise<core.WithRawResponse<TrueForge.HomeAssistantCheckResponse>> {
         const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
         const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
             _authRequest.headers,
@@ -466,7 +466,7 @@ export class McpServersClient {
             url: core.url.join(
                 (await core.Supplier.get(this._options.baseUrl)) ??
                     (await core.Supplier.get(this._options.environment)),
-                `api/v1/mcp-servers/${core.url.encodePathParam(name)}/memory-check`,
+                `api/v1/mcp-servers/${core.url.encodePathParam(name)}/home-assistant-check`,
             ),
             method: "POST",
             headers: _headers,
@@ -479,7 +479,7 @@ export class McpServersClient {
         });
         if (_response.ok) {
             return {
-                data: serializers.MemoryProviderCheckResponse.parseOrThrow(_response.body, {
+                data: serializers.HomeAssistantCheckResponse.parseOrThrow(_response.body, {
                     unrecognizedObjectKeys: "passthrough",
                     allowUnrecognizedUnionMembers: true,
                     allowUnrecognizedEnumValues: true,
@@ -516,7 +516,7 @@ export class McpServersClient {
             _response.error,
             _response.rawResponse,
             "POST",
-            "/api/v1/mcp-servers/{name}/memory-check",
+            "/api/v1/mcp-servers/{name}/home-assistant-check",
         );
     }
 

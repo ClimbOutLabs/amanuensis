@@ -7,7 +7,7 @@
 #   APP_VERSION — npm version to install, e.g. 0.1.0
 #
 # Example:
-#   docker build --build-arg APP_VERSION=0.1.0 -t trueforge:0.1.0 .
+#   docker build --build-arg APP_VERSION=0.1.0 -t aman:0.1.0 .
 
 FROM node:24-slim AS runner
 WORKDIR /app
@@ -50,8 +50,10 @@ RUN groupadd --gid 10001 trueforge \
 # first write. The Email send list volume mounts at /data/mail-policy and the
 # server is its only writer, so the dir is created here the same way; without
 # it the fresh volume starts out owned by root and the first write fails.
-RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy \
-  && chown -R 10001:10001 /data
+# The local model bridge's two sides share socket files in a volume mounted at
+# /run/aman-local-model, made here for the same reason.
+RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy /run/aman-local-model \
+  && chown -R 10001:10001 /data /run/aman-local-model
 
 # Image-level defaults so either image works without deploy-specific env: the
 # data roots above are writable by the runtime user. Deploys that pin their own
@@ -60,7 +62,13 @@ RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy \
 # has no home directory, so the default under HOME would fail with EACCES at startup.
 ENV MEMORY_MARKDOWN_DIR=/data/memory \
   PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
-  APP_DATA_DIR=/data/app
+  APP_DATA_DIR=/data/app \
+  VOICE_VAD_MODEL_DIR=/opt/aman-voice
+
+# Voice mode's listening model (Silero VAD v5.1.2, MIT), fetched at build time and checked against its
+# SHA-256, so the build fails on any other file and the running server never downloads it. The server
+# pins the same hash in packages/trueforge/src/voice/vad/sileroVad.ts; a test keeps the two equal.
+ADD --chmod=0644 --checksum=sha256:2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx /opt/aman-voice/silero_vad.onnx
 
 EXPOSE 8790
 

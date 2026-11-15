@@ -20,6 +20,7 @@ export const SessionEventType = {
     AmanMemoryRecall: "aman.memory.recall",
     AmanProfileLearned: "aman.profile.learned",
     AmanSkillUsed: "aman.skill.used",
+    AmanEmailSendReceipt: "aman.email.send_receipt",
     AmanSandboxProvisioning: "aman.sandbox.provisioning",
     AmanModelWaiting: "aman.model.waiting",
 } as const;

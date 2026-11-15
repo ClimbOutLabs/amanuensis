@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ToolInvocationContext } from '../../../../src/core/mcp/IMCPServer';
@@ -20,13 +20,13 @@ import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracin
 import { makeSilentLogger } from '../../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from '../durableWorkspaceCoordinator';
 import { fakeGithub, makeCerts, type SeenRequest } from '../fakeGithub';
+import { hostToolsPresent } from '../hostTools';
 import { attestation, FakeAgent, type FakeHandler } from './fakeAgent';
 
 // Assembled at runtime so secret scanners do not mistake the synthetic value for a real token.
 const TOKEN = ['FAKE', 'slot', 'token', 'not', 'real'].join('-');
 const GIT = '/usr/bin/git';
-const HAS_TOOLS = [GIT, '/usr/bin/env', '/usr/bin/openssl'].every(path => existsSync(path));
-const describeWithTools = HAS_TOOLS ? describe : describe.skip;
+const describeWithTools = hostToolsPresent([GIT, '/usr/bin/env', '/usr/bin/openssl']) ? describe : describe.skip;
 const SANDBOX_ID = `s1-${'e'.repeat(32)}`;
 const SHOWN = 'https://github.com/acme/widgets';
 const OTHER = 'https://github.com/other/private';

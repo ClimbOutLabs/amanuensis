@@ -23,6 +23,10 @@ export type Persona = {
   model_name: string;
   /** Voice that reads this persona's replies aloud; null uses the person's own voice choice. */
   voice: string | null;
+  /** Email accounts this persona may use, by address; absent means every connected account. */
+  mail_accounts?: string[] | undefined;
+  /** Calendar accounts this persona may use, by email address; absent means every connected account. */
+  calendar_accounts?: string[] | undefined;
 };
 
 export type PersonaDraft = Omit<Persona, 'id'>;

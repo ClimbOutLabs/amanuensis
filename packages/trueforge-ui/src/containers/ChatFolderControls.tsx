@@ -14,6 +14,7 @@ import { DropdownMenu } from '../atoms/primitives/DropdownMenu.js';
 import { CHAT_TITLE_MAX_LENGTH, normalizeChatTitle, useSaveChatTitle } from '../hooks/useChatTitleSave.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalChatFolders, type ChatFolder } from '../server/ChatFolderContext.js';
+import { useIsPrivateChat } from '../server/privateChatStore.js';
 import { cancelOnEscape, FolderMoveDialog, FolderSection, NewFolderControl } from './FolderControls.js';
 import { useToasterOptional } from './ToasterContainer.js';
 
@@ -236,6 +237,9 @@ export function ThreadListItemActions({
   const compact = useCompactLayout();
   const isMobile = useIsMobile();
   const chatFolders = useOptionalChatFolders();
+  // A private chat is never kept, so it is never filed either.
+  const isPrivate = useIsPrivateChat(sessionId);
+  const canMoveToFolder = chatFolders !== null && !isPrivate;
   const [sheetOpen, setSheetOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -300,7 +304,7 @@ export function ThreadListItemActions({
                   Rename
                 </button>
               ) : null}
-              {chatFolders !== null ? (
+              {canMoveToFolder ? (
                 <button
                   type="button"
                   role="menuitem"
@@ -356,7 +360,7 @@ export function ThreadListItemActions({
               Rename
             </button>
           ) : null}
-          {chatFolders !== null ? (
+          {canMoveToFolder ? (
             <button type="button" role="menuitem" className={menuItemClass} onClick={() => setFolderOpen(true)}>
               <Icon name="folder" className="size-3.5" />
               Move to folder

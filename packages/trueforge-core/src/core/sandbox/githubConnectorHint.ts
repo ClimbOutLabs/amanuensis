@@ -28,6 +28,10 @@ export const GITHUB_GIT_FORM_UNAUTHENTICATED_HINT =
 export const GITHUB_ACCESS_OR_MISSING_REPO_HINT =
   "GitHub reports this repository as inaccessible. The token may lack access to it, or the repository does not exist under that name; ask the user to confirm the repository URL and the connector's access.";
 
+/** An offline sandbox reaches a remote only through the host, which takes one plain git command for github.com. */
+export const OFFLINE_GIT_FORM_HINT =
+  'This sandbox is offline, so git reaches a remote only when the whole command is one plain git clone, fetch, pull, push or ls-remote for a github.com repository. Run it again on its own, with cwd set to the repository folder instead of cd, and with no pipes, chaining, -c or -C. Other hosts cannot be reached; tell the user so.';
+
 /** Whether the GitHub connector is attached to the session and, if so, whether a credential reached the sandbox. */
 export type GithubConnectorState = 'not-attached' | 'unresolved' | 'unauthenticated-form' | 'attached';
 
@@ -88,4 +92,19 @@ export function getGithubConnectorHint(input: {
     return GITHUB_ACCESS_OR_MISSING_REPO_HINT;
   }
   return undefined;
+}
+
+/**
+ * The remediation for a git network command that ran inside an offline sandbox because the host
+ * did not take it over, or `undefined` when the failure is anything but the missing network.
+ */
+export function getOfflineGitFormHint(input: {
+  output: string;
+  offline: boolean;
+  /** True when the command is a git network command the host did not run itself. */
+  ranInSandbox: boolean;
+}): string | undefined {
+  return input.offline && input.ranInSandbox && /could not resolve host/i.test(input.output)
+    ? OFFLINE_GIT_FORM_HINT
+    : undefined;
 }

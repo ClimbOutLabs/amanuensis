@@ -24,8 +24,10 @@ import {
   type GetRunByIdInput,
   type GetRunInput,
   type GetScheduledRunForInput,
+  type GetScheduledRunsForInput,
   type GetScheduleInput,
   type IScheduleStore,
+  type ListLatestRunsInput,
   type ListRunsInput,
   type ListScheduledRunsInput,
   type ListSchedulesInput,
@@ -331,6 +333,40 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
     return { data: data.map(toRunRecord), pagination };
   }
 
+  async listLatestRuns(input: ListLatestRunsInput, transaction?: Transaction<Database>): Promise<ScheduleRunRecord[]> {
+    if (input.schedule_ids.length === 0 || input.per_schedule <= 0) {
+      return [];
+    }
+    const db = transaction ?? this.#db;
+    const ranked = db
+      .selectFrom('schedule_run')
+      .select(runColumns)
+      .select(sql<number>`row_number() over (partition by schedule_id order by scheduled_for desc, id)`.as('run_rank'))
+      .where('tenant_id', '=', input.tenant_id)
+      .where('schedule_id', 'in', [...input.schedule_ids])
+      .as('ranked');
+    const rows = await db
+      .selectFrom(ranked)
+      .select([
+        'id',
+        'tenant_id',
+        'schedule_id',
+        'name',
+        'scheduled_for',
+        'status',
+        'created_by_subject',
+        'triggered_at',
+        'reason',
+        'created_at',
+        'updated_at',
+      ])
+      .where('run_rank', '<=', input.per_schedule)
+      .orderBy('schedule_id')
+      .orderBy('run_rank')
+      .execute();
+    return rows.map(toRunRecord);
+  }
+
   async getRun(input: GetRunInput, transaction?: Transaction<Database>): Promise<ScheduleRunRecord | undefined> {
     const db = transaction ?? this.#db;
     const row = await db
@@ -364,6 +400,24 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
       .where('status', '=', 'scheduled')
       .executeTakeFirst();
     return row === undefined ? undefined : toRunRecord(row);
+  }
+
+  async getScheduledRunsFor(
+    input: GetScheduledRunsForInput,
+    transaction?: Transaction<Database>,
+  ): Promise<ScheduleRunRecord[]> {
+    if (input.schedule_ids.length === 0) {
+      return [];
+    }
+    const db = transaction ?? this.#db;
+    const rows = await db
+      .selectFrom('schedule_run')
+      .select(runColumns)
+      .where('tenant_id', '=', input.tenant_id)
+      .where('schedule_id', 'in', [...input.schedule_ids])
+      .where('status', '=', 'scheduled')
+      .execute();
+    return rows.map(toRunRecord);
   }
 
   async createRun(input: CreateScheduleRunInput, transaction?: Transaction<Database>): Promise<ScheduleRunRecord> {

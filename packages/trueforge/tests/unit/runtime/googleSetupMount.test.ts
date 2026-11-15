@@ -24,30 +24,28 @@ const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const CALENDAR_READ = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const CALENDAR_WRITE = 'https://www.googleapis.com/auth/calendar.events';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
+const DRIVE = 'https://www.googleapis.com/auth/drive.file';
 
 const MEMORY_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
-  recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 const NO_SCREEN: ToolOutputScreenConfig = { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500 };
 const memory: MemoryTurnContext = {
+  keepsNothing: false,
   client: undefined,
   config: MEMORY_CONFIG,
   sessionId: 's1',
   previousTurnId: null,
   summarize: undefined,
-  providerServerName: undefined,
 };
 
 const STORE: SpaceToolStore = {
@@ -171,6 +169,7 @@ describe('the guided Google setup mount', () => {
         logger: createLogger({ silent: true }),
       },
       {
+        deletedChats: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         sessionStore: new SqliteSessionStore(env.db),
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
@@ -206,10 +205,10 @@ describe('the guided Google setup mount', () => {
     return undefined;
   }
 
-  it('mounts the setup read and its guidance for a person who never connected', async () => {
+  it('mounts the setup read, with no standing guidance, for a person who never connected', async () => {
     const mounted = await setupCapabilityOf(await resolved());
     expect(mounted?.tools).toEqual(['google_setup_status']);
-    expect(mounted?.instructionBuilders).toBe(1);
+    expect(mounted?.instructionBuilders).toBe(0);
   });
 
   it('still mounts it when the login allows only some of mail and calendar', async () => {
@@ -221,5 +220,11 @@ describe('the guided Google setup mount', () => {
   it('mounts nothing once the login allows everything', async () => {
     await connections.save(record({ granted_scopes: [READ, COMPOSE, CALENDAR_READ, CALENDAR_WRITE] }));
     expect(await setupCapabilityOf(await resolved())).toBeUndefined();
+  });
+
+  it('still mounts it when calendar is missing, even with Drive allowed', async () => {
+    await connections.save(record({ granted_scopes: [READ, COMPOSE, DRIVE] }));
+    const mounted = await setupCapabilityOf(await resolved());
+    expect(mounted?.tools).toEqual(['google_setup_status']);
   });
 });

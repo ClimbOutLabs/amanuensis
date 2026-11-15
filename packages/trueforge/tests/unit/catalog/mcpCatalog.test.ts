@@ -1,32 +1,9 @@
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
-import { parseMemoryProviderUrl } from '../../../src/runtime/memory/memoryProvider';
 import { McpCatalogFileSchema } from '../../../src/schemas/mcpCatalog';
 
 describe('shipped MCP catalog', () => {
   it('loads and validates every shipped preset', () => {
     expect(McpCatalog.loadShipped().list().length).toBeGreaterThan(0);
-  });
-
-  it('ships a hindsight preset whose placeholder URL is a shape memory can actually use', () => {
-    const hindsight = McpCatalog.loadShipped()
-      .list()
-      .find(server => server.name === 'hindsight');
-    if (hindsight === undefined) {
-      throw new Error('expected a hindsight preset in the shipped MCP catalog');
-    }
-
-    // The URL is a per-deployment placeholder, but it must still parse as {apiBase}/mcp/{bank}:
-    // that is the only shape resolveMemoryProvider accepts, and anything else silently disables
-    // memory for the turn.
-    expect(parseMemoryProviderUrl(hindsight.url)).toEqual({
-      apiBase: 'https://your-hindsight-host:8449',
-      bank: 'your-bank',
-    });
-    // Hindsight authenticates with an API key in a header, not OAuth.
-    expect(hindsight.auth?.type).toBe('header');
-    // No hosted logo asset exists for a self-hosted server; a broken image is worse than none.
-    expect(hindsight.logo).toBeUndefined();
-    expect(hindsight.description).toMatch(/\{apiBase\}\/mcp\/\{bank\}/);
   });
 
   it('offers Parallel’s keyless hosted MCP and Tavily as the presets that can become the web search provider', () => {
@@ -137,6 +114,50 @@ describe('shipped MCP catalog', () => {
       tools: [],
       plumbing_fields: [],
     });
+  });
+
+  it('ships the Notion preset at the address and sign-in shape Notion documents', () => {
+    const notion = McpCatalog.loadShipped()
+      .list()
+      .find(server => server.name === 'notion');
+    if (notion === undefined) {
+      throw new Error('expected a notion preset in the shipped MCP catalog');
+    }
+    // Notion's own client guide names this endpoint (Streamable HTTP) and dynamic client
+    // registration, which is the sign-in the catalog's dcr shape runs.
+    expect(notion.url).toBe('https://mcp.notion.com/mcp');
+    expect(notion.auth?.type).toBe('dcr');
+    // The help line the preset carries: signing in gives the connection the same access
+    // the person has, so it can reach any page or database they can open.
+    expect(notion.description).toMatch(/same access you have/);
+    expect(notion.description).not.toMatch(/cannot see anything you do not share/);
+  });
+
+  it('ships the GitHub preset at the address and token shape GitHub documents', () => {
+    const github = McpCatalog.loadShipped()
+      .list()
+      .find(server => server.name === 'github');
+    if (github === undefined) {
+      throw new Error('expected a github preset in the shipped MCP catalog');
+    }
+    // GitHub's setup guide names this endpoint and a personal access token sent as a bearer
+    // header; its OAuth is registered per client application, so a shipped preset cannot
+    // carry it and the token is the shape a preset can fill.
+    expect(github.url).toBe('https://api.githubcopilot.com/mcp/');
+    expect(github.auth?.type).toBe('header');
+    expect(github.description).toMatch(/personal access token/);
+  });
+
+  it('ships no Slack preset, because its server cannot register this app by itself', () => {
+    // Slack's MCP server has no dynamic client registration: it signs a person in only
+    // through a Slack app that person registered first, whose client id and secret a
+    // shipped catalog row cannot hold. A preset would fail at sign-in, so there is none;
+    // a person adds Slack by hand with their own app's credentials instead.
+    expect(
+      McpCatalog.loadShipped()
+        .list()
+        .find(server => server.name === 'slack'),
+    ).toBeUndefined();
   });
 
   it('rejects a preset whose search tools are not a short list of names', () => {

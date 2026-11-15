@@ -13,8 +13,30 @@ import type {
   MemoryVaultEntry,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import type { AgentUIServer } from '@/server/types.js';
 import { personaApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
+
+function stubShell() {
+  return {
+    setSettingsOpen: vi.fn(),
+    setLibraryOpen: vi.fn(),
+    setSessionsOpen: vi.fn(),
+    setSchedulesOpen: vi.fn(),
+    setRemindersOpen: vi.fn(),
+    openSpaces: vi.fn(),
+    closeSpaces: vi.fn(),
+    openHistorySession: vi.fn(),
+  };
+}
+
+// The shell the page steers when it opens a chat; null stands for a screen with no shell.
+let shell: ReturnType<typeof stubShell> | null = null;
+
+vi.mock('@/server/ShellModeContext.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/server/ShellModeContext.js')>()),
+  useOptionalShellMode: () => shell,
+}));
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -43,6 +65,7 @@ function createCatalog(initial: MemoryVaultEntry[]) {
   const catalog: MemoryVaultCatalog = {
     listEntries: async namespace => (namespace === undefined ? stored : []),
     getSummaryStatus: async () => ({ summaryPending: false }),
+    dismissSummaryStatus: async () => undefined,
     updateEntry: async () => {
       throw new Error('not used in these tests');
     },
@@ -87,6 +110,7 @@ function listedTexts(): string[] {
 
 afterEach(() => {
   vi.useRealTimers();
+  shell = null;
 });
 
 describe('Memory explorer', () => {
@@ -275,6 +299,7 @@ describe('Memory explorer with several collections', () => {
     return {
       listEntries: async () => [],
       getSummaryStatus: async () => ({ summaryPending: false }),
+      dismissSummaryStatus: async () => undefined,
       updateEntry: async () => {
         throw new Error('not used in these tests');
       },
@@ -287,8 +312,9 @@ describe('Memory explorer with several collections', () => {
     };
   }
 
-  function renderPersonaPanel(catalog: MemoryVaultCatalog) {
-    const server = { ...createMockAgentUIServer({ catalog: createMockCatalog() }), memoryVault: catalog };
+  function renderPersonaPanel(catalog: MemoryVaultCatalog, getSession?: AgentUIServer['getSession']) {
+    const mock = createMockAgentUIServer({ catalog: createMockCatalog() });
+    const server = { ...mock, getSession: getSession ?? mock.getSession, memoryVault: catalog };
     render(
       <ServerProvider server={server}>
         <PersonaProvider api={personaApi()}>
@@ -332,6 +358,7 @@ describe('Memory explorer with several collections', () => {
               }),
             ],
       getSummaryStatus: async namespace => ({ summaryPending: namespace === 'persona:Zara' }),
+      dismissSummaryStatus: async () => undefined,
     });
     renderPersonaPanel(catalog);
 
@@ -345,6 +372,7 @@ describe('Memory explorer with several collections', () => {
     const catalog = catalogWith({
       listEntries: async () => [],
       getSummaryStatus: async () => ({ summaryPending: true }),
+      dismissSummaryStatus: async () => undefined,
     });
     renderPersonaPanel(catalog);
 
@@ -353,10 +381,106 @@ describe('Memory explorer with several collections', () => {
     expect(screen.getAllByText(/Couldn't make a summary/)).toHaveLength(2);
   });
 
+  it('says when and why it happened, and Dismiss puts away that one line only', async () => {
+    const dismissed: (string | undefined)[] = [];
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async () => ({
+        summaryPending: true,
+        failedAt: '2026-08-14T12:00:00.000Z',
+        cause: 'model_too_slow',
+      }),
+      dismissSummaryStatus: async namespace => {
+        dismissed.push(namespace);
+      },
+    });
+    renderPersonaPanel(catalog);
+
+    const zaraLine = await screen.findByText(ZARA_PENDING_LINE);
+    expect(
+      screen.getAllByText(
+        /^This happened on .*2026.*\d\d.*\. The model took too long to answer\. If this keeps happening, choose a faster Background model in Settings\.$/,
+      ),
+    ).toHaveLength(2);
+    // The server did not say which chat it was, so the note offers no way to open one.
+    expect(screen.queryByRole('button', { name: 'Open the chat' })).not.toBeInTheDocument();
+    const zaraNote = zaraLine.closest('div')?.parentElement;
+    if (zaraNote === null || zaraNote === undefined) throw new Error('the Zara line sits in no note');
+    fireEvent.click(within(zaraNote).getByRole('button', { name: 'Dismiss' }));
+
+    await waitFor(() => expect(screen.queryByText(ZARA_PENDING_LINE)).not.toBeInTheDocument());
+    expect(dismissed).toEqual(['persona:Zara']);
+    expect(screen.getByText(SHARED_PENDING_LINE)).toBeInTheDocument();
+  });
+
+  it('opens the chat the failed summary was for', async () => {
+    shell = stubShell();
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async namespace => ({
+        summaryPending: namespace === undefined,
+        cause: 'interrupted',
+        sessionId: 'chat-oat-bars',
+      }),
+    });
+    renderPersonaPanel(catalog, async ({ sessionId }) => ({
+      id: sessionId,
+      title: 'Oat bars',
+      isMutable: true,
+      createdAt: '2026-08-14T11:00:00.000Z',
+      updatedAt: '2026-08-14T12:00:00.000Z',
+    }));
+
+    expect(
+      await screen.findByText('Aman stopped before the summary was finished. Nothing is wrong with the model.'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open the chat' }));
+
+    await waitFor(() =>
+      expect(shell?.openHistorySession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'chat-oat-bars' })),
+    );
+    expect(shell?.setSettingsOpen).toHaveBeenCalledWith(false);
+  });
+
+  it('says so when the chat the failed summary was for has been deleted', async () => {
+    shell = stubShell();
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async namespace => ({ summaryPending: namespace === undefined, sessionId: 'chat-gone' }),
+    });
+    renderPersonaPanel(catalog, async () => {
+      throw Object.assign(new Error('Not found'), { name: 'NotFoundError' });
+    });
+
+    await screen.findByText(SHARED_PENDING_LINE);
+    fireEvent.click(screen.getByRole('button', { name: 'Open the chat' }));
+
+    expect(await screen.findByText('This chat was deleted.')).toBeInTheDocument();
+    expect(shell.openHistorySession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the line and says why when Dismiss does not reach the server', async () => {
+    const catalog = catalogWith({
+      listEntries: async () => [],
+      getSummaryStatus: async namespace => ({ summaryPending: namespace === undefined }),
+      dismissSummaryStatus: async () => {
+        throw new Error('The memory folder cannot be written. Check its disk, then try again.');
+      },
+    });
+    renderPersonaPanel(catalog);
+
+    await screen.findByText(SHARED_PENDING_LINE);
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+    expect(await screen.findByText(/The memory folder cannot be written/)).toBeInTheDocument();
+    expect(screen.getByText(SHARED_PENDING_LINE)).toBeInTheDocument();
+  });
+
   it('does not promise that the failed chat itself is summarised again', async () => {
     const catalog = catalogWith({
       listEntries: async () => [],
       getSummaryStatus: async () => ({ summaryPending: true }),
+      dismissSummaryStatus: async () => undefined,
     });
     renderPersonaPanel(catalog);
 

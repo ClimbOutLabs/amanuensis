@@ -13,6 +13,8 @@ import { MemoryClient } from "./api/resources/memory/client/Client.js";
 import { ModelsClient } from "./api/resources/models/client/Client.js";
 import { PersonalizationClient } from "./api/resources/personalization/client/Client.js";
 import { PersonasClient } from "./api/resources/personas/client/Client.js";
+import { ReachClient } from "./api/resources/reach/client/Client.js";
+import { RemindersClient } from "./api/resources/reminders/client/Client.js";
 import { RepositoriesClient } from "./api/resources/repositories/client/Client.js";
 import { RepositoryCommandProposalsClient } from "./api/resources/repositoryCommandProposals/client/Client.js";
 import { RepositoryCommandsClient } from "./api/resources/repositoryCommands/client/Client.js";
@@ -26,6 +28,8 @@ import { SettingsClient } from "./api/resources/settings/client/Client.js";
 import { SkillsClient } from "./api/resources/skills/client/Client.js";
 import { SpaceFoldersClient } from "./api/resources/spaceFolders/client/Client.js";
 import { SpacesClient } from "./api/resources/spaces/client/Client.js";
+import { TelegramClient } from "./api/resources/telegram/client/Client.js";
+import { TodayClient } from "./api/resources/today/client/Client.js";
 import { VoiceClient } from "./api/resources/voice/client/Client.js";
 import type { BaseClientOptions, BaseRequestOptions } from "./BaseClient.js";
 import { type NormalizedClientOptionsWithAuth, normalizeClientOptionsWithAuth } from "./BaseClient.js";
@@ -40,6 +44,7 @@ export declare namespace TrueForge {
 export class TrueForge {
     protected readonly _options: NormalizedClientOptionsWithAuth<TrueForge.Options>;
     protected _internal: InternalClient | undefined;
+    protected _telegram: TelegramClient | undefined;
     protected _agents: AgentsClient | undefined;
     protected _auth: AuthClient | undefined;
     protected _bugReports: BugReportsClient | undefined;
@@ -61,7 +66,10 @@ export class TrueForge {
     protected _skills: SkillsClient | undefined;
     protected _spaceFolders: SpaceFoldersClient | undefined;
     protected _spaces: SpacesClient | undefined;
+    protected _today: TodayClient | undefined;
     protected _deliveries: DeliveriesClient | undefined;
+    protected _reach: ReachClient | undefined;
+    protected _reminders: RemindersClient | undefined;
     protected _voice: VoiceClient | undefined;
     protected _catalogs: CatalogsClient | undefined;
     protected _memory: MemoryClient | undefined;
@@ -73,6 +81,10 @@ export class TrueForge {
 
     public get internal(): InternalClient {
         return (this._internal ??= new InternalClient(this._options));
+    }
+
+    public get telegram(): TelegramClient {
+        return (this._telegram ??= new TelegramClient(this._options));
     }
 
     public get agents(): AgentsClient {
@@ -159,8 +171,20 @@ export class TrueForge {
         return (this._spaces ??= new SpacesClient(this._options));
     }
 
+    public get today(): TodayClient {
+        return (this._today ??= new TodayClient(this._options));
+    }
+
     public get deliveries(): DeliveriesClient {
         return (this._deliveries ??= new DeliveriesClient(this._options));
+    }
+
+    public get reach(): ReachClient {
+        return (this._reach ??= new ReachClient(this._options));
+    }
+
+    public get reminders(): RemindersClient {
+        return (this._reminders ??= new RemindersClient(this._options));
     }
 
     public get voice(): VoiceClient {

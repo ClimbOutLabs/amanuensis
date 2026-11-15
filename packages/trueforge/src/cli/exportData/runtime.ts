@@ -1,5 +1,3 @@
-import { createLogger } from 'winston';
-
 import type { AgentRecord } from '../../db/agentStore';
 import type { ExportDataSession, SessionOwner } from './session';
 import type { ExportStores } from './stores';
@@ -23,7 +21,6 @@ async function buildSession<TTransaction>({
     exportService,
     secrets,
     envFile,
-    memory,
     outbound,
   ] = await Promise.all([
     import('../../config'),
@@ -31,7 +28,6 @@ async function buildSession<TTransaction>({
     import('../../dataExport/exportService'),
     import('../../dataExport/secretScrub'),
     import('../../dataExport/envFileSecrets'),
-    import('../../dataExport/memorySource'),
     import('../../runtime/outboundSecrets'),
   ]);
   const { PACKAGE_VERSION } = await import('../../packageVersion');
@@ -42,9 +38,8 @@ async function buildSession<TTransaction>({
     mcpServers: stores.mcpServerStore,
     tokens: stores.tokenStore,
     googleConnections: stores.googleConnectionStore,
+    telegram: stores.telegramStore,
   });
-  // Memory provider lookups log through this; the command reports failures itself.
-  const logger = createLogger({ silent: true });
 
   async function listOwners(): Promise<SessionOwner[]> {
     const owners = new Map<string, SessionOwner>();
@@ -64,6 +59,7 @@ async function buildSession<TTransaction>({
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       for (const session of page.data) {
         const { subject_id: userId, subject_display_name: displayName } = session.created_by_subject;
@@ -113,13 +109,6 @@ async function buildSession<TTransaction>({
         ...(await outboundSecrets({ tenant_id: TENANT_ID, created_by: userId })),
         ...(secretsEnvText === undefined ? [] : envFile.envFileSecretValues(secretsEnvText)),
       ]);
-      const memorySource = await memory.resolveMemoryExportSource({
-        mcpServerStore: stores.mcpServerStore,
-        tokenStore: stores.tokenStore,
-        tenantId: TENANT_ID,
-        subjectId: userId,
-        logger,
-      });
       return exportService.runDataExport(
         {
           sessionStore: stores.sessionStore,
@@ -131,10 +120,13 @@ async function buildSession<TTransaction>({
           sentinelSettingsStore: stores.sentinelSettingsStore,
           auditStore: stores.auditStore,
           deliveryStore: stores.deliveryStore,
+          reachSettingsStore: stores.reachSettingsStore,
+          textContactStore: stores.textContactStore,
           turnArtifactStore: stores.turnArtifactStore,
           mcpServerStore: stores.mcpServerStore,
+          modelProviderStore: stores.modelProviderStore,
           listAgents: () => listUserAgents(userId),
-          memorySource,
+          memoryMarkdownDir: configuration.MEMORY_MARKDOWN_DIR,
           personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
         },
         {
@@ -188,6 +180,7 @@ export async function openExportDataSession({ migrate }: { migrate: boolean }): 
     poolMax: configuration.DATABASE_POOL_MAX,
     statementTimeoutMs: configuration.POSTGRES_STATEMENT_TIMEOUT_MS,
     idleInTransactionSessionTimeoutMs: configuration.POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS,
+    connectionTimeoutMs: configuration.POSTGRES_CONNECT_TIMEOUT_MS,
     migrate,
   });
   return buildSession({ stores, signInOffUserId });

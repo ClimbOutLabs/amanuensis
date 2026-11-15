@@ -41,6 +41,8 @@ function parsePersona(data: unknown): Persona {
     instructions: persona.instructions,
     model_name: persona.model_name,
     voice: persona.voice,
+    ...(isStringArray(persona.mail_accounts) ? { mail_accounts: persona.mail_accounts } : {}),
+    ...(isStringArray(persona.calendar_accounts) ? { calendar_accounts: persona.calendar_accounts } : {}),
   };
 }
 

@@ -42,7 +42,7 @@ services:
 
   # Holds the network namespace that `server` and, with the login profile,
   # `dex` share, and publishes their ports. Sharing one namespace is what lets
-  # the OIDC issuer https://localhost:5556/dex be the same URL for the browser
+  # the OIDC issuer http://localhost:5556/dex be the same URL for the browser
   # on the host and for the server verifying tokens. The namespace lives in
   # this idle container so either of the two can restart without stranding
   # the other in a dead namespace.
@@ -66,13 +66,15 @@ services:
     # another's namespace, and the joined containers read this hosts file.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
-    # The calendar network is shared with the calendar connector only (see calendar-caldav); the
-    # browser-control network, with the browser gateway only (see browser-gateway), never with the
-    # browser itself; and the voice network with the voice only (see aman-tts). Harmless when the
-    # `browser` profile does not run: an unused network costs nothing.
+    # The calendar network is shared with the calendar connector only (see calendar-caldav); the mail
+    # network with the mail connector only (see mail-email); the browser-control network, with the
+    # browser gateway only (see browser-gateway), never with the browser itself; and the voice network
+    # with the voice only (see aman-tts). Harmless when the `browser` profile does not run: an unused
+    # network costs nothing.
     networks:
       - default
       - calendar
+      - mail
       - browser-control
       - voice
     restart: unless-stopped
@@ -84,11 +86,8 @@ services:
       # From-source image; root Dockerfile is the npm-install prod recipe.
       dockerfile: Dockerfile.dev
     image: truefoundry-server:latest
-    # The aman-stt and aman-tts sidecars own cores 16-19 (see below); the
-    # server and its in-process embedding workload stay on the remaining cores
-    # so voice work never steals latency from chat. Adjust both pins together
-    # on hosts with a different core count (see docs/voice-input.mdx).
-    cpuset: '0-15'
+    # No core pins here, so the stack starts on any core count. To give voice
+    # and chat their own cores, see "Dedicated cores" in docs/voice-input.mdx.
     # Ports are published by `loopback` above. Compose DNS therefore has no
     # `server` entry; other services reach this one as `loopback`.
     network_mode: 'service:loopback'
@@ -129,11 +128,18 @@ services:
       # Local text-to-speech sidecar for spoken replies. When it is down the
       # browser reads replies with its own built-in voice instead.
       TTS_URL: http://aman-tts:8002
+      # Guards both speech sidecars; the same value goes to aman-stt and aman-tts. There is no default:
+      # `pnpm smoke` makes a random one for each run, and for plain `docker compose` set it in the shell
+      # (openssl rand -hex 32).
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       # Email send list the server writes, and the sidecar's status file it reads (see mail-email).
       MAIL_POLICY_FILE: /data/mail-policy/allowed_recipients.toml
       MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
       # The sidecar's account agent, which the Settings Email card talks to (see mail-email).
       MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
+      # Guards the mail account port; the same value goes to mail-email. Made like the calendar secret below:
+      # `pnpm smoke` makes a random one for each run, and for plain `docker compose` set it in the shell.
+      MAIL_EMAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       # The calendar sidecar's account agent, which the Settings Calendar card talks to (see calendar-caldav).
       CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
       # Guards the calendar account port; the same value goes to calendar-caldav. There is no default: `pnpm smoke`
@@ -152,10 +158,7 @@ services:
     env_file:
       - path: packages/trueforge/.env
         required: true
-    # The login profile's self-signed Dex certificate lives here. Empty, and
-    # unused, unless NODE_EXTRA_CA_CERTS in .env points into it.
     volumes:
-      - dex-tls:/etc/dex-tls:ro
       # Persistent Markdown memory ; without this, memories vanish
       # on container recreate.
       - memory-data:/data/memory
@@ -204,15 +207,15 @@ services:
     build:
       context: ops/aman-stt
     image: amanuensis-aman-stt:latest
-    # Dedicated cores, disjoint from the server's 0-15 pin above, so a
-    # transcription never contends with chat or embedding work.
-    cpuset: '16-19'
     mem_limit: 2g
     environment:
-      # Whisper encoder threads; 4 matches the 4 pinned cores.
+      # Whisper encoder threads; match the core count when the sidecar has its own cores.
       AMAN_STT_CPU_THREADS: '4'
       # Model cache location; matches the stt-model-cache volume below.
       AMAN_STT_MODEL_DIR: /data/stt-cache
+      # The shared secret every transcription call must carry; the same value the server sends (see the
+      # server's SPEECH_SECRET).
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     volumes:
       # Persistent Whisper model cache; without this the ~464 MB model
       # downloads again on every container recreate.
@@ -225,24 +228,25 @@ services:
   # posts reply text here and returns the audio to the browser. No host port
   # is published, and the voice files are baked into the image, so it sits
   # only on the internal voice network: no way out, and nothing but the app
-  # can reach it. Shares cores 16-19 with aman-stt: a person speaks, then
-  # listens, so the two rarely run at once.
+  # can reach it.
   aman-tts:
     build:
       context: ops/aman-tts
     image: amanuensis-aman-tts:latest
-    cpuset: '16-19'
     mem_limit: 1g
     environment:
       # onnxruntime threads; 4 matches the 4 pinned cores.
       AMAN_TTS_CPU_THREADS: '4'
+      # The shared secret every speak call must carry; the same value the server sends (see the
+      # server's SPEECH_SECRET).
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
     networks:
       - voice
     restart: unless-stopped
 
-  # Email connector sidecar. Private to the Compose network: `expose` only, never `ports`.
+  # Email connector sidecar. Private: `expose` only, never `ports`, on its own network.
   # The server reaches it as http://mail-email:9557/mcp. The server has no login of its own,
-  # so nothing outside this network may reach it.
+  # so nothing but the app may reach it.
   mail-email:
     image: ghcr.io/wh1isper/mcp-email-server@sha256:1c4d5333028a6b86867b5c73db121060086a8fb96e40ceb4262d14aae37f8852
     # The wrapper starts the sidecar on the send list the server writes, and restarts it when that list changes.
@@ -255,16 +259,25 @@ services:
       # server never touch the OS keyring, and no account is written to the config file.
       MCP_EMAIL_SERVER_CREDENTIAL_STORAGE: plaintext
       # The send list the server owns. It is read-only here; the server is the only writer.
+      # The wrapper composes the config file the mail server reads from this list and the saved
+      # accounts, and starts the server on the composed file instead.
       MCP_EMAIL_SERVER_CONFIG_PATH: /policy/allowed_recipients.toml
       # Where the wrapper records the hash of the list it started with. The server waits on it.
       AMAN_MAIL_STATUS_FILE: /mail-status/loaded.sha256
       # The account agent: the account file it owns, its private-network port, and its own path in the image.
       AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
+      # The composed config the wrapper writes from the send list and the saved accounts.
+      AMAN_MAIL_CONFIG_FILE: /account/config.toml
       AMAN_MAIL_ACCOUNT_PORT: '9559'
+      # Only a caller that presents this secret can read, replace or remove the account (same value as the server).
+      AMAN_MAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       AMAN_MAIL_ACCOUNT_AGENT: /usr/local/bin/aman-mail-account-agent
       AMAN_MAIL_EMAIL_CHECK: /usr/local/bin/aman-mail-email-check
       # Attachment content is read only so the server can hand it to the agent as data, never as instructions.
       MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'
+    # A network of its own, shared with the app's `loopback` only, so no other service can reach either port.
+    networks:
+      - mail
     volumes:
       - ./ops/compose/mail-email/entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
       - ./ops/compose/mail-email/account_agent.py:/usr/local/bin/aman-mail-account-agent:ro
@@ -413,45 +426,26 @@ services:
     restart: unless-stopped
 
   # Login profile. Start with `docker compose --profile login up --build` after
-  # setting the OIDC_*, DEX_* and NODE_EXTRA_CA_CERTS values in
+  # setting the OIDC_* and DEX_* values in
   # packages/trueforge/.env (docs/quickstart.mdx walks through it). The app
   # then shows a real sign-in screen backed by one local account, on Aman's own
   # sign-in service. Standalone also needs OIDC_ALLOWED_EMAILS (the owner).
-
-  # One-shot: mints a self-signed certificate for https://localhost:5556 the
-  # first time the profile runs. OIDC issuers must be HTTPS; the server trusts
-  # this certificate through NODE_EXTRA_CA_CERTS, and the browser asks once.
-  dex-tls:
-    image: alpine/openssl:3.5.1
-    profiles: ['login']
-    entrypoint: ['sh', '-c']
-    command:
-      - |
-        test -f /tls/dex.crt && exit 0
-        openssl req -x509 -newkey rsa:2048 -nodes -days 825           -keyout /tls/dex.key -out /tls/dex.crt           -subj '/CN=localhost'           -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
-        # Dex runs unprivileged; the key protects a loopback-only login.
-        chmod 644 /tls/dex.key /tls/dex.crt
-    volumes:
-      - dex-tls:/tls
 
   dex:
     image: ghcr.io/dexidp/dex:v2.41.1
     profiles: ['login']
     # Same network namespace as the server (see `loopback`), so the issuer
-    # https://localhost:5556/dex is one URL for the browser and the server.
+    # http://localhost:5556/dex is one URL for the browser and the server.
     network_mode: 'service:loopback'
     command: ['dex', 'serve', '/etc/dex/config.yaml']
     volumes:
       - ./ops/compose/dex/config.yaml:/etc/dex/config.yaml:ro
-      - dex-tls:/etc/dex/tls:ro
     env_file:
       - path: packages/trueforge/.env
         required: true
     depends_on:
       loopback:
         condition: service_started
-      dex-tls:
-        condition: service_completed_successfully
     # Dex's plain-HTTP telemetry listener serves /healthz; see config.yaml.
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:5558/healthz']
@@ -464,6 +458,9 @@ networks:
   # Between the app's `loopback` and the calendar connector only. Not internal: the connector reaches the calendar
   # server on the internet.
   calendar: {}
+  # Between the app's `loopback` and the mail connector only. Not internal: the connector reaches the mail server
+  # on the internet.
+  mail: {}
   # Between the app's `loopback` and the voice only. Internal: the voice needs no network access.
   voice:
     internal: true
@@ -477,7 +474,6 @@ networks:
   browser-egress: {}
 
 volumes:
-  dex-tls:
   # The Email send list. Holds only addresses, never credentials.
   mail-policy:
   # Records which send list the Email sidecar loaded. Written by the sidecar, read by the server.

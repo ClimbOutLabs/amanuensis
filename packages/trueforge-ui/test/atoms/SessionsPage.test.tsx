@@ -78,7 +78,7 @@ describe('SessionsPage', () => {
 
   it('lists all user sessions without agent_id and applies the default time window', async () => {
     const { listSessions } = renderPage();
-    expect(await screen.findByRole('heading', { name: 'Agent Sessions' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Chat stats' })).toBeInTheDocument();
     expect(await screen.findByText('Named session')).toBeInTheDocument();
     expect(screen.getByText('Draft session')).toBeInTheDocument();
     expect(screen.queryByText('Draft')).not.toBeInTheDocument();
@@ -120,7 +120,7 @@ describe('SessionsPage', () => {
 
   it('shows a single empty screen when there are no sessions', async () => {
     renderPage({ listSessions: vi.fn(async () => ({ data: [] })) });
-    expect(await screen.findByRole('heading', { name: 'Agent Sessions' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Chat stats' })).toBeInTheDocument();
     expect(await screen.findByText('No Sessions Found')).toBeInTheDocument();
     expect(screen.getByText('There are no sessions available at the moment.')).toBeInTheDocument();
     expect(screen.queryByText('Select a session to view details')).not.toBeInTheDocument();

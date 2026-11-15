@@ -29,7 +29,16 @@ describe('EvalGmailApi', () => {
     const all = await gmail.listThreads({ query: '', maxResults: 10, pageToken: undefined });
 
     expect(matching.threadIds).toEqual(['thread-vendor-review']);
-    expect(all.threadIds).toEqual(['thread-vendor-review', 'thread-pier-retrofit', 'thread-load-survey']);
+    expect(all.threadIds).toEqual([
+      'thread-vendor-review',
+      'thread-pier-retrofit',
+      'thread-load-survey',
+      'thread-parking-permit',
+      'thread-it-helpdesk',
+      'thread-rowing-club',
+      'thread-council-newsletter',
+      'thread-bank-alert',
+    ]);
   });
 
   it('returns headers only for a metadata read and the full text otherwise', async () => {

@@ -1,4 +1,5 @@
 import type { Problem } from '../messages.ts';
+import { MANIFEST_ASSET_NAME, MANIFEST_SIGNATURE_ASSET_NAME } from './assetNames.ts';
 import type { ReleaseManifest } from './manifest.ts';
 import { checkDownloadedFile, checkSignedManifest } from './verify.ts';
 
@@ -52,8 +53,8 @@ export async function fetchLatestManifest({
   fetchBytes: FetchBytes;
   publicKeyBase64?: string;
 }): Promise<LatestManifestResult> {
-  const manifestResult = await fetchBytes(`${RELEASE_BASE}/latest/download/manifest.json`);
-  const signatureResult = await fetchBytes(`${RELEASE_BASE}/latest/download/manifest.json.minisig`);
+  const manifestResult = await fetchBytes(`${RELEASE_BASE}/latest/download/${MANIFEST_ASSET_NAME}`);
+  const signatureResult = await fetchBytes(`${RELEASE_BASE}/latest/download/${MANIFEST_SIGNATURE_ASSET_NAME}`);
   if ('unreachable' in manifestResult || 'unreachable' in signatureResult) {
     return { unreachable: true };
   }
@@ -107,8 +108,4 @@ export function sourceArchiveName(manifest: ReleaseManifest): string | null {
     return null;
   }
   return names[0] ?? null;
-}
-
-export function windowsAssetName(arch: string): string {
-  return `aman-windows-${arch}.exe`;
 }

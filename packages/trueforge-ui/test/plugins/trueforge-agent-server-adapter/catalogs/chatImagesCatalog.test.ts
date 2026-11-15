@@ -9,7 +9,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe('createChatImagesCatalog', () => {
   it('posts a show request with the session cookie only, never a bearer token', async () => {
     const fetch = vi.fn((_url: RequestInfo | URL, _init?: RequestInit) =>
-      Promise.resolve(jsonResponse({ data: { status: 'ask', count: 2, host: null } })),
+      Promise.resolve(jsonResponse({ data: { status: 'ask', count: 2, host: null, url: null } })),
     );
     const bearer = 'invented-bearer-value';
     const catalog = createChatImagesCatalog({ baseUrl: '/app/', token: bearer, fetch });
@@ -20,12 +20,30 @@ describe('createChatImagesCatalog', () => {
         source: { kind: 'email', tool_call_id: 'm' },
         approved: false,
       }),
-    ).resolves.toEqual({ status: 'ask', count: 2, host: null });
+    ).resolves.toEqual({ status: 'ask', count: 2, host: null, url: null });
     const [url, init] = fetch.mock.calls[0] ?? [];
     expect(url).toBe('/app/api/chat-images/sessions/s%201/turns/t1');
     expect(init?.credentials).toBe('same-origin');
     expect(JSON.stringify(init?.headers)).not.toContain(bearer);
     expect(init?.body).toBe(JSON.stringify({ source: { kind: 'email', tool_call_id: 'm' }, approved: false }));
+  });
+
+  it('passes on the whole address of the one picture a reply would load', async () => {
+    const ask = {
+      status: 'ask',
+      count: 1,
+      host: 'pictures.example',
+      url: 'https://pictures.example/fox.jpg?size=large',
+    };
+    const catalog = createChatImagesCatalog({ fetch: () => Promise.resolve(jsonResponse({ data: ask })) });
+    await expect(
+      catalog.showTurnImages({
+        sessionId: 's1',
+        turnId: 't1',
+        source: { kind: 'reply', url: ask.url },
+        approved: false,
+      }),
+    ).resolves.toEqual(ask);
   });
 
   it('builds the same-origin image address', () => {

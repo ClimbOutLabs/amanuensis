@@ -24,17 +24,27 @@ const CERTIFICATE_ERRORS = new Set([
   'ERR_TLS_CERT_ALTNAME_INVALID',
 ]);
 
-const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-/** The address a redirect points to when it stays on the same server and port over https, else null. */
-function sameServerRedirect({ response, target }) {
-  const location = response.headers?.location;
+/**
+ * The address the tool server sends its first request to: the saved address without its query and with one
+ * trailing slash. The check asks that same address so a pass here means the tool server's first step passes.
+ */
+export function firstRequestUrl(url) {
+  const parsed = new URL(url);
+  return new URL(`${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}/`);
+}
+
+/** The same-server https address a redirect points to, or null when it leaves the server or is unreadable. */
+function sameServerLocation({ location, from }) {
   if (typeof location !== 'string') {
     return null;
   }
   try {
-    const next = new URL(location, target);
-    return next.protocol === 'https:' && next.origin === target.origin ? next : null;
+    const next = new URL(location, from);
+    return next.protocol === 'https:' && next.origin === from.origin && next.username === '' && next.password === ''
+      ? next
+      : null;
   } catch {
     return null;
   }
@@ -43,10 +53,12 @@ function sameServerRedirect({ response, target }) {
 /**
  * Words: ok (signed in), login (the server refused the login), server (the address could not be reached,
  * or answered something else), certificate (its security certificate was not accepted), redirect (it sent
- * the login to another server), blocked (not an address this service may use).
- * The connection goes only to an address that passed the address rules. One redirect to another path on the
- * same server is followed, since providers often add a trailing slash; any other redirect is refused, so
- * neither a changing DNS answer nor a redirect can lead the login somewhere else.
+ * the login to another address), blocked (not an address this service may use).
+ * The connection goes only to an address that passed the address rules, and the check takes the same steps
+ * the tool server takes to find the account. It asks the saved address first; the tool server follows no
+ * redirect there. When that address redirects, the tool server asks the server's /.well-known/caldav
+ * address instead and follows one redirect from it on the same server, so the check does the same.
+ * Nothing that leaves the server is ever followed, so the login is never sent anywhere else.
  */
 export async function checkSignIn(account, deps = {}) {
   const host = hostOf(account.url);
@@ -54,17 +66,21 @@ export async function checkSignIn(account, deps = {}) {
   if (!allowed.ok) {
     return allowed.reason === 'blocked' ? 'blocked' : 'server';
   }
-  const first = new URL(account.url);
-  const answer = await attempt({ account, target: first, allowed, deps });
-  if (answer.word !== 'redirect') {
-    return answer.word;
+  const first = await attempt({ account, target: firstRequestUrl(account.url), allowed, deps });
+  if (first.word !== 'redirect') {
+    return first.word;
   }
-  if (answer.next === null) {
+  const wellKnown = new URL('/.well-known/caldav', firstRequestUrl(account.url));
+  const viaWellKnown = await attempt({ account, target: wellKnown, allowed, deps });
+  if (viaWellKnown.word !== 'redirect') {
+    return viaWellKnown.word;
+  }
+  const next = sameServerLocation({ location: viaWellKnown.location, from: wellKnown });
+  if (next === null) {
     return 'redirect';
   }
-  const second = await attempt({ account, target: answer.next, allowed, deps });
-  // A second redirect is not followed either.
-  return second.word;
+  // The address the well-known route names is asked once; a further redirect is not followed.
+  return (await attempt({ account, target: next, allowed, deps })).word;
 }
 
 function attempt({ account, target, allowed, deps }) {
@@ -73,10 +89,10 @@ function attempt({ account, target, allowed, deps }) {
   const basic = Buffer.from(`${account.username}:${account.password}`, 'utf8').toString('base64');
   return new Promise(done => {
     let finished = false;
-    const finish = (word, next = null) => {
+    const finish = (word, location = null) => {
       if (!finished) {
         finished = true;
-        done({ word, next });
+        done({ word, location });
       }
     };
     const options = {
@@ -110,7 +126,7 @@ function attempt({ account, target, allowed, deps }) {
       } else if (status === 401 || status === 403) {
         finish('login');
       } else if (REDIRECT_STATUSES.has(status)) {
-        finish('redirect', sameServerRedirect({ response, target }));
+        finish('redirect', response.headers?.location ?? null);
       } else {
         finish('server');
       }

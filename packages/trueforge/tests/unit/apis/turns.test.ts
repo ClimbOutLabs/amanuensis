@@ -38,6 +38,7 @@ import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
+import { browserTurnTimezone } from '../../fixtures/browserTurnTimezone';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Standalone caller identity, spelled out as a plain string where a store expects one. */
@@ -175,6 +176,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       const tokenStore = new SqliteOAuthTokenStore(db);
@@ -182,6 +185,8 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          turnTimezone: browserTurnTimezone,
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -265,11 +270,15 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const app = new OpenAPIHono();
       app.route(
         '/',
         createTurnsRouter({
+          turnTimezone: browserTurnTimezone,
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -428,6 +437,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await modelProviderStore.upsertProvider({
         tenant_id: 'default',
@@ -502,6 +513,8 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          turnTimezone: browserTurnTimezone,
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -603,6 +616,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       // The route itself resolves the referenced agent once, up front, for authorization; that
@@ -641,6 +656,8 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          turnTimezone: browserTurnTimezone,
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -713,6 +730,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       // Turn 1 of this chat is still saving its sandbox files.
@@ -747,6 +766,8 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          turnTimezone: browserTurnTimezone,
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -841,6 +862,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const sessions = {
         get: () =>
@@ -874,6 +897,8 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          turnTimezone: browserTurnTimezone,
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -961,12 +986,16 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const tokenStore = new SqliteOAuthTokenStore(db);
       const app = new OpenAPIHono();
       app.route(
         '/',
         createTurnsRouter({
+          turnTimezone: browserTurnTimezone,
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,

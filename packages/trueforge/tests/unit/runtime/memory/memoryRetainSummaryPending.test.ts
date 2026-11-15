@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import winston from 'winston';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
@@ -24,10 +25,10 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 });
 
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
-import { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { submitRetain } from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
+import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 const mockSummarize = jest.mocked(summarizeTurnContent);
 
@@ -38,11 +39,13 @@ function makeLogger() {
 /** Minimal fake; the mocked summarizeTurnContent never dereferences the store. */
 function fakeModelProviderStore(): IModelProviderStore {
   return {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
     createProvider: jest.fn(),
     upsertProvider: jest.fn(),
+    recordProviderCheck: jest.fn(async () => undefined),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
   };
@@ -54,6 +57,7 @@ function summarizeContext() {
     modelProviderStore: fakeModelProviderStore(),
     summarizationModelFqn: 'local/slow-model',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }
@@ -86,8 +90,10 @@ describe('submitRetain summary-pending marker', () => {
     });
 
     await submitRetain({
+      session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'Please remember that my test robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',
@@ -101,15 +107,22 @@ describe('submitRetain summary-pending marker', () => {
     expect(afterFailure.ok && afterFailure.entries).toEqual([]);
     // The failure is not silent: Zara's vault is marked as owed a summary, and no
     // other vault is marked.
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(true);
-    expect(await reader.summaryPending({ namespace: '' })).toBe(false);
+    expect((await reader.summaryPending({ namespace: '' }))?.failed_at).toBeUndefined();
+    // The mark says why, and which chat it was, so the Memories page can lead back to it.
+    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toEqual({
+      failed_at: expect.any(String),
+      reason: 'model_timeout',
+      session_id: 's1',
+    });
 
     // The next chat with Zara runs the summary job again; this time it succeeds, the
     // summary is stored, and the mark clears.
     mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The test robot is named Bleep-Bloop.'] });
     await submitRetain({
+      session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't2',
       userText: 'Please remember that my test robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',
@@ -124,15 +137,52 @@ describe('submitRetain summary-pending marker', () => {
     if (afterRetry.ok) {
       expect(afterRetry.entries.some(entry => entry.text.includes('The test robot is named Bleep-Bloop.'))).toBe(true);
     }
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(false);
+    expect((await reader.summaryPending({ namespace: 'persona:Zara' }))?.failed_at).toBeUndefined();
+  });
+
+  it('logs how long a failed summary took, beside the chat and the reason', async () => {
+    // The clock is moved by hand, so the seconds do not depend on how busy the machine is.
+    let now = Date.parse('2026-10-20T12:00:00.000Z');
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    mockSummarize.mockImplementation(async () => {
+      now += 120_000;
+      return { status: 'failed', reason: 'The model timed out', fallback: 'model_timeout' };
+    });
+    const logger = makeLogger();
+    const info = jest.spyOn(logger, 'info');
+
+    await submitRetain({
+      session: { is_incognito: false },
+      client: zaraClient,
+      sessionId: 's1',
+      origin: 'user_stated',
+      turnId: 't1',
+      userText: 'Please remember that my test robot is named Bleep-Bloop.',
+      assistantText: 'Got it, Bleep-Bloop.',
+      completedAt: '2026-10-20T12:00:00.000Z',
+      logger,
+      summarize: summarizeContext(),
+      outcomeLog: { personaName: 'Zara' },
+    });
+    clock.mockRestore();
+
+    expect(info).toHaveBeenCalledWith('Turn memory not saved: the summary failed', {
+      sessionId: 's1',
+      turnId: 't1',
+      personaName: 'Zara',
+      reason: 'model_timeout',
+      seconds: 120,
+    });
   });
 
   it('marks the vault when no summary model is set, because the turn could not be saved', async () => {
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'no-model-configured' });
 
     await submitRetain({
+      session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'Please remember that my robot is named Bleep-Bloop.',
       assistantText: 'Got it.',
@@ -141,7 +191,7 @@ describe('submitRetain summary-pending marker', () => {
       summarize: summarizeContext(),
     });
 
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(true);
+    expect((await reader.summaryPending({ namespace: 'persona:Zara' }))?.failed_at).toEqual(expect.any(String));
     const listed = await reader.listEntries({ namespace: 'persona:Zara', timeoutMs: 5_000 });
     expect(listed.ok && listed.entries).toEqual([]);
   });
@@ -150,8 +200,10 @@ describe('submitRetain summary-pending marker', () => {
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'empty-exchange' });
 
     await submitRetain({
+      session: { is_incognito: false },
       client: zaraClient,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'A very long story.',
       assistantText: 'A very long answer.',
@@ -160,22 +212,19 @@ describe('submitRetain summary-pending marker', () => {
       summarize: summarizeContext(),
     });
 
-    expect(await reader.summaryPending({ namespace: 'persona:Zara' })).toBe(false);
+    expect((await reader.summaryPending({ namespace: 'persona:Zara' }))?.failed_at).toBeUndefined();
   });
 
   it('stores nothing, and does not fail, on a client without summary tracking when a summary fails', async () => {
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.test.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl: () => Promise.reject(new Error('summary pending tests must not reach the network')),
-    });
+    const client = new QuietMemoryClient();
     const retain = jest.spyOn(client, 'retain').mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'boom', fallback: 'model_failed' });
 
     await submitRetain({
+      session: { is_incognito: false },
       client,
       sessionId: 's1',
+      origin: 'user_stated',
       turnId: 't1',
       userText: 'Please remember that my test robot is named Bleep-Bloop.',
       assistantText: 'Got it, Bleep-Bloop.',

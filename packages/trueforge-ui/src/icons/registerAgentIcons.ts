@@ -11,6 +11,7 @@ import McpServerIcon from './mcp-server.svg';
 import SearchGlobeIcon from './search-globe.svg';
 import TrueForgeLogomarkDarkIcon from './trueforge-logomark-dark.svg';
 import TrueForgeLogomarkLightIcon from './trueforge-logomark-light.svg';
+import TypeScriptIcon from './typescript.svg';
 
 type SvgIcon = React.FC<React.SVGProps<SVGSVGElement>>;
 
@@ -27,4 +28,5 @@ registerIcons({
   empty: EmptyIcon as unknown as SvgIcon,
   'trueforge-logomark-light': TrueForgeLogomarkLightIcon as unknown as SvgIcon,
   'trueforge-logomark-dark': TrueForgeLogomarkDarkIcon as unknown as SvgIcon,
+  typescript: TypeScriptIcon,
 });

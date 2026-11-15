@@ -98,13 +98,16 @@ export async function gateEvalApprovals({
   input,
 }: {
   session: EvalApprovalSession;
-  previous_turn_id: string;
+  /** The paused turn the approvals answer, already resolved to a real turn; null when there is none. */
+  previous_turn_id: string | null;
   input: TurnInputItem[] | undefined;
 }): Promise<TurnInputItem[] | undefined> {
   if (!input?.some(item => item.type === EventType.USER_TOOL_APPROVAL && item.approval.status === 'allow')) {
     return input;
   }
-  const names = await toolNamesByCallId(await session.getTurn(previous_turn_id));
+  const names = await toolNamesByCallId(
+    previous_turn_id === null ? undefined : await session.getTurn(previous_turn_id),
+  );
   return input.map(item => {
     if (item.type !== EventType.USER_TOOL_APPROVAL || item.approval.status !== 'allow') {
       return item;

@@ -18,7 +18,7 @@ The app runs in two modes: **standalone** — one process on your own machine, S
 | Git | any recent version | [git-scm.com/downloads](https://git-scm.com/downloads) |
 | A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL2](https://learn.microsoft.com/windows/wsl/install) |
 
-On Windows, run every command below inside WSL2. Native Windows (PowerShell, cmd or Git Bash) is not supported: the setup scripts use POSIX-style environment variable assignments that those shells do not understand.
+This page is for developers. To install Aman on Windows for everyday use, follow the [Windows guide](install-windows.md) instead. On Windows, run every command below inside WSL2. Native Windows (PowerShell, cmd or Git Bash) is not supported: the setup scripts use POSIX-style environment variable assignments that those shells do not understand.
 
 ## Install and run
 
@@ -36,6 +36,8 @@ Login is mandatory in standalone mode, and the server refuses to start without i
 ```bash
 pnpm standalone:dev
 ```
+
+No Docker? Set `TRUEFORGE_AUTH_MODE=local` in `packages/trueforge/.env` instead and skip `pnpm dev:login`. Aman then keeps one sign-in itself, an email and a password it stores as a scrambled hash, and the first page you open asks you to create it. That is the sign-in the `npx amanuensis` install uses; see [Setup Login](/authentication/overview).
 
 The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) and sign in — that is the app.
 
@@ -89,20 +91,19 @@ The app does not ship with a model configured — a fresh checkout has no defaul
     - Under **Models**, **Model ID** — `qwen2.5:0.5b` (or whatever you pulled), matching the name exactly. **Model name** here is actually a machine slug, not a display label: lowercase letters, digits, and hyphens only, starting with a letter — `qwen2-5-0-5b` works.
     - Under **Advanced**, set **Context length** and **Max output tokens** — check the model's page on [ollama.com/library](https://ollama.com/library) for its real limits; `32000` and `4096` are safe placeholders for small models.
 
-    Click **Add provider**.
+    One setting comes first: Aman does not connect to a model on its own computer until that model's exact address is named in the server's `LOCAL_MODEL_ENDPOINTS` setting. Start the app with `LOCAL_MODEL_ENDPOINTS=localhost:11434` in its environment (or add that line to `packages/trueforge/.env`), restart it, and then click **Add provider**. See [Setup Models](/models#a-model-on-the-same-computer-as-aman).
   </Tab>
 </Tabs>
 
 ## Confirm it works
 
-Start a **New Chat**, pick your model from the selector in the message box, and send a message. A reply streaming back confirms the app, the database, and the model connection are all working. The right-hand rail shows which model and memory bank (if any) are active for the session.
+Start a **New Chat**, pick your model from the selector in the message box, and send a message. A reply streaming back confirms the app, the database, and the model connection are all working. The right-hand rail shows which model is active for the session.
 
 ## Optional add-ons
 
 None of these are required to chat with a model. Each is one sentence plus where to read more:
 
 - **Sandbox** — lets an agent run code and use skills that need a filesystem, via [Daytona](https://www.daytona.io). Standalone mode also supports a built-in local adapter on supported macOS and Linux hosts; hosted mode needs a configured provider. See [Sandbox](/sandbox).
-- **Memory (Hindsight)** — a self-hosted, long-term memory bank the app recalls from and writes to automatically. See the [Memory runbook](/../ops/memory/RUNBOOK.md) and the README's [Memory](https://github.com/ClimbOutLabs/amanuensis#memory) section.
 - **Prompt Guard** — an optional classifier sidecar that screens recalled memories and tool output for prompt injection before they reach the model. See [Deployment Security → Prompt Guard screens](/deployment-security#prompt-guard-screens).
 - **OIDC login** — always on in standalone; in hosted mode it is required before the app is reachable by anyone but you, since without it every request is one shared admin identity. See [Setup Login](/authentication/overview).
 
@@ -144,10 +145,12 @@ None of these are required to chat with a model. Each is one sentence plus where
     git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
     cp packages/trueforge/.env.example packages/trueforge/.env
     export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)
+    export MAIL_EMAIL_ACCOUNT_SECRET=$(openssl rand -hex 32)
+    export SPEECH_SECRET=$(openssl rand -hex 32)
     docker compose up --build
     ```
 
-    The `export` line makes a random secret that the app and the calendar container share, so only the app can use the calendar container's account port. Compose stops with a message if it is missing. Set it again in each new terminal, and run `docker compose down` and `up` with the same value; `pnpm smoke` makes one for you.
+    The `export` lines make random secrets that the app shares with the calendar, email and speech containers, so only the app can use them. Compose stops with a message if one is missing. Set them again in each new terminal, and run `docker compose down` and `up` with the same values; `pnpm smoke` makes them for you.
 
     The first build takes a few minutes (it compiles the app from source). `docker compose up` stays in the foreground
     and streams every container's log; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790`
@@ -199,15 +202,20 @@ None of these are required to chat with a model. Each is one sentence plus where
        ```
 
     4. Open [http://localhost:8791](http://localhost:8791) and click **Let's Get Started**. The browser lands on
-       `https://localhost:5556/dex`, whose certificate the stack minted for itself on first start, so it warns once:
-       choose **Advanced**, then proceed to localhost. Sign in with the email and password you chose. You land in the
-       app as that user, with **Settings** available.
+       the sign-in page at `http://localhost:5556/dex`. Sign in with the email and password you chose. You land in
+       the app as that user, with **Settings** available.
 
-    The certificate and its key live in the `dex-tls` Docker volume; `docker compose down -v` removes them and the
-    next start mints new ones. The account itself is only the `.env` lines, so changing the password means
-    generating a new hash and restarting the `dex` service.
+    The sign-in page answers on this computer only, like the app, so there is no certificate and no browser warning.
+    If your browser ever warns about the sign-in page, stop and check the address: do not click past the warning.
+    The account itself is only the `.env` lines, so changing the password means generating a new hash and restarting
+    the `dex` service.
 
-    **Ollama from Compose.** The app runs inside a container here, so `localhost` means the container itself. Point the custom provider at `http://host.docker.internal:11434/v1` instead of `http://localhost:11434/v1`. Docker Desktop provides that mapping automatically; plain Docker Engine needs the `extra_hosts` entry this repo's `docker-compose.yml` already ships. Ollama itself listens on `127.0.0.1` only by default — open it to the Docker network with `OLLAMA_HOST=0.0.0.0:11434` (systemd override on Linux/WSL, or the desktop app's Settings on macOS/Windows) and restart it.
+    Turned on login here before the sign-in page moved to plain http? Your `.env` still names its old https address,
+    so sign-in stops working after you pull. In `packages/trueforge/.env`, change `OIDC_ISSUER_URL` to
+    `http://localhost:5556/dex`, delete the `NODE_EXTRA_CA_CERTS` line, then run
+    `docker compose --profile login up --build -d` again.
+
+    **Ollama from Compose.** The app runs inside a container here, so `localhost` means the container itself. Point the custom provider at `http://host.docker.internal:11434/v1` instead of `http://localhost:11434/v1`. Docker Desktop provides that mapping automatically; plain Docker Engine needs the `extra_hosts` entry this repo's `docker-compose.yml` already ships. Ollama itself listens on `127.0.0.1` only by default. Open it to the Docker network with `OLLAMA_HOST=0.0.0.0:11434` (systemd override on Linux/WSL, or the desktop app's Settings on macOS/Windows) and restart it. No `LOCAL_MODEL_ENDPOINTS` entry is needed for this address: it names your computer, not the container, so the address check lets it through as it stands. See [Setup Models](/models#a-model-on-the-same-computer-as-aman).
 
     **Docker prerequisite gotchas** (fresh machines hit these):
     - `docker compose up --build` fails with `unknown flag: --build` — the Compose plugin isn't installed. On macOS/Windows, install [Docker Desktop](https://docs.docker.com/get-started/get-docker/) (it bundles Compose v2) and wait for it to report running.
@@ -235,12 +243,11 @@ None of these are required to chat with a model. Each is one sentence plus where
     ```
 
     ```bash
-    helm install trueforge oci://tfy.jfrog.io/tfy-helm/trueforge \
-      --version <x.y.z> \
+    helm install trueforge ./charts/trueforge \
       --values values.yaml
     ```
 
-    Find the version you want to install in the [published Helm charts](https://tfy.jfrog.io/ui/packages/oci:%2F%2Ftrueforge).
+    Run it from a clone of this repository; the chart lives in `charts/trueforge`.
     See the [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#api-key) for full `apiKey` details.
 
     To expose TrueForge through an Istio gateway, save this `VirtualService` in
@@ -269,8 +276,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     Then install (or upgrade) with the values file that includes both `apiKey` and `extraObjects`:
 
     ```bash
-    helm upgrade --install trueforge oci://tfy.jfrog.io/tfy-helm/trueforge \
-      --version <x.y.z> \
+    helm upgrade --install trueforge ./charts/trueforge \
       --values values.yaml
     ```
 
@@ -303,7 +309,7 @@ With the app open in your browser and a model connected (above), this walkthroug
       </Step>
 
   <Step title="Connect a web-search tool">
-    Open **Settings → Connectors** and add a [Model Context Protocol (MCP)](/mcp-servers) server — this is how your agent reaches external tools and data. TrueForge ships a catalog you can connect in one click; each entry shows its auth type (OAuth, an API key, or none), and you can register your own server by URL with **Add MCP Server**.
+    Open **Settings → Connectors** and add a [Model Context Protocol (MCP)](/mcp-servers) server — this is how your agent reaches external tools and data. TrueForge ships a catalog you can connect in one click; each entry shows its auth type (OAuth, an API key, or none), and you can register your own server by URL with **Add a custom connector**.
 
     For this walkthrough, connect **Exa** — a web-search server that needs no authentication. Find it in the catalog and click **Connect**; it moves to **Configured**.
 
@@ -345,10 +351,12 @@ With the app open in your browser and a model connected (above), this walkthroug
       </Step>
 
   <Step title="Save it as an agent">
-    Happy with the setup? Click **Save Agent**, then in **Save agent** give it a name and instructions and click **Save changes** — this captures the model, connectors, skills, and prompt together as a reusable agent. For this example:
+    Happy with the setup? Click **Save Agent**. In **Save agent**, type a **Name** and say **What it's for**, then click **Save agent**. This captures the model, connectors, skills, and instructions together as a reusable agent. The name is saved in lowercase with hyphens. For this example:
 
     - **Name** — `web-research-brief`
-    - **Instructions** —
+    - **What it's for** — Researches a topic on the web and writes a one-page brief with sources.
+
+    To give the agent standing instructions, build it from **More**, then **Build agent**, and write them under **What should it do?** in the **Set up your agent** panel. See [Agents](/agent-library). For this example:
 
     ```text wrap
     You are a web research assistant. Given a topic or question, use Exa to search the web and pull content from the most relevant, recent sources. When the request compares several items, research each one in parallel, then synthesize the findings into a clear one-page brief.

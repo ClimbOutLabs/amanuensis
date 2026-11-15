@@ -3,6 +3,8 @@
 export interface Persona {
     /** Extra names that invoke this persona. Must not collide with any other persona name or alias. */
     aliases: string[];
+    /** Calendar accounts this persona may use, by email address. Omitted means every connected account. */
+    calendarAccounts?: string[];
     createdAt: Date;
     createdBy: string;
     /** Name shown in the UI and typed to invoke the persona. */
@@ -11,6 +13,8 @@ export interface Persona {
     id: string;
     /** Concise role for the persona. Added as one section of the system prompt; it cannot replace harness policy. */
     instructions: string;
+    /** Email accounts this persona may use, by address. Omitted means every connected account. */
+    mailAccounts?: string[];
     /** Fully qualified model name (`provider/model`) selected when this persona is active. */
     modelName: string;
     updatedAt: Date;

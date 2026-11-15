@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 
 import { cn } from '@/atoms/lib/cn.js';
+import { auiInputClass } from '@/atoms/lib/inputClasses.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { Switch } from '@/atoms/primitives/Switch.js';
@@ -12,6 +13,7 @@ import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
 import { useServerCapabilities } from '@/server/ServerContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
+import { useGitCommitIdentitySetting } from './gitCommitIdentitySetting.js';
 import {
   formatCheckedAgo,
   formatMegabytes,
@@ -316,6 +318,102 @@ function PackageDownloadsCard() {
   );
 }
 
+const FIELD_LABEL_CLASS = 'mb-1 block text-sm font-medium text-text-primary';
+
+/**
+ * The name and email on commits the assistant makes with Git. An empty box means the default, which is
+ * the person's own name from Personalization. Shows only where the host provides the setting.
+ */
+function CommitNameCard() {
+  const { supported, setting, saving, error, save } = useGitCommitIdentitySetting();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (setting === null) return;
+    setName(setting.name ?? '');
+    setEmail(setting.email ?? '');
+  }, [setting]);
+
+  if (!supported) return null;
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaved(false);
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    setSaved(
+      await save({ name: trimmedName === '' ? null : trimmedName, email: trimmedEmail === '' ? null : trimmedEmail }),
+    );
+  };
+
+  return (
+    <Card headingId="sandbox-commit-name-heading" title="Name on Git commits">
+      <p className="mt-2 text-sm text-text-secondary">
+        When the assistant saves work with Git in the sandbox, each commit carries this name and email. Leave a box
+        empty to use what is shown in grey. A change applies from your next message.
+      </p>
+      <form onSubmit={event => void handleSubmit(event)} className="mt-3 space-y-3">
+        <div>
+          <label htmlFor="sandbox-commit-name" className={FIELD_LABEL_CLASS}>
+            Name
+          </label>
+          <input
+            id="sandbox-commit-name"
+            type="text"
+            value={name}
+            maxLength={100}
+            placeholder={setting?.default_name ?? ''}
+            onChange={event => {
+              setName(event.target.value);
+              setSaved(false);
+            }}
+            autoComplete="off"
+            className={auiInputClass('h-10')}
+          />
+        </div>
+        <div>
+          <label htmlFor="sandbox-commit-email" className={FIELD_LABEL_CLASS}>
+            Email
+          </label>
+          <input
+            id="sandbox-commit-email"
+            type="email"
+            value={email}
+            maxLength={254}
+            placeholder={setting?.default_email ?? ''}
+            onChange={event => {
+              setEmail(event.target.value);
+              setSaved(false);
+            }}
+            autoComplete="off"
+            className={auiInputClass('h-10')}
+          />
+          <p className="mt-1 text-xs text-text-secondary">
+            To have GitHub link the commits to you, use an email from your GitHub account.
+          </p>
+        </div>
+        {error !== null && (
+          <p className="text-xs text-failure-bg" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="flex items-center gap-3">
+          <Button.Secondary size="small" type="submit" disabled={saving || setting === null}>
+            Save
+          </Button.Secondary>
+          {saved && (
+            <p className="text-xs text-text-secondary" role="status">
+              Saved.
+            </p>
+          )}
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 /** Wall-clock time that re-renders every half minute so "Last checked" stays honest. */
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
@@ -441,6 +539,7 @@ const SandboxSettings = () => {
 
       <LimitsCard limits={limits} />
       <PackageDownloadsCard />
+      <CommitNameCard />
     </div>
   );
 };

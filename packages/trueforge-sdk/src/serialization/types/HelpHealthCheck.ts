@@ -5,6 +5,7 @@ import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { HelpHealthItem } from "./HelpHealthItem.js";
 import { HelpHostReport } from "./HelpHostReport.js";
+import { HelpState } from "./HelpState.js";
 
 export const HelpHealthCheck: core.serialization.ObjectSchema<
     serializers.HelpHealthCheck.Raw,
@@ -14,6 +15,7 @@ export const HelpHealthCheck: core.serialization.ObjectSchema<
     hostReport: core.serialization.property("host_report", HelpHostReport),
     items: core.serialization.list(HelpHealthItem),
     modelReady: core.serialization.property("model_ready", core.serialization.boolean()),
+    state: HelpState,
 });
 
 export declare namespace HelpHealthCheck {
@@ -22,5 +24,6 @@ export declare namespace HelpHealthCheck {
         host_report: HelpHostReport.Raw;
         items: HelpHealthItem.Raw[];
         model_ready: boolean;
+        state: HelpState.Raw;
     }
 }

@@ -24,6 +24,8 @@ async function buildSession() {
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   await store.createTurn(
     makeCreateTurnInput({

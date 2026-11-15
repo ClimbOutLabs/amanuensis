@@ -118,6 +118,12 @@ describe('the first package download in a repo', () => {
     const info = await sandbox.toolCallInfo(PIP_CALL);
     expect(info.is_approval_required).toBe(true);
     expect(info.tier3_card?.plain_what).toBe(PACKAGE_CARD_WHAT);
+    // The card renders its copy, so the download wording has to be in the copy too.
+    expect(info.tier3_card?.copy).toEqual({
+      headline: PACKAGE_CARD_WHAT,
+      consequence: 'Commands can change or delete files.',
+      reason: null,
+    });
   });
 
   it('keeps the ordinary card wording once the repo allows downloads', async () => {

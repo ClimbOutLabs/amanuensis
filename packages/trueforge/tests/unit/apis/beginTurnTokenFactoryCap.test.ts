@@ -136,7 +136,9 @@ async function startTurn(options: {
     tenant_id: TENANT_ID,
     settings: {
       apiKey: 'sk-nebius',
-      baseUrl: options.tokenFactoryUrl ?? 'https://api.tokenfactory.nebius.com/v1',
+      // A public IP address, not a name: the provider is judged by the address check when a
+      // model is resolved, and a fixture name's resolution depends on the machine's DNS.
+      baseUrl: options.tokenFactoryUrl ?? 'https://93.184.216.34/v1',
       model: options.tokenFactoryModel ?? 'nvidia/nemotron-3-super-120b-a12b',
     },
     catalogModels:
@@ -175,6 +177,8 @@ async function startTurn(options: {
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   const record = await sessionStore.getSession({ tenant_id: TENANT_ID, session_id: 's1' });
   if (record === undefined) {
@@ -208,6 +212,7 @@ async function startTurn(options: {
     userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
     deps: {
       mcpCatalog: McpCatalog.loadShipped(),
+      chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: createTokenFactoryBudget({ store: usageStore, cap: options.cap, now: () => NOW }),
       sessionStore,
@@ -242,10 +247,15 @@ describe('Token Factory daily cap in the turn path', () => {
   const originalMode = configuration.TOKEN_FACTORY_MODE;
   const originalKey = configuration.NEBIUS_API_KEY;
   const originalBaseUrl = configuration.TOKEN_FACTORY_BASE_URL;
+  const originalLocalModelEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
   const servers: Server[] = [];
 
   beforeEach(() => {
     mockResolverCtorArgs.length = 0;
+    // The local provider below lives on this computer (a real one at :8000, a dead one at
+    // :1); the operator names those exact endpoints, as the local model endpoint list
+    // requires, so resolving it is judged on the connection, not the address.
+    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:8000', '127.0.0.1:1'];
     configuration.NEBIUS_API_KEY = 'sk-nebius';
   });
 
@@ -256,6 +266,7 @@ describe('Token Factory daily cap in the turn path', () => {
     for (const server of servers.splice(0)) {
       server.close();
     }
+    configuration.LOCAL_MODEL_ENDPOINTS = originalLocalModelEndpoints;
   });
 
   async function modelServer(usage: { prompt_tokens: number; completion_tokens: number } | undefined) {

@@ -34,37 +34,77 @@ afterEach(() => {
 
 const CANARY = 'CANARY-APP-PASSWORD-7f3d9';
 
+const GOOGLE: CalendarProviderInfo = {
+  key: 'google',
+  name: 'Google',
+  serverUrl: null,
+  accountUrlTemplate: 'https://calendar.google.com/calendar/dav/{email}/',
+  helpUrl: 'https://support.google.com/accounts/answer/185833',
+  helpHint: 'Google: turn on 2-Step Verification, then make an app password at myaccount.google.com/apppasswords.',
+  setupSteps: [
+    'Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that.',
+    'Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.',
+    'Copy the 16-letter password Google shows. Google shows it only once.',
+    'When you are asked, type your Gmail address and paste the app password. The login name can be left empty or kept the same as your email address.',
+  ],
+};
+
 const FASTMAIL: CalendarProviderInfo = {
   key: 'fastmail',
   name: 'Fastmail',
   serverUrl: 'https://caldav.fastmail.com/dav/',
+  accountUrlTemplate: null,
   helpUrl: 'https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords',
   helpHint: 'Fastmail: make an app password under Settings, Privacy & Security.',
+  setupSteps: [],
 };
 
 const GMX: CalendarProviderInfo = {
   key: 'gmx',
   name: 'GMX',
   serverUrl: null,
+  accountUrlTemplate: null,
   helpUrl: 'https://support.gmx.com/security/2fa/application-specific-passwords.html',
   helpHint: 'GMX: make an application-specific password.',
+  setupSteps: [],
 };
 
 const WEBDE: CalendarProviderInfo = {
   key: 'webde',
   name: 'web.de',
   serverUrl: 'https://caldav.web.de',
+  accountUrlTemplate: null,
   helpUrl: null,
   helpHint: 'web.de: make an application-specific password.',
+  setupSteps: [],
 };
 
 const OTHER: CalendarProviderInfo = {
   key: 'other',
   name: 'Other',
   serverUrl: null,
+  accountUrlTemplate: null,
   helpUrl: null,
   helpHint: "Your calendar provider's help pages explain how to make an app password.",
+  setupSteps: [],
 };
+
+function accountOf(
+  email: string,
+  state: CalendarAccountStatus['state'] = 'connected',
+  isDefault = true,
+  rest: Partial<CalendarAccountStatus['accounts'][number]> = {},
+): CalendarAccountStatus['accounts'][number] {
+  return {
+    email,
+    username: email,
+    calendarUrl: 'https://caldav.fastmail.com/dav/',
+    providerKey: 'fastmail',
+    state,
+    isDefault,
+    ...rest,
+  };
+}
 
 function statusOf(overrides: Partial<CalendarAccountStatus> = {}): CalendarAccountStatus {
   return {
@@ -74,16 +114,30 @@ function statusOf(overrides: Partial<CalendarAccountStatus> = {}): CalendarAccou
     username: null,
     calendarUrl: null,
     providerKey: 'fastmail',
-    providers: [FASTMAIL, GMX, WEBDE, OTHER],
+    accounts: [],
+    defaultAddress: null,
+    providers: [GOOGLE, FASTMAIL, GMX, WEBDE, OTHER],
     ...overrides,
   };
+}
+
+function connectedStatus(email = 'owner@example.invalid'): CalendarAccountStatus {
+  return statusOf({
+    state: 'connected',
+    email,
+    username: email,
+    calendarUrl: 'https://caldav.fastmail.com/dav/',
+    accounts: [accountOf(email)],
+    defaultAddress: email,
+  });
 }
 
 function makePort(status: CalendarAccountStatus) {
   const port: CalendarSetupPort = {
     getCalendarStatus: vi.fn(async () => status),
-    saveCalendarAccount: vi.fn(async () => statusOf({ state: 'connected', email: 'owner@example.invalid' })),
+    saveCalendarAccount: vi.fn(async () => connectedStatus()),
     removeCalendarAccount: vi.fn(async () => statusOf()),
+    setDefaultCalendarAccount: vi.fn(async () => status),
   };
   return port;
 }
@@ -98,6 +152,7 @@ describe('CalendarSetupPanel', () => {
     renderPanel(port);
     const select = await screen.findByLabelText(/calendar provider/i);
     expect([...select.querySelectorAll('option')].map(option => option.textContent)).toEqual([
+      'Google',
       'Fastmail',
       'GMX',
       'web.de',
@@ -115,9 +170,35 @@ describe('CalendarSetupPanel', () => {
       email: 'owner@example.invalid',
       password: CANARY,
     });
-    // After the answer the form is gone and the password is nowhere on the page.
-    expect(await screen.findByText(/Connected as/)).toBeTruthy();
+    // After the answer the form is gone and the account is listed; the password is nowhere on the page.
+    expect(await screen.findByText('owner@example.invalid')).toBeTruthy();
     expect(document.body.textContent).not.toContain(CANARY);
+  });
+
+  it('shows the Google steps, says the address comes from the email, and saves Google with no typed address', async () => {
+    const port = makePort(statusOf({ providerKey: 'google' }));
+    renderPanel(port);
+    const select = await screen.findByLabelText(/calendar provider/i);
+    expect(select).toHaveValue('google');
+    expect(screen.getByText('Before you start')).toBeTruthy();
+    for (const step of GOOGLE.setupSteps) {
+      expect(screen.getByText(step)).toBeTruthy();
+    }
+    expect(screen.getByText(/Calendar address: filled in from your email address/)).toBeTruthy();
+
+    fireEvent.change(select, { target: { value: 'fastmail' } });
+    expect(screen.queryByText('Before you start')).toBeNull();
+    fireEvent.change(select, { target: { value: 'google' } });
+    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'person@gmail.com' } });
+    fireEvent.change(screen.getByLabelText(/app password/i), { target: { value: CANARY } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+
+    await waitFor(() => expect(port.saveCalendarAccount).toHaveBeenCalled());
+    expect(vi.mocked(port.saveCalendarAccount).mock.calls[0]?.[0]).toEqual({
+      providerKey: 'google',
+      email: 'person@gmail.com',
+      password: CANARY,
+    });
   });
 
   it('shows the provider hint and a new-tab help link under the app password field', async () => {
@@ -184,19 +265,27 @@ describe('CalendarSetupPanel', () => {
   });
 
   it('shows the stopped line when the saved sign-in no longer works', async () => {
-    renderPanel(makePort(statusOf({ state: 'sign_in_stopped', email: 'owner@example.invalid' })));
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Sign-in stopped working. Make a new app password and save it again.',
+    renderPanel(
+      makePort(
+        statusOf({
+          state: 'sign_in_stopped',
+          email: 'owner@example.invalid',
+          accounts: [accountOf('owner@example.invalid', 'sign_in_stopped')],
+          defaultAddress: 'owner@example.invalid',
+        }),
+      ),
     );
+    expect(await screen.findByText(/Sign-in stopped working/)).toBeTruthy();
   });
 
-  it('remove takes two steps and calls the port once confirmed', async () => {
-    const port = makePort(statusOf({ state: 'connected', email: 'owner@example.invalid' }));
+  it('remove takes two steps and calls the port with the account address once confirmed', async () => {
+    const port = makePort(connectedStatus());
     renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
     expect(await screen.findByText(/deleted for good/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Remove calendar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }));
     await waitFor(() => expect(port.removeCalendarAccount).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(port.removeCalendarAccount).mock.calls[0]?.[0]).toBe('owner@example.invalid');
     expect(await screen.findByLabelText(/calendar provider/i)).toBeTruthy();
   });
 
@@ -208,10 +297,18 @@ describe('CalendarSetupPanel', () => {
         username: 'owner-login',
         calendarUrl: 'https://nas.example.invalid/dav/',
         providerKey: 'other',
+        accounts: [
+          accountOf('owner@example.invalid', 'connected', true, {
+            username: 'owner-login',
+            calendarUrl: 'https://nas.example.invalid/dav/',
+            providerKey: 'other',
+          }),
+        ],
+        defaultAddress: 'owner@example.invalid',
       }),
     );
     renderPanel(port);
-    fireEvent.click(await screen.findByRole('button', { name: 'Change calendar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change' }));
     expect(screen.getByLabelText(/calendar address/i)).toHaveValue('https://nas.example.invalid/dav/');
     expect(screen.getByLabelText(/login name/i)).toHaveValue('owner-login');
     expect(screen.getByLabelText(/email address/i)).toHaveValue('owner@example.invalid');
@@ -230,17 +327,8 @@ describe('CalendarSetupPanel', () => {
   });
 
   it('leaves the login box empty when the login is the email address', async () => {
-    renderPanel(
-      makePort(
-        statusOf({
-          state: 'connected',
-          email: 'owner@example.invalid',
-          username: 'owner@example.invalid',
-          calendarUrl: 'https://caldav.fastmail.com/dav/',
-        }),
-      ),
-    );
-    fireEvent.click(await screen.findByRole('button', { name: 'Change calendar' }));
+    renderPanel(makePort(connectedStatus()));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change' }));
     expect(screen.getByLabelText(/login name/i)).toHaveValue('');
   });
 
@@ -252,11 +340,19 @@ describe('CalendarSetupPanel', () => {
         username: 'owner-login',
         calendarUrl: 'https://nas.example.invalid/dav/',
         providerKey: 'other',
+        accounts: [
+          accountOf('owner@example.invalid', 'connected', true, {
+            username: 'owner-login',
+            calendarUrl: 'https://nas.example.invalid/dav/',
+            providerKey: 'other',
+          }),
+        ],
+        defaultAddress: 'owner@example.invalid',
       }),
     );
     renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Remove calendar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }));
     const provider = await screen.findByLabelText(/calendar provider/i);
     expect(provider).toHaveValue('fastmail');
     expect(screen.getByLabelText(/email address/i)).toHaveValue('');
@@ -268,24 +364,47 @@ describe('CalendarSetupPanel', () => {
   it.each([
     ['sign_in_stopped', /Sign-in stopped working/],
     ['not_working', /not working right now/],
-  ] as const)('a %s account can still be removed, or the window closed', async (state, line) => {
-    const onOpenChange = vi.fn();
-    const port = makePort(statusOf({ state, email: 'owner@example.invalid' }));
-    render(<CalendarSetupPanel open onOpenChange={onOpenChange} port={port} onChanged={() => undefined} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent(line);
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+  ] as const)('a %s account can still be removed', async (state, line) => {
+    const port = makePort(
+      statusOf({
+        state,
+        email: 'owner@example.invalid',
+        accounts: [accountOf('owner@example.invalid', state)],
+        defaultAddress: 'owner@example.invalid',
+      }),
+    );
+    renderPanel(port);
+    expect(await screen.findByText(line)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove calendar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove account' }));
     await waitFor(() => expect(port.removeCalendarAccount).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(port.removeCalendarAccount).mock.calls[0]?.[0]).toBe('owner@example.invalid');
   });
 
-  it('a connected account being changed can go back with Cancel, and still be removed from the form', async () => {
-    renderPanel(makePort(statusOf({ state: 'connected', email: 'owner@example.invalid' })));
-    fireEvent.click(await screen.findByRole('button', { name: 'Change calendar' }));
-    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy();
+  it('a connected account being changed can go back with Cancel', async () => {
+    renderPanel(makePort(connectedStatus()));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(await screen.findByText(/Connected as/)).toBeTruthy();
+    expect(await screen.findByText('owner@example.invalid')).toBeTruthy();
+  });
+
+  it('lists every account, makes another the default, and offers to add one more', async () => {
+    const two = statusOf({
+      state: 'connected',
+      email: 'owner@example.invalid',
+      accounts: [accountOf('owner@example.invalid'), accountOf('work@example.invalid', 'connected', false)],
+      defaultAddress: 'owner@example.invalid',
+    });
+    const port = makePort(two);
+    renderPanel(port);
+    expect(await screen.findByText('work@example.invalid')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Make default' }));
+    await waitFor(() => expect(port.setDefaultCalendarAccount).toHaveBeenCalledWith('work@example.invalid'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add another account' }));
+    expect(await screen.findByLabelText(/calendar provider/i)).toBeTruthy();
+    const emailField = screen.getByLabelText(/email address/i);
+    if (!(emailField instanceof HTMLInputElement)) throw new Error('email address field is not an input');
+    expect(emailField.value).toBe('');
   });
 
   it('asks the list to refresh when a save fails, since a cut-off save may still have gone through', async () => {

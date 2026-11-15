@@ -233,6 +233,8 @@ describe('ChatSearchIndexer', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const createInput = makeCreateTurnInput<TurnCustom>({ sessionId, turnId: `${sessionId}-turn-1` });
     createInput.turn.input = [{ type: EventType.USER_MESSAGE, content: 'When does the ferry to the island leave?' }];
@@ -258,6 +260,8 @@ describe('ChatSearchIndexer', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
   }
 

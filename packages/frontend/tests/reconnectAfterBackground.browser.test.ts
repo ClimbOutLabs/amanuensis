@@ -7,6 +7,7 @@ import { createServer } from 'vite';
 
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -63,6 +64,28 @@ async function chatCounts(page: Page): Promise<{ userMessages: number; allowButt
   };
 }
 
+const BEFORE_RESYNC = 'data-before-resync';
+
+/**
+ * A resync empties the chat and draws it again from the server, so a fixed wait can count the old
+ * chat or the empty one on a slow machine. This marks what is on screen now; the resync is over
+ * when the question is back and nothing marked is left.
+ */
+async function watchResync(page: Page): Promise<{ done: () => Promise<void> }> {
+  await page.locator('[data-role="user"]').evaluateAll((messages, mark) => {
+    for (const message of messages) message.setAttribute(mark, '');
+  }, BEFORE_RESYNC);
+  return {
+    done: async () => {
+      await page.locator(`[${BEFORE_RESYNC}]`).first().waitFor({ state: 'detached', timeout: RENDER_TIMEOUT_MS });
+      await page.locator('[data-role="user"]').getByText(USER_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+      await page.getByRole('button', { name: ALLOW }).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+      // Anything drawn twice shows up shortly after the first copy.
+      await page.waitForTimeout(3_000);
+    },
+  };
+}
+
 test('the chat reconnects on its own after the page was in the background', { timeout: 600_000 }, async () => {
   const api = await startApprovalTestServer();
   const viteCache = privateViteCache('reconnect-after-background');
@@ -95,6 +118,9 @@ test('the chat reconnects on its own after the page was in the background', { ti
     const baseline = await chatCounts(page);
     assert.ok(baseline.userMessages >= 1, 'the question is on screen');
     assert.ok(baseline.allowButtons >= 1, 'the approval card is on screen');
+    await page.screenshot({
+      path: await featureShotPath({ surface: 'screen:chat-return', step: 'phone-before-background' }),
+    });
     const marker = await pageLoadMarker(page);
 
     await test.test('hidden, then visible with the network down, then the network returns', async () => {
@@ -108,10 +134,10 @@ test('the chat reconnects on its own after the page was in the background', { ti
       // Before this fix, this return showed a "Connection lost" toast that promised a resync and never did it.
       assert.equal(await page.getByText('Connection lost', { exact: true }).count(), 0, 'no connection-lost toast');
 
+      const resync = await watchResync(page);
       await restoreNetwork(page);
       await page.getByText(RECONNECTING).waitFor({ state: 'detached', timeout: RENDER_TIMEOUT_MS });
-      await page.getByRole('button', { name: ALLOW }).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page.waitForTimeout(3_000);
+      await resync.done();
       assert.deepEqual(await chatCounts(page), baseline, 'the same messages and approval card, once each');
       assert.equal(await pageLoadMarker(page), marker, 'the page itself was not reloaded');
     });
@@ -125,14 +151,17 @@ test('the chat reconnects on its own after the page was in the background', { ti
       await page.getByText(LOST).waitFor({ timeout: RENDER_TIMEOUT_MS });
       assert.equal(await page.getByRole('button', { name: 'Retry' }).count(), 1, 'one Retry button');
 
+      const resync = await watchResync(page);
       await restoreNetwork(page);
       await page.getByRole('button', { name: 'Retry' }).click();
       await page.getByText(LOST).waitFor({ state: 'detached', timeout: RENDER_TIMEOUT_MS });
-      await page.getByRole('button', { name: ALLOW }).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page.waitForTimeout(3_000);
+      await resync.done();
       assert.deepEqual(await chatCounts(page), baseline, 'the same messages and approval card, once each');
       assert.equal(await pageLoadMarker(page), marker, 'the page itself was not reloaded');
     });
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:chat-return' });
+    throw error;
   } finally {
     await browser?.close();
     await vite.close();

@@ -39,6 +39,7 @@ function makeThread(input: {
   modelProperties?: { contextLength: number | undefined } | undefined;
   modelParams?: ModelParams | undefined;
   capabilities?: readonly AgentCapability[] | undefined;
+  modelSupportsVision?: boolean | undefined;
 }): { thread: AgentThread; create: jest.Mock } {
   const create = jest.fn(promptStream);
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
@@ -59,6 +60,7 @@ function makeThread(input: {
       toolSets: [],
       modelProperties: input.modelProperties,
       modelParams: input.modelParams,
+      ...(input.modelSupportsVision === undefined ? {} : { modelSupportsVision: input.modelSupportsVision }),
     },
     context: input.context ?? [{ role: 'user', content: 'A question.' }],
     // No capabilities by default: no pre-LLM processors, so forced compaction is a
@@ -101,9 +103,8 @@ describe('request assembly pre-flight guard', () => {
     expect(create).not.toHaveBeenCalled();
     const done = expectErrorDone(events);
     expect(done.handoff_cause).toBe('fatal_error');
-    expect(done.error).toContain('safety ceiling');
-    expect(done.error).toContain('refusing to assemble');
-    expect(done.error).toContain('Start a new chat');
+    // The chat gets plain words; the size and the ceiling go to the log.
+    expect(done.error).toBe('The chat is too long for this model. Start a new chat or use a different model.');
   });
 
   it('lets a normal context through to the model', async () => {
@@ -211,9 +212,7 @@ describe('token-based pre-flight guard', () => {
     expect(create).not.toHaveBeenCalled();
     const done = expectErrorDone(events);
     expect(done.handoff_cause).toBe('fatal_error');
-    expect(done.error).toContain('context limit');
-    expect(done.error).toContain('even after compaction');
-    expect(done.error).toContain('Start a new chat');
+    expect(done.error).toBe('The chat is too long for this model. Start a new chat or use a different model.');
   });
 
   it('sends the request untouched when the estimate is under the limit', async () => {
@@ -247,7 +246,7 @@ describe('token-based pre-flight guard', () => {
     expect(forcedPasses).toBe(0);
     expect(create).not.toHaveBeenCalled();
     const done = expectErrorDone(events);
-    expect(done.error).toContain('even after compaction');
+    expect(done.error).toBe('The chat is too long for this model. Start a new chat or use a different model.');
   });
 
   it('ignores image base64 payloads when estimating request tokens', async () => {
@@ -267,6 +266,81 @@ describe('token-based pre-flight guard', () => {
     const { thread, create } = makeThread({
       context: [imageMessage],
       modelProperties: { contextLength: 128_000 },
+    });
+    const events = await drainEvents(thread, new AbortController().signal);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(doneEvent(events)?.status).toBe('done');
+  });
+
+  const THREE_PICTURES: ContextMessage = {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'Compare these.' },
+      ...[1, 2, 3].map(() => ({
+        type: 'image_url' as const,
+        image_url: { url: 'data:image/png;base64,AAAA' },
+      })),
+    ],
+  };
+
+  it('counts each picture for a model that reads pictures', async () => {
+    // Three pictures count as 4,500 tokens: over a 4,096-token model on their own.
+    const { thread, create } = makeThread({
+      context: [THREE_PICTURES],
+      modelProperties: { contextLength: 4096 },
+      modelSupportsVision: true,
+    });
+    const events = await drainEvents(thread, new AbortController().signal);
+
+    expect(create).not.toHaveBeenCalled();
+    expect(expectErrorDone(events).error).toBe(
+      'The chat is too long for this model. Start a new chat or use a different model.',
+    );
+  });
+
+  it('does not count pictures for a model that is sent text in their place', async () => {
+    const { thread, create } = makeThread({
+      context: [THREE_PICTURES],
+      modelProperties: { contextLength: 4096 },
+      modelSupportsVision: false,
+    });
+    const events = await drainEvents(thread, new AbortController().signal);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(doneEvent(events)?.status).toBe('done');
+  });
+
+  it('counts text that is added to one request and never saved', async () => {
+    // The chat itself is tiny; the added block alone is about 5,000 tokens.
+    const addsLongBlock: AgentCapability = {
+      preLLMEphemeralProcessors: [
+        {
+          processPreLLMEphemeral: messages => [{ role: 'system', content: 'm'.repeat(20_000) }, ...messages],
+        },
+      ],
+    };
+    const { thread, create } = makeThread({
+      modelProperties: { contextLength: 4096 },
+      capabilities: [addsLongBlock],
+    });
+    const events = await drainEvents(thread, new AbortController().signal);
+
+    expect(create).not.toHaveBeenCalled();
+    expect(expectErrorDone(events).error).toBe(
+      'The chat is too long for this model. Start a new chat or use a different model.',
+    );
+  });
+
+  it('does not count a saved message twice when it comes back as a copy', async () => {
+    // About 2,000 tokens: under the 4,096-token model once, over it if counted twice.
+    const returnsCopies: AgentCapability = {
+      preLLMEphemeralProcessors: [{ processPreLLMEphemeral: messages => messages.map(message => ({ ...message })) }],
+    };
+    const { thread, create } = makeThread({
+      context: [{ role: 'user', content: 'x'.repeat(8_000) }],
+      modelProperties: { contextLength: 4096 },
+      capabilities: [returnsCopies],
     });
     const events = await drainEvents(thread, new AbortController().signal);
 

@@ -6,8 +6,13 @@ import {
   SandboxNotAvailableError,
   SandboxPathIsDirectoryError,
 } from '../../../../src/core/sandbox/SandboxErrors';
+import { buildHostAuthenticatedGitProbe } from '../../../../src/core/sandbox/hostAuthenticatedGit';
 import { SLOT_NOT_READY_MESSAGE } from '../../../../src/core/sandbox/slots/SlotDriver';
-import { chatCapacity, SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
+import {
+  chatCapacity,
+  SlotFullStateLog,
+  SlotSandboxProvider,
+} from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { makeSilentLogger } from '../../harnessMocks';
 import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
 
@@ -122,6 +127,49 @@ describe('SlotSandboxProvider', () => {
     });
   });
 
+  test('an argv call reaches the agent as that argv, with no shell in front', async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const sandboxId = `s1-${'d'.repeat(32)}`;
+    await provider.exec({
+      sandboxId,
+      command: "'python3' 'scripts/run.py' '$(id)'",
+      argv: ['python3', 'scripts/run.py', '$(id)'],
+      cwd: '/workspace/.aman/skills/alpha',
+    });
+    expect(started[0]?.requests[0]?.body).toMatchObject({
+      argv: ['python3', 'scripts/run.py', '$(id)'],
+      cwd: '/workspace/.aman/skills/alpha',
+    });
+  });
+
+  test('a host-built git question reaches the agent without the names the agent refuses', async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const sandboxId = `s1-${'d'.repeat(32)}`;
+    const probe = buildHostAuthenticatedGitProbe({
+      gitArguments: ['remote', 'get-url', 'origin'],
+      workspaceRoot: '/workspace/repo',
+    });
+    await provider.exec({ sandboxId, command: probe.command, cwd: '/workspace/repo', env: probe.env });
+    const sent = bodyOf(started[0]?.requests[0], z.object({ env: z.record(z.string(), z.string()) })).env;
+    const refusedByTheAgent = ['HOME', 'XDG_CONFIG_HOME', 'PATH', 'GIT_ASKPASS', 'GIT_EDITOR', 'GIT_MERGE_AUTOEDIT'];
+    expect(Object.keys(sent).filter(name => refusedByTheAgent.includes(name))).toEqual([]);
+    expect(sent).toMatchObject({ GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' });
+    expect(Number(sent['GIT_CONFIG_COUNT'])).toBeGreaterThan(0);
+  });
+
+  test("a home or PATH of the caller's own choosing still reaches the agent, which refuses it", async () => {
+    const { provider, agents: started } = await providerFor([healthy]);
+    const sandboxId = `s1-${'d'.repeat(32)}`;
+    await provider.exec({
+      sandboxId,
+      command: 'ls',
+      env: { HOME: '/workspace', PATH: '/workspace/bin', GIT_EDITOR: 'vi' },
+    });
+    expect(started[0]?.requests[0]?.body).toMatchObject({
+      env: { HOME: '/workspace', PATH: '/workspace/bin', GIT_EDITOR: 'vi' },
+    });
+  });
+
   test('exec carries the skill network token to the agent only when one was granted', async () => {
     const { provider, agents: started } = await providerFor([healthy]);
     const sandboxId = `s1-${'d'.repeat(32)}`;
@@ -191,6 +239,22 @@ describe('SlotSandboxProvider', () => {
       expect(result.success).toBe(false);
       expect(!result.success && result.error).toContain(expected);
     }
+  });
+
+  test('a timeout below the cap says how to ask for longer, and one at the cap does not', async () => {
+    const timedOut = (): ReturnType<FakeHandler> => ({
+      status: 200,
+      body: execResponse({ terminated_by: 'timeout', output: '' }),
+    });
+    const short = await (
+      await providerFor([timedOut])
+    ).provider.exec({ sandboxId: `s1-${'e'.repeat(32)}`, command: 'x', timeoutSeconds: 60 });
+    expect(!short.success && short.error).toContain('run it again with a larger timeout_seconds');
+    const longest = await (
+      await providerFor([timedOut])
+    ).provider.exec({ sandboxId: `s1-${'e'.repeat(32)}`, command: 'x', timeoutSeconds: 600 });
+    expect(!longest.success && longest.error).toContain('timed out after 600s');
+    expect(!longest.success && longest.error).not.toContain('timeout_seconds');
   });
 
   test('a busy slot is retried until it is free', async () => {
@@ -319,6 +383,62 @@ describe('SlotSandboxProvider', () => {
     test('when every slot is at capacity the answer says to delete chats, not to run the doctor command', async () => {
       const { provider } = await providerFor([hard(2), hard(2)]);
       await expect(provider.createSandbox()).rejects.toThrow(/sandbox is full.*Delete old chats/);
+    });
+
+    test('when every slot is at capacity the full state is logged once with each slot count', async () => {
+      const logger = makeSilentLogger();
+      const warn = jest.spyOn(logger, 'warn');
+      const started = [new FakeAgent(hard(2)), new FakeAgent(hard(2))];
+      agents.push(...started);
+      const socketPaths = await Promise.all(started.map(agent => agent.start()));
+      const provider = new SlotSandboxProvider({
+        socketPaths,
+        defaultExecTimeoutSeconds: 60,
+        treeDiskMb: 2048,
+        fileMaxBytesForDownload: 1024,
+        logger,
+        sleepMs: () => Promise.resolve(),
+        gitBridge: undefined,
+      });
+      await expect(provider.createSandbox()).rejects.toThrow(/sandbox is full.*Delete old chats/);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('every sandbox slot is full', {
+        slots: [
+          { slot: 1, sessions: 2, capacity: 2 },
+          { slot: 2, sessions: 2, capacity: 2 },
+        ],
+      });
+    });
+
+    test('a shared full-state log warns once while the slots stay full, across providers, and again after room came back', async () => {
+      const logger = makeSilentLogger();
+      const warn = jest.spyOn(logger, 'warn');
+      const fullStateLog = new SlotFullStateLog();
+      const started = [new FakeAgent(hard(2)), new FakeAgent(hard(2))];
+      agents.push(...started);
+      const socketPaths = await Promise.all(started.map(agent => agent.start()));
+      const makeProvider = () =>
+        new SlotSandboxProvider({
+          socketPaths,
+          defaultExecTimeoutSeconds: 60,
+          treeDiskMb: 2048,
+          fileMaxBytesForDownload: 1024,
+          logger,
+          sleepMs: () => Promise.resolve(),
+          gitBridge: undefined,
+          fullStateLog,
+        });
+
+      await makeProvider().getImageBuildStatus();
+      await makeProvider().getImageBuildStatus();
+      await expect(makeProvider().createSandbox()).rejects.toThrow(/sandbox is full/);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenLastCalledWith('every sandbox slot is full', expect.anything());
+
+      fullStateLog.report({ logger, full: null });
+      await makeProvider().getImageBuildStatus();
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenLastCalledWith('every sandbox slot is full', expect.anything());
     });
 
     test('a shared disk (Docker VM or none) is not capped by chats', async () => {

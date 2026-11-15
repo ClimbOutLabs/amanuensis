@@ -55,6 +55,30 @@ describe('ThreadListRow', () => {
     expect(activeRow?.className).toMatch(/bg-dropdown-selected-item-bg/);
   });
 
+  it('shows the dot and a bold title for a chat with something new', () => {
+    const { container } = render(
+      <SlotsProvider>
+        <ThreadListRow title="Session A" active={false} onSelect={() => {}} unread />
+      </SlotsProvider>,
+    );
+    expect(screen.getByRole('img', { name: 'New in this chat' })).toBeInTheDocument();
+    expect(screen.getByText('Session A').className).toMatch(/font-semibold/);
+    const row = container.querySelector('[data-slot="aui_thread-list-item"]');
+    expect(row?.getAttribute('data-unread')).toBe('true');
+  });
+
+  it('shows no dot for a chat with nothing new', () => {
+    const { container } = render(
+      <SlotsProvider>
+        <ThreadListRow title="Session A" active={false} onSelect={() => {}} />
+      </SlotsProvider>,
+    );
+    expect(screen.queryByRole('img', { name: 'New in this chat' })).not.toBeInTheDocument();
+    expect(screen.getByText('Session A').className).toMatch(/font-normal/);
+    const row = container.querySelector('[data-slot="aui_thread-list-item"]');
+    expect(row?.getAttribute('data-unread')).toBeNull();
+  });
+
   it('renders agent name and relative time when provided', () => {
     const lastMessageAt = new Date(Date.now() - 30 * 60_000);
     render(
@@ -69,7 +93,9 @@ describe('ThreadListRow', () => {
       </SlotsProvider>,
     );
     expect(screen.getByText('Hello chat')).toBeInTheDocument();
-    expect(screen.getByText('from-sdk')).toBeInTheDocument();
+    const agentLine = screen.getByText('from-sdk').parentElement;
+    expect(agentLine).toHaveClass('text-xs');
+    expect(agentLine?.className).not.toMatch(/text-\[0\.75rem\]/);
     expect(screen.getByText('30m')).toBeInTheDocument();
   });
 

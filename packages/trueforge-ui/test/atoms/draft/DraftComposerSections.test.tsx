@@ -6,9 +6,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { DraftComposerLeftSection, DraftComposerRightSection } from '@/atoms/draft/DraftComposerSections.js';
 import { CompactLayoutProvider } from '@/atoms/lib/CompactLayoutContext.js';
+import { readPrivateChatState, setPendingPrivateChat } from '@/server/privateChatStore.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
 import type { AgentSpec } from '@/server/types.js';
+import { RuntimeHarness } from '../../containers/RuntimeHarness.js';
 import { createMockAgentUIServer } from '../../server/mockServer.js';
 
 let agentSpec: AgentSpec;
@@ -23,10 +25,12 @@ function DraftSections({
   onAttach,
   disabled = false,
   isRunning = false,
+  remoteId,
 }: {
   onAttach?: () => void;
   disabled?: boolean;
   isRunning?: boolean;
+  remoteId?: string;
 }) {
   const server = createMockAgentUIServer({
     getModels: async () => [
@@ -41,10 +45,12 @@ function DraftSections({
 
   return (
     <ServerProvider server={server}>
-      <DraftCatalogProvider>
-        <DraftComposerLeftSection disabled={disabled} isRunning={isRunning} onAttach={onAttach} />
-        <DraftComposerRightSection disabled={disabled} isRunning={isRunning} />
-      </DraftCatalogProvider>
+      <RuntimeHarness messages={[]} {...(remoteId === undefined ? {} : { threadId: 't1', remoteId })}>
+        <DraftCatalogProvider>
+          <DraftComposerLeftSection disabled={disabled} isRunning={isRunning} onAttach={onAttach} />
+          <DraftComposerRightSection disabled={disabled} isRunning={isRunning} />
+        </DraftCatalogProvider>
+      </RuntimeHarness>
     </ServerProvider>
   );
 }
@@ -73,6 +79,35 @@ describe('draft composer sections', () => {
       ],
     };
     updateAgentSpec.mockReset();
+    setPendingPrivateChat(false);
+  });
+
+  it('offers Incognito chat on a new chat, and pressing it chooses Incognito for that chat', () => {
+    render(<DraftSections />);
+
+    const choice = screen.getByRole('button', { name: 'Start incognito chat' });
+    expect(choice).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(choice);
+    expect(choice).toHaveAttribute('aria-pressed', 'true');
+    expect(readPrivateChatState().pending).toBe(true);
+  });
+
+  it('does not offer Incognito chat once the chat has started', () => {
+    render(<DraftSections remoteId="ses_started" />);
+
+    expect(screen.queryByRole('button', { name: 'Start incognito chat' })).not.toBeInTheDocument();
+  });
+
+  it('leaves Incognito chat out of the builder composer', () => {
+    render(
+      <ShellModeProvider agentConfig={{ mode: 'AgentComposer' }}>
+        <BuilderMode>
+          <DraftSections />
+        </BuilderMode>
+      </ShellModeProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Start incognito chat' })).not.toBeInTheDocument();
   });
 
   it('puts attaching and add-ons in one plus menu, with no standalone attach or add-ons control', async () => {
@@ -108,6 +143,14 @@ describe('draft composer sections', () => {
     });
   });
 
+  it('groups the model and voice controls so narrow screens can restack them', async () => {
+    render(<DraftSections />);
+
+    const model = await screen.findByTitle('Select model');
+    const selector = model.closest('.aui-composer-model-selector');
+    expect(selector?.parentElement).toHaveClass('aui-composer-right-group');
+  });
+
   it('leaves the model control out of the builder composer', () => {
     render(
       <ShellModeProvider agentConfig={{ mode: 'AgentComposer' }}>
@@ -130,7 +173,7 @@ describe('draft composer sections', () => {
       </ShellModeProvider>,
     );
 
-    expect(screen.queryByRole('button', { name: 'Agent config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agent setup' })).not.toBeInTheDocument();
 
     rerender(
       <ShellModeProvider agentConfig={{ mode: 'AgentComposer' }}>
@@ -146,12 +189,12 @@ describe('draft composer sections', () => {
     expect(screen.queryByRole('button', { name: 'Attach a file' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getByRole('menuitem', { name: 'Agent config' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Agent setup' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Attach files' }));
     expect(onAttach).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Agent config' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Agent setup' }));
     expect(screen.getByText('Config open')).toBeInTheDocument();
   });
 

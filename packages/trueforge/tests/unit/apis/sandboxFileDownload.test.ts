@@ -29,6 +29,7 @@ import { buildRunCodeHarvestSink } from '../../../src/runtime/artifacts/persistR
 import { submitArtifactPersistence } from '../../../src/runtime/artifacts/persistTurnArtifacts';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
+import { browserTurnTimezone } from '../../fixtures/browserTurnTimezone';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
@@ -52,6 +53,8 @@ async function buildApp(options?: { sandboxProvider?: SandboxProvider | undefine
   app.route(
     '/',
     createTurnsRouter({
+      turnTimezone: browserTurnTimezone,
+      chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -115,6 +118,8 @@ async function createSessionWithSandboxTurn(params: {
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   const record = await params.sessionStore.getSession({
     tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,

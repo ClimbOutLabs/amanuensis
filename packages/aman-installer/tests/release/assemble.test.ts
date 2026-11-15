@@ -33,6 +33,7 @@ function part(
 function threeParts(): ReleaseManifest[] {
   return [
     part([
+      { name: 'Aman-Setup.exe', data: 'the windows build' },
       { name: 'aman-windows-x64.exe', data: 'the windows build' },
       { name: 'amanuensis-v2.0.0.tar.gz', data: 'the source archive' },
     ]),
@@ -48,6 +49,7 @@ test('three partial records assemble into the one release record', () => {
   }
   assert.equal(result.manifest.release, 'v2.0.0');
   assert.deepEqual(Object.keys(result.manifest.files).sort(), [
+    'Aman-Setup.exe',
     'aman-darwin-arm64',
     'aman-linux-x64',
     'aman-windows-x64.exe',
@@ -69,7 +71,10 @@ test('a missing system build refuses loudly', () => {
 
 test('a missing source archive refuses loudly', () => {
   const parts = [
-    part([{ name: 'aman-windows-x64.exe', data: 'the windows build' }]),
+    part([
+      { name: 'Aman-Setup.exe', data: 'the windows build' },
+      { name: 'aman-windows-x64.exe', data: 'the windows build' },
+    ]),
     part([{ name: 'aman-darwin-arm64', data: 'the mac build' }]),
     part([{ name: 'aman-linux-x64', data: 'the linux build' }]),
   ];
@@ -78,6 +83,39 @@ test('a missing source archive refuses loudly', () => {
     assert.fail('the assembly should refuse');
   }
   assert.match(result.problem, /source archive is missing/);
+});
+
+test('a missing setup download refuses loudly', () => {
+  const parts = [
+    part([
+      { name: 'aman-windows-x64.exe', data: 'the windows build' },
+      { name: 'amanuensis-v2.0.0.tar.gz', data: 'the source archive' },
+    ]),
+    part([{ name: 'aman-darwin-arm64', data: 'the mac build' }]),
+    part([{ name: 'aman-linux-x64', data: 'the linux build' }]),
+  ];
+  const result = assembleManifests({ parts, expectedSourceIds: IDS });
+  if (!('problem' in result)) {
+    assert.fail('the assembly should refuse');
+  }
+  assert.match(result.problem, /Aman-Setup.exe is missing/);
+});
+
+test('a setup download that is not the windows build refuses loudly', () => {
+  const parts = [
+    part([
+      { name: 'Aman-Setup.exe', data: 'some other program' },
+      { name: 'aman-windows-x64.exe', data: 'the windows build' },
+      { name: 'amanuensis-v2.0.0.tar.gz', data: 'the source archive' },
+    ]),
+    part([{ name: 'aman-darwin-arm64', data: 'the mac build' }]),
+    part([{ name: 'aman-linux-x64', data: 'the linux build' }]),
+  ];
+  const result = assembleManifests({ parts, expectedSourceIds: IDS });
+  if (!('problem' in result)) {
+    assert.fail('the assembly should refuse');
+  }
+  assert.match(result.problem, /not the same program as the Windows build/);
 });
 
 test('two records that disagree about a file refuse loudly', () => {

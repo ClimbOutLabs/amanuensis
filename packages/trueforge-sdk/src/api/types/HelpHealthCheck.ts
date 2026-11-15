@@ -10,4 +10,5 @@ export interface HelpHealthCheck {
     items: TrueForge.HelpHealthItem[];
     /** Whether the default model answered the test call. */
     modelReady: boolean;
+    state: TrueForge.HelpState;
 }

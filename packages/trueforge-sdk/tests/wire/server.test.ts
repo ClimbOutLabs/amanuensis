@@ -13,25 +13,16 @@ describe("ServerClient", () => {
             data: {
                 build: { ref: "ref", version: "version" },
                 memory_defaults: {
-                    backend: "markdown",
-                    curated_enabled: true,
-                    curated_max_models: 1,
-                    curated_max_tokens: 1,
                     markdown_dir: "markdown_dir",
                     prerecall_gate_enabled: true,
-                    recall_max_entities: 1,
                     recall_max_items: 1,
                     recall_min_score: 1.1,
                     recall_query_window: 1,
                     recall_timeout_ms: 1,
-                    reflect_budget: "low",
-                    reflect_enabled: true,
-                    reflect_max_tokens: 1,
-                    reflect_timeout_ms: 1,
                 },
                 memory_embeddings: { detail: "detail", enabled: true, indexed_entries: 1, state: "starting" },
                 memory_screen: { configured: true, enabled: true, reason: "reason", threshold: 1.1 },
-                sandbox: { enabled: true },
+                sandbox: { enabled: true, reason: "reason" },
                 sandbox_isolation: {
                     cosign_key_configured: true,
                     default_timeout_seconds: 1,
@@ -45,6 +36,7 @@ describe("ServerClient", () => {
                     stdout_stderr_cap_kb: 1,
                 },
                 settings: { enabled: true },
+                sign_in: { mode: "local" },
                 skill: { enabled: true, reason: "reason" },
                 tool_output_screen: {
                     configured: true,
@@ -73,21 +65,12 @@ describe("ServerClient", () => {
                     version: "version",
                 },
                 memoryDefaults: {
-                    backend: "markdown",
-                    curatedEnabled: true,
-                    curatedMaxModels: 1,
-                    curatedMaxTokens: 1,
                     markdownDir: "markdown_dir",
                     prerecallGateEnabled: true,
-                    recallMaxEntities: 1,
                     recallMaxItems: 1,
                     recallMinScore: 1.1,
                     recallQueryWindow: 1,
                     recallTimeoutMs: 1,
-                    reflectBudget: "low",
-                    reflectEnabled: true,
-                    reflectMaxTokens: 1,
-                    reflectTimeoutMs: 1,
                 },
                 memoryEmbeddings: {
                     detail: "detail",
@@ -103,6 +86,7 @@ describe("ServerClient", () => {
                 },
                 sandbox: {
                     enabled: true,
+                    reason: "reason",
                 },
                 sandboxIsolation: {
                     cosignKeyConfigured: true,
@@ -118,6 +102,9 @@ describe("ServerClient", () => {
                 },
                 settings: {
                     enabled: true,
+                },
+                signIn: {
+                    mode: "local",
                 },
                 skill: {
                     enabled: true,

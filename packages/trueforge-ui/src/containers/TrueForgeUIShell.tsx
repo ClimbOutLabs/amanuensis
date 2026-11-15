@@ -30,6 +30,7 @@ import {
 import { ChatFolderProvider, type ChatFolderStore } from '../server/ChatFolderContext.js';
 import { CustomActionRenderersProvider, type CustomActionRenderers } from '../server/CustomActionRenderersContext.js';
 import { withSendableSkills } from '../server/draftSpecPreferences.js';
+import { adoptPrivateChat, readPrivateChatState, setPendingPrivateChat } from '../server/privateChatStore.js';
 import { ServerProvider, useServerCapabilities } from '../server/ServerContext.js';
 import { createSessionListCache, withSessionListCache } from '../server/sessionListCache.js';
 import {
@@ -37,6 +38,7 @@ import {
   ShellModeProvider,
   useShellMode,
   type AgentConfig,
+  type OpenSessionRequest,
   type SettingsOpenRequest,
 } from '../server/ShellModeContext.js';
 import { SpaceProvider, type SpaceStore } from '../server/SpaceContext.js';
@@ -45,6 +47,7 @@ import type { AgentUIServer } from '../server/types.js';
 import { SlotsProvider, useThemeMode, type SlotOverrides } from '../theme/SlotsProvider.js';
 import type { LayoutProp, ThemeConfig } from '../theme/types.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
+import { OpenSessionRequestBridge } from './OpenSessionRequestBridge.js';
 import { TrueFoundryChatProvider, type TrueFoundryChatProviderProps } from './TrueFoundryChatProvider.js';
 import { useResolvedServer } from './useResolvedServer.js';
 
@@ -104,6 +107,12 @@ export type TrueForgeUIProps = {
    * remembered, not answered.
    */
   settingsOpenRequest?: SettingsOpenRequest;
+  /**
+   * Ask the shell to open one chat by id after mount, from UI that lives outside the shell
+   * tree (the right rail's desk rows). Raise the request's nonce on every ask; a request the
+   * shell mounts with is remembered, not answered.
+   */
+  openSessionRequest?: OpenSessionRequest;
   /**
    * Host UI for pending client-side tools, keyed by tool name.
    * When a pending tool matches, the composer mounts that component instead of Ask User.
@@ -237,6 +246,8 @@ function ChatProviderFromShell({
   const connectorChoice = useChatConnectorChoiceStore();
   // A new chat starts with nothing chosen; a choice made on an abandoned draft must not carry over.
   useEffect(() => connectorChoice?.clearPending(), [connectorChoice, runtimeKey]);
+  // Likewise the Private choice, which belongs to the new chat it was made on.
+  useEffect(() => setPendingPrivateChat(false), [runtimeKey]);
 
   const sandboxEnabled = useServerCapabilities()?.sandbox.enabled;
   const serverWithCreateIntent = useMemo((): AgentUIServer => {
@@ -244,16 +255,21 @@ function ChatProviderFromShell({
     const sending = isCreateAgent ? server : withSendableSkills({ server, sandboxEnabled });
     return {
       ...sending,
-      createSession: request => {
-        if (request.agentSpec === undefined) {
-          return sending.createSession(request);
-        }
-        return createSessionWithConnectorChoice({
-          server: sending,
-          store: connectorChoice,
-          metadata: { [IS_CREATE_AGENT_METADATA_KEY]: isCreateAgentMetadataValue(isCreateAgent) },
-          request,
-        });
+      createSession: async request => {
+        // An agent being built is never private; the choice is offered only on a normal new chat.
+        const isIncognito = !isCreateAgent && readPrivateChatState().pending;
+        const withPrivacy = isIncognito ? { ...request, isIncognito } : request;
+        const session =
+          request.agentSpec === undefined
+            ? await sending.createSession(withPrivacy)
+            : await createSessionWithConnectorChoice({
+                server: sending,
+                store: connectorChoice,
+                metadata: { [IS_CREATE_AGENT_METADATA_KEY]: isCreateAgentMetadataValue(isCreateAgent) },
+                request: withPrivacy,
+              });
+        if (isIncognito) adoptPrivateChat(session.id);
+        return session;
       },
     };
   }, [server, isCreateAgent, connectorChoice, sandboxEnabled]);
@@ -337,6 +353,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
     agentConfig = DEFAULT_AGENT_CONFIG,
     initialSettingsOpen = false,
     settingsOpenRequest,
+    openSessionRequest,
     onSettingsChromeEnabledChange,
     server: serverConfig,
     onError,
@@ -391,6 +408,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
       onSettingsChromeEnabledChange={onSettingsChromeEnabledChange}
     >
       <LibrarySessionShareBoot />
+      <OpenSessionRequestBridge request={openSessionRequest} />
       {resolvedRoutes != null ? (
         <Suspense fallback={null}>
           <ShellRouteSync

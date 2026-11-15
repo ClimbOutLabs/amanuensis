@@ -35,17 +35,42 @@ const HEALTHY: HelpHealthCheck = {
   checked_at: '2026-10-21T09:00:00Z',
   model_ready: true,
   items: [
-    { id: 'model', name: 'Your model', status: 'pass', message: 'The model answered.', next_step: null },
-    { id: 'connectors', name: 'Connectors', status: 'pass', message: 'All 2 connectors answered.', next_step: null },
+    {
+      id: 'model',
+      name: 'Your model',
+      status: 'pass',
+      message: 'The model answered.',
+      next_step: null,
+      settings_section: 'models',
+    },
+    {
+      id: 'connectors',
+      name: 'Connectors',
+      status: 'pass',
+      message: 'All 2 connectors answered.',
+      next_step: null,
+      settings_section: 'connectors',
+    },
     {
       id: 'sandbox',
       name: 'Sandbox',
       status: 'warn',
       message: 'The sandbox is not ready.',
       next_step: 'Check Settings, Sandbox.',
+      settings_section: 'sandbox',
     },
   ],
   host_report: { state: 'ok', checked_at: '2026-10-20T08:30:00Z', message: 'all good', next_step: null },
+  state: {
+    setup_steps: [
+      { id: 'model', done: true },
+      { id: 'about_you', done: false },
+    ],
+    connectors: [],
+    sandbox_ready: true,
+    app_version: '1.4.0',
+    build_ref: null,
+  },
 };
 
 const NO_MODEL: HelpHealthCheck = {
@@ -58,6 +83,7 @@ const NO_MODEL: HelpHealthCheck = {
       status: 'fail',
       message: 'No model is connected.',
       next_step: null,
+      settings_section: 'models',
     },
     {
       id: 'connectors',
@@ -65,6 +91,7 @@ const NO_MODEL: HelpHealthCheck = {
       status: 'not_set_up',
       message: 'No connectors are set up yet.',
       next_step: null,
+      settings_section: 'connectors',
     },
   ],
   host_report: {
@@ -72,6 +99,16 @@ const NO_MODEL: HelpHealthCheck = {
     checked_at: null,
     message: null,
     next_step: null,
+  },
+  state: {
+    setup_steps: [
+      { id: 'model', done: true },
+      { id: 'about_you', done: false },
+    ],
+    connectors: [],
+    sandbox_ready: true,
+    app_version: '1.4.0',
+    build_ref: null,
   },
 };
 
@@ -152,6 +189,56 @@ describe('HelpChatPanel', () => {
     expect(shellMock.setSettingsOpen).toHaveBeenCalledWith(true, 'models');
   });
 
+  it.each([
+    [
+      'Email and calendar',
+      'mail_calendar',
+      'Open Settings, Connectors and connect your email and your calendar there.',
+      'connectors',
+    ],
+    ['Connectors', 'connectors', 'Open Settings, Connectors and check each one.', 'connectors'],
+    ['Sandbox', 'sandbox', 'Check Settings, Sandbox.', 'sandbox'],
+  ] as const)(
+    'opens the Settings section a %s step names when the step is pressed',
+    async (name, id, step, section) => {
+      renderHelp({
+        check: {
+          ...NO_MODEL,
+          items: [
+            { id, name, status: 'fail', message: 'Something is off.', next_step: step, settings_section: section },
+          ],
+        },
+      });
+
+      const results = await screen.findByTestId('help-chat-results');
+      fireEvent.click(within(results).getByRole('button', { name: step }));
+
+      expect(shellMock.setSettingsOpen).toHaveBeenCalledWith(true, section);
+    },
+  );
+
+  it('shows a step with no Settings section as plain text', async () => {
+    renderHelp({
+      check: {
+        ...NO_MODEL,
+        items: [
+          {
+            id: 'schedules',
+            name: 'Schedules',
+            status: 'fail',
+            message: 'Schedules have stopped.',
+            next_step: 'Restart Aman.',
+            settings_section: null,
+          },
+        ],
+      },
+    });
+
+    const results = await screen.findByTestId('help-chat-results');
+    expect(within(results).getByText('Restart Aman.')).toBeInTheDocument();
+    expect(within(results).queryByRole('button', { name: 'Restart Aman.' })).toBeNull();
+  });
+
   it('shows the saved full check date and result, and nothing when there is no saved report', async () => {
     renderHelp({ check: HEALTHY });
 
@@ -178,6 +265,7 @@ describe('HelpChatPanel', () => {
             status: 'fail',
             message: 'The model did not answer in time.',
             next_step: 'Check the model key in Settings, Models. Then press Check again.',
+            settings_section: 'models',
           },
         ],
       },

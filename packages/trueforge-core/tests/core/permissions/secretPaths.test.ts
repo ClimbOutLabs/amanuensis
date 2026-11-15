@@ -40,6 +40,11 @@ describe('namesSecretPath', () => {
     expect(namesSecretPath('C:\\Users\\u\\.ssh\\id_rsa')).toBe(true);
   });
 
+  test('blocks a Windows path to an SSH key written with look-alike backslashes', () => {
+    expect(namesSecretPath('C:⧹Users⧹u⧹.ssh⧹id_rsa')).toBe(true);
+    expect(namesSecretPath('C:∖Users∖u∖.ssh∖id_rsa')).toBe(true);
+  });
+
   test('blocks a path to an SSH key inside a quoted command word', () => {
     expect(namesSecretPath("cat '~/.ssh/id_rsa'")).toBe(true);
   });
@@ -148,6 +153,49 @@ describe('namesSecretPath with split words', () => {
   });
 });
 
+describe('encoding layers and the decode cap', () => {
+  /** Percent-encodes a value `layers` times over, so each decode round peels one layer. */
+  const encodeLayers = (value: string, layers: number): string => {
+    let out = value;
+    for (let i = 0; i < layers; i += 1) {
+      out = encodeURIComponent(out);
+    }
+    return out;
+  };
+
+  test('a secret path encoded three layers deep is still read and blocked', () => {
+    const encoded = encodeLayers('/home/u/.ssh/id_rsa', 3);
+    expect(namesSecretPath(encoded)).toBe(true);
+    expect(containsSecretPath({ path: encoded })).toBe(true);
+  });
+
+  test('ordinary text encoded three layers deep is judged on what it decodes to', () => {
+    expect(namesSecretPath(encodeLayers('hello world', 3))).toBe(false);
+    expect(containsPathLikeValue({ note: encodeLayers('hello world', 3) })).toBe(false);
+    expect(containsPathLikeValue({ path: encodeLayers('notes/todo', 3) })).toBe(true);
+    expect(namesSecretPath(encodeLayers('notes/todo', 3))).toBe(false);
+  });
+
+  test('a secret path encoded four layers deep fails closed', () => {
+    const encoded = encodeLayers('/home/u/.ssh/id_rsa', 4);
+    expect(namesSecretPath(encoded)).toBe(true);
+    expect(containsSecretPath({ path: encoded })).toBe(true);
+    expect(containsPathLikeValue({ path: encoded })).toBe(true);
+  });
+
+  test('any text encoded four layers deep fails closed, because the checks cannot read it', () => {
+    expect(namesSecretPath(encodeLayers('notes/todo', 4))).toBe(true);
+    expect(containsPathLikeValue({ path: encodeLayers('notes/todo', 4) })).toBe(true);
+    expect(namesSecretPath(encodeLayers('hello world', 4))).toBe(true);
+    expect(containsPathLikeValue({ note: encodeLayers('hello world', 4) })).toBe(true);
+  });
+
+  test('text encoded five layers deep fails closed too', () => {
+    expect(namesSecretPath(encodeLayers('/home/u/.ssh/id_rsa', 5))).toBe(true);
+    expect(containsPathLikeValue({ path: encodeLayers('notes/todo', 5) })).toBe(true);
+  });
+});
+
 describe('containsSecretPath', () => {
   test('finds a secret path at any key and depth', () => {
     expect(containsSecretPath({ a: { b: [{ c: '/home/u/.ssh/id_rsa' }] } })).toBe(true);
@@ -233,6 +281,8 @@ describe('containsPathLikeValue', () => {
     ['a division slash', 'notes∕todo'],
     ['a fraction slash', 'notes⁄todo'],
     ['a big solidus', 'notes⧸todo'],
+    ['a big reverse solidus', 'notes⧹todo'],
+    ['a set minus', 'notes∖todo'],
     ['a fullwidth slash', 'notes／todo'],
     ['a fullwidth backslash', 'notes＼todo'],
     ['a parent path with fullwidth dots', '．．／secrets'],

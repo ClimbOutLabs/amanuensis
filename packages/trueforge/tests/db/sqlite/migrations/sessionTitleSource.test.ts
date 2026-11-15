@@ -28,6 +28,8 @@ async function seedChat(store: SqliteSessionStore, sessionId: string): Promise<v
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
 }
 

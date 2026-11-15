@@ -26,6 +26,7 @@ import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-st
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
+import { browserTurnTimezone } from '../../fixtures/browserTurnTimezone';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response> {
@@ -82,6 +83,8 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
   app.route(
     '/',
     createTurnsRouter({
+      turnTimezone: browserTurnTimezone,
+      chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,

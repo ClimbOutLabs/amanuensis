@@ -45,6 +45,7 @@ function mcpRecord(id: string, manifest: McpServerRecord['manifest']): McpServer
 const providerRecord: ModelProviderRecord = {
   tenant_id: 't1',
   name: 'custom-llm',
+  last_check: null,
   created_at: '2026-10-01T00:00:00.000Z',
   updated_at: '2026-10-01T00:00:00.000Z',
   manifest: {
@@ -143,6 +144,7 @@ function sources(overrides: Partial<OutboundSecretSources> = {}): OutboundSecret
             : null,
         ),
     },
+    telegram: { getConnection: () => Promise.resolve(undefined) },
     ...overrides,
   };
 }
@@ -226,6 +228,48 @@ describe('createOutboundSecretSource', () => {
       }),
     )(alice);
     expect(secrets).toContain('synthetic-plain-header-0011');
+  });
+  it("lists the user's own Telegram bot token and webhook secret, and nobody else's", async () => {
+    const withBot = sources({
+      telegram: {
+        getConnection: ({ created_by }) =>
+          Promise.resolve(
+            created_by === 'alice'
+              ? {
+                  id: 'tg-1',
+                  tenant_id: 't1',
+                  created_by,
+                  created_by_subject: { subject_id: created_by, subject_type: 'user', subject_display_name: 'Alice' },
+                  bot_token: '7000000001:synthetic-bot-token-0012',
+                  bot_id: '7000000001',
+                  bot_name: 'Harbour bot',
+                  bot_username: null,
+                  paired_telegram_user_id: null,
+                  paired_chat_id: null,
+                  pairing_code: null,
+                  pairing_expires_at: null,
+                  pairing_telegram_user_id: null,
+                  pairing_chat_id: null,
+                  pairing_display_name: null,
+                  last_update_id: null,
+                  poll_offset: null,
+                  transport: 'webhook',
+                  webhook_secret: 'synthetic-webhook-secret-0013',
+                  session_id: null,
+                  created_at: '2026-10-01T00:00:00.000Z',
+                  updated_at: '2026-10-01T00:00:00.000Z',
+                }
+              : undefined,
+          ),
+      },
+    });
+    const mine = await createOutboundSecretSource(withBot)(alice);
+    expect(mine).toEqual(
+      expect.arrayContaining(['7000000001:synthetic-bot-token-0012', 'synthetic-webhook-secret-0013']),
+    );
+    const theirs = await createOutboundSecretSource(withBot)({ tenant_id: 't1', created_by: 'bob' });
+    expect(theirs).not.toContain('7000000001:synthetic-bot-token-0012');
+    expect(theirs).not.toContain('synthetic-webhook-secret-0013');
   });
 });
 

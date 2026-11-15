@@ -12,6 +12,12 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# The service does not start without a shared secret, so every test runs with this one and its
+# clients present it, as the app does.
+TEST_SECRET = "test-secret-value-with-more-than-32-chars"
+os.environ["SPEECH_SECRET"] = TEST_SECRET
+SECRET_HEADERS = {"x-speech-secret": TEST_SECRET}
+
 import hashlib  # noqa: E402
 
 import numpy as np  # noqa: E402
@@ -82,7 +88,7 @@ def make_client(settings: Settings | None = None, factory=FakeTranscriber) -> Te
     settings = settings or Settings()
     FakeTranscriber.instances.clear()
     app = create_app(settings=settings, transcriber_factory=factory)
-    return TestClient(app)
+    return TestClient(app, headers=SECRET_HEADERS)
 
 
 class HealthzTest(unittest.TestCase):
@@ -103,6 +109,61 @@ class HealthzTest(unittest.TestCase):
         self.assertEqual(body["status"], "ok")
         self.assertFalse(body["model_loaded"])
         self.assertIn("no model here", body["model_error"])
+
+
+class SharedSecretTest(unittest.TestCase):
+    SECRET = TEST_SECRET
+
+    def settings(self) -> Settings:
+        settings = Settings()
+        settings.shared_secret = self.SECRET
+        return settings
+
+    def test_transcribe_without_the_secret_is_refused(self):
+        wav = make_sine_wav()
+        app = create_app(settings=self.settings(), transcriber_factory=FakeTranscriber)
+        with TestClient(app) as client:
+            response = client.post("/v1/transcribe", content=wav, headers={"Content-Type": "audio/wav"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_transcribe_with_a_wrong_secret_is_refused(self):
+        wav = make_sine_wav()
+        with make_client(settings=self.settings()) as client:
+            response = client.post(
+                "/v1/transcribe",
+                content=wav,
+                headers={"Content-Type": "audio/wav", "x-speech-secret": "a-different-secret-that-is-long-enough"},
+            )
+        self.assertEqual(response.status_code, 401)
+
+    def test_transcribe_with_the_secret_works(self):
+        wav = make_sine_wav()
+        with make_client(settings=self.settings()) as client:
+            response = client.post(
+                "/v1/transcribe",
+                content=wav,
+                headers={"Content-Type": "audio/wav", "x-speech-secret": self.SECRET},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["text"], "synthetic transcript")
+
+    def test_healthz_stays_open_without_the_secret(self):
+        with make_client(settings=self.settings()) as client:
+            response = client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["model_loaded"])
+
+    def test_a_short_secret_refuses_to_start(self):
+        settings = Settings()
+        settings.shared_secret = "too-short"
+        with self.assertRaises(ValueError):
+            create_app(settings=settings, transcriber_factory=FakeTranscriber)
+
+    def test_no_secret_refuses_to_start(self):
+        settings = Settings()
+        settings.shared_secret = None
+        with self.assertRaises(ValueError):
+            create_app(settings=settings, transcriber_factory=FakeTranscriber)
 
 
 class TranscribeTest(unittest.TestCase):

@@ -15,19 +15,23 @@ export const ScheduleManifest: core.serialization.ObjectSchema<
 > = core.serialization.object({
     cron: CronExpression.optionalNullable(),
     kind: ScheduleKind.optional(),
+    originSessionId: core.serialization.property("origin_session_id", core.serialization.string().optionalNullable()),
     runAt: core.serialization.property("run_at", RunAt.optionalNullable()),
     status: ScheduleStatus.optional(),
     task: core.serialization.string(),
     timezone: Timezone.optional(),
+    urgent: core.serialization.boolean().optional(),
 });
 
 export declare namespace ScheduleManifest {
     export interface Raw {
         cron?: ((CronExpression.Raw | undefined) | null | undefined) | null;
         kind?: ScheduleKind.Raw | null;
+        origin_session_id?: (string | null | undefined) | null;
         run_at?: ((RunAt.Raw | undefined) | null | undefined) | null;
         status?: ScheduleStatus.Raw | null;
         task: string;
         timezone?: Timezone.Raw | null;
+        urgent?: boolean | null;
     }
 }

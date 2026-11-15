@@ -1,17 +1,15 @@
 import { OpenAPIHono, type z } from '@hono/zod-openapi';
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, SLOT_NOT_READY_MESSAGE } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import { hasAdminRole, type ResolveRequestContext } from '../auth/identity';
-import configuration, { UNSTAMPED_BUILD_REF } from '../config';
+import configuration, { getTrueForgeAuthMode, TrueForgeAuthMode, UNSTAMPED_BUILD_REF } from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import { PACKAGE_VERSION } from '../packageVersion';
 import { getCapabilitiesRoute } from '../routes/capabilityRoutes';
 import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
-import { findMemoryProviderSettings } from '../runtime/memory/memoryProvider';
 import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { readToolOutputScreenSetting } from '../runtime/toolOutputScreenSettings';
 import { isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
@@ -40,12 +38,53 @@ type ToolOutputScreenCapabilityData = NonNullable<CapabilitiesData['tool_output_
 type MemoryEmbeddingsCapabilityData = z.infer<typeof MemoryEmbeddingsCapabilitySchema>;
 
 /**
- * Why skills are unavailable, keyed off the sandbox build status.
- * `pending` is transient (retry); everything else (no provider / failed / unknown) reads as not configured.
+ * What a person who does not run the server reads when the sandbox is off for a reason only the server's admin
+ * can fix. A hosted provider's own detail can name its internals, so it goes to admins only.
  */
-function skillDisabledReason(status: SandboxBuildStatus | undefined): string {
+export const SANDBOX_UNAVAILABLE_FOR_MEMBER =
+  'The sandbox is not working on this server right now. Ask the person who runs Aman to check it.';
+
+/**
+ * The reason a person is shown for a failed sandbox. The slot backend's reasons are written for people: a full
+ * sandbox tells anyone to delete old chats, which they can do, while "not set up yet" needs the admin. A hosted
+ * provider's stored reason is its raw build error, so only an admin sees it.
+ */
+function personFacingSandboxReason({
+  reason,
+  isAdmin,
+  backend,
+}: {
+  reason: string | null | undefined;
+  isAdmin: boolean;
+  backend: 'slots' | 'provider';
+}): string | null | undefined {
+  if (reason == null || reason === '' || isAdmin) {
+    return reason;
+  }
+  if (backend === 'slots' && reason !== SLOT_NOT_READY_MESSAGE) {
+    return reason;
+  }
+  return SANDBOX_UNAVAILABLE_FOR_MEMBER;
+}
+
+/**
+ * Why skills are unavailable, keyed off the sandbox build status.
+ * `pending` is transient (retry). A failed build that reported a reason carries that reason,
+ * so a person learns what is actually wrong; a failure with no reason, no provider, or an
+ * unknown status reads as not configured.
+ */
+function skillDisabledReason({
+  status,
+  reason,
+}: {
+  status: SandboxBuildStatus | undefined;
+  reason: string | undefined;
+}): string {
   if (status === 'pending') {
     return 'Skills run in a sandbox whose image is still being prepared — retry shortly.';
+  }
+  if (status === 'failed' && reason !== undefined) {
+    return reason;
   }
   return 'Skills run in a sandbox, which is not configured.';
 }
@@ -85,7 +124,6 @@ function sandboxIsolationCapability(): SandboxIsolationCapability {
  * `MEMORY_SCREEN_AUTH_TOKEN`. `threshold` is omitted when the screen is off.
  */
 async function memoryScreenCapability(deps: {
-  mcpServerStore: IMcpServerStore;
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
 }): Promise<MemoryScreenCapabilityData> {
@@ -96,15 +134,7 @@ async function memoryScreenCapability(deps: {
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
-    if (stored.overridden) {
-      settingEnabled = stored.enabled;
-    } else {
-      const settings = await findMemoryProviderSettings({
-        mcpServerStore: deps.mcpServerStore,
-        tenantId: TENANT_ID,
-      });
-      settingEnabled = settings?.screen_enabled ?? configuration.MEMORY_SCREEN_ENABLED;
-    }
+    settingEnabled = stored.enabled;
   } catch (error) {
     deps.logger.warn(
       'Recall screen setting read failed; reporting the recall screen off',
@@ -166,7 +196,6 @@ async function toolOutputScreenCapability(deps: {
 /** The resolved `MEMORY_*` defaults, straight off configuration; no I/O, no credentials. */
 function memoryDefaultsCapability(isAdmin: boolean): MemoryDefaultsCapability {
   return {
-    backend: configuration.MEMORY_BACKEND,
     // The resolved Markdown directory is a host filesystem path: disclose it only to
     // admins. Non-admin authenticated users can read capabilities; they get the rest
     // of the memory status without the path.
@@ -175,15 +204,7 @@ function memoryDefaultsCapability(isAdmin: boolean): MemoryDefaultsCapability {
     recall_query_window: configuration.MEMORY_RECALL_QUERY_WINDOW,
     recall_min_score: configuration.MEMORY_RECALL_MIN_SCORE,
     recall_max_items: configuration.MEMORY_RECALL_MAX_ITEMS,
-    recall_max_entities: configuration.MEMORY_RECALL_MAX_ENTITIES,
     prerecall_gate_enabled: configuration.MEMORY_PRERECALL_GATE_ENABLED,
-    curated_enabled: configuration.MEMORY_CURATED_ENABLED,
-    curated_max_models: configuration.MEMORY_CURATED_MAX_MODELS,
-    curated_max_tokens: configuration.MEMORY_CURATED_MAX_TOKENS,
-    reflect_enabled: configuration.MEMORY_REFLECT_ENABLED,
-    reflect_budget: configuration.MEMORY_REFLECT_BUDGET,
-    reflect_max_tokens: configuration.MEMORY_REFLECT_MAX_TOKENS,
-    reflect_timeout_ms: configuration.MEMORY_REFLECT_TIMEOUT_MS,
   };
 }
 
@@ -195,7 +216,7 @@ function memoryDefaultsCapability(isAdmin: boolean): MemoryDefaultsCapability {
  * counts; it never carries memory text.
  */
 function memoryEmbeddingsCapability(tenantId: string): MemoryEmbeddingsCapabilityData {
-  if (!configuration.MEMORY_EMBEDDINGS_ENABLED || configuration.MEMORY_BACKEND !== 'markdown') {
+  if (!configuration.MEMORY_EMBEDDINGS_ENABLED) {
     return MemoryEmbeddingsCapabilitySchema.parse({
       enabled: false,
       state: 'unavailable',
@@ -229,7 +250,6 @@ export function toBuildIdentity({ version, buildRef }: { version: string; buildR
 
 export interface ComputeCapabilitiesDataDeps<TTransaction> {
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
-  mcpServerStore: IMcpServerStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   logger: Logger;
   /** Whether the requesting identity is an admin (settings capability gate). */
@@ -268,36 +288,56 @@ export async function readServerSandboxAvailable({
   }
 }
 
+/** The wire name for the running sign-in mode. */
+function signInModeName(): 'local' | 'oidc' | 'standalone' | 'truefoundry' {
+  switch (getTrueForgeAuthMode(configuration)) {
+    case TrueForgeAuthMode.Local:
+      return 'local';
+    case TrueForgeAuthMode.Oidc:
+      return 'oidc';
+    case TrueForgeAuthMode.TrueFoundry:
+      return 'truefoundry';
+    case TrueForgeAuthMode.Standalone:
+      return 'standalone';
+  }
+}
+
 /**
- * Maps a resolved sandbox build status plus a local (zero-egress) read of the memory-provider
- * settings to the capability flags. The memory-provider read is a local DB read only, so this
- * stays safe on both the capabilities route and the zero-egress bug-report config_flags path.
+ * Maps a resolved sandbox build status plus the stored recall screen setting to the capability
+ * flags. Both are local reads, so this stays safe on the zero-egress bug-report path too.
  */
 async function capabilitiesFromSandboxStatus({
   status,
+  reason,
   isAdmin,
   tenantId,
-  mcpServerStore,
   globalSettingsStore,
   logger,
 }: {
   status: SandboxBuildStatus | undefined;
+  /** The detail for a failed build that this caller may read; see personFacingSandboxReason. */
+  reason: string | null | undefined;
   isAdmin: boolean;
   tenantId: string;
-  mcpServerStore: IMcpServerStore;
   globalSettingsStore: IGlobalSettingsStore;
   logger: Logger;
 }): Promise<CapabilitiesData> {
   const sandboxEnabled = sandboxEnabledFromBuildStatus(status);
+  const failureReason = status === 'failed' && reason != null && reason !== '' ? reason : undefined;
   return {
-    sandbox: { enabled: sandboxEnabled },
+    sandbox: sandboxEnabled
+      ? { enabled: true }
+      : failureReason === undefined
+        ? { enabled: false }
+        : { enabled: false, reason: failureReason },
     // Skills run wherever the sandbox runs: on the slots backend the host copies the skill
     // files in and approved sites go through the skill network gateway.
-    skill: sandboxEnabled ? { enabled: true } : { enabled: false, reason: skillDisabledReason(status) },
+    skill: sandboxEnabled
+      ? { enabled: true }
+      : { enabled: false, reason: skillDisabledReason({ status, reason: failureReason }) },
     settings: { enabled: isAdmin },
     voice: { enabled: isVoiceAvailable() },
     memory_screen: await memoryScreenCapability({
-      mcpServerStore,
       globalSettingsStore,
       logger,
     }),
@@ -305,6 +345,7 @@ async function capabilitiesFromSandboxStatus({
     memory_defaults: memoryDefaultsCapability(isAdmin),
     memory_embeddings: memoryEmbeddingsCapability(tenantId),
     sandbox_isolation: sandboxIsolationCapability(),
+    sign_in: { mode: signInModeName() },
     build: toBuildIdentity({ version: PACKAGE_VERSION, buildRef: configuration.BUILD_REF }),
   };
 }
@@ -321,13 +362,16 @@ export async function computeCapabilitiesData<TTransaction>(
   deps: ComputeCapabilitiesDataDeps<TTransaction>,
 ): Promise<CapabilitiesData> {
   let status: SandboxBuildStatus | undefined;
+  let reason: string | null | undefined;
   if (slotsBackendEnabled()) {
-    status = (await slotSandboxBuildStatus({ logger: deps.logger })).status;
+    const build = await slotSandboxBuildStatus({ logger: deps.logger });
+    status = build.status;
+    reason = personFacingSandboxReason({ reason: build.reason, isAdmin: deps.isAdmin, backend: 'slots' });
     return capabilitiesFromSandboxStatus({
       status,
+      reason,
       isAdmin: deps.isAdmin,
       tenantId: deps.tenantId ?? TENANT_ID,
-      mcpServerStore: deps.mcpServerStore,
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
@@ -339,14 +383,19 @@ export async function computeCapabilitiesData<TTransaction>(
       logger: deps.logger,
     });
     status = refreshed?.status;
+    reason = personFacingSandboxReason({
+      reason: refreshed?.status_reason,
+      isAdmin: deps.isAdmin,
+      backend: 'provider',
+    });
   } catch (error) {
     deps.logger.warn('Sandbox image status check failed; reporting sandbox disabled', extractErrorLogFields(error));
   }
   return capabilitiesFromSandboxStatus({
     status,
+    reason,
     isAdmin: deps.isAdmin,
     tenantId: deps.tenantId ?? TENANT_ID,
-    mcpServerStore: deps.mcpServerStore,
     globalSettingsStore: deps.globalSettingsStore,
     logger: deps.logger,
   });
@@ -363,13 +412,16 @@ export async function readLocalCapabilitiesData<TTransaction>(
   deps: ComputeCapabilitiesDataDeps<TTransaction>,
 ): Promise<CapabilitiesData> {
   let status: SandboxBuildStatus | undefined;
+  let reason: string | null | undefined;
   if (slotsBackendEnabled()) {
-    status = (await slotSandboxBuildStatus({ logger: deps.logger })).status;
+    const build = await slotSandboxBuildStatus({ logger: deps.logger });
+    status = build.status;
+    reason = personFacingSandboxReason({ reason: build.reason, isAdmin: deps.isAdmin, backend: 'slots' });
     return capabilitiesFromSandboxStatus({
       status,
+      reason,
       isAdmin: deps.isAdmin,
       tenantId: deps.tenantId ?? TENANT_ID,
-      mcpServerStore: deps.mcpServerStore,
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
@@ -380,14 +432,19 @@ export async function readLocalCapabilitiesData<TTransaction>(
       tenant_id: deps.tenantId ?? TENANT_ID,
     });
     status = persisted?.status;
+    reason = personFacingSandboxReason({
+      reason: persisted?.status_reason,
+      isAdmin: deps.isAdmin,
+      backend: 'provider',
+    });
   } catch (error) {
     deps.logger.warn('Sandbox status read failed; reporting sandbox disabled', extractErrorLogFields(error));
   }
   return capabilitiesFromSandboxStatus({
     status,
+    reason,
     isAdmin: deps.isAdmin,
     tenantId: deps.tenantId ?? TENANT_ID,
-    mcpServerStore: deps.mcpServerStore,
     globalSettingsStore: deps.globalSettingsStore,
     logger: deps.logger,
   });
@@ -395,7 +452,6 @@ export async function readLocalCapabilitiesData<TTransaction>(
 
 export function createCapabilitiesRouter<TTransaction>(deps: {
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
-  mcpServerStore: IMcpServerStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
@@ -406,7 +462,6 @@ export function createCapabilitiesRouter<TTransaction>(deps: {
     const requestContext = deps.resolveRequestContext(c);
     const data = await computeCapabilitiesData({
       sandboxProviderStore: deps.resolveSandboxProviderStore(c),
-      mcpServerStore: deps.mcpServerStore,
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
       tenantId: requestContext.tenant_id,

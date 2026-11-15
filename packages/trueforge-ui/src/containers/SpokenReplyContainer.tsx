@@ -6,22 +6,17 @@ import { useEffect, useRef } from 'react';
 
 import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useSpeakReply } from '../hooks/useSpeakReply.js';
+import { cardHeadline } from '../sentinel/approvalCopy.js';
 import { useOptionalSentinelState, type SentinelState } from '../sentinel/SentinelStateProvider.js';
-import { useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
+import { useReadWholeMessages, useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
 import {
+  answerReadoutText,
   approvalSpeechLine,
   finalAnswerSpeech,
-  limitSpeechWords,
   pendingApprovalCallIds,
   type SpeechContentPart,
 } from '../utils/speechText.js';
-import {
-  disarmSpokenReply,
-  noteUserMessage,
-  setHandsFree,
-  takeSpokenReply,
-  voiceReplyDone,
-} from '../utils/voiceTurn.js';
+import { disarmSpokenReply, noteUserMessage, takeSpokenReply } from '../utils/voiceTurn.js';
 
 type SpeakableMessage = {
   readonly id: string;
@@ -55,7 +50,7 @@ function approvalLine(content: readonly SpeechContentPart[], sentinel: SentinelS
   if (callIds.length === 0) return undefined;
   for (const callId of callIds) {
     const info = sentinel?.approvalFor(callId);
-    if (info !== undefined) return approvalSpeechLine(info.card.plain_what);
+    if (info !== undefined) return approvalSpeechLine(cardHeadline(info.card));
   }
   return approvalSpeechLine('');
 }
@@ -72,6 +67,7 @@ export function SpokenReplyContainer() {
   const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
   const speakReply = useSpeakReply();
   const { enabled } = useSpeakVoiceReplies();
+  const { enabled: readWholeEnabled } = useReadWholeMessages();
   const spokenReply = useSpokenReply();
   const latestUser = lastMessageWithRole(messages, 'user');
   const latestUserId = latestUser?.id;
@@ -86,20 +82,17 @@ export function SpokenReplyContainer() {
   // Bumped whenever a reading must not start, so a voice lookup that answers late reads nothing.
   const readGeneration = useRef(0);
 
-  // Switching chats, or leaving this one, ends a reply in progress, any voice send still waiting,
-  // and a hands-free conversation.
+  // Switching chats ends a reply in progress and any voice send still waiting.
   useEffect(() => {
     disarmSpokenReply();
-    setHandsFree('off');
     replyDue.current = false;
     readGeneration.current += 1;
     spokenReply.stop();
   }, [threadId, spokenReply]);
 
-  // Leaving the chat view ends a reply in progress and a hands-free conversation.
+  // Leaving the chat view ends a reply in progress.
   useEffect(
     () => () => {
-      setHandsFree('off');
       readGeneration.current += 1;
       spokenReply.stop();
     },
@@ -123,7 +116,6 @@ export function SpokenReplyContainer() {
     }
     if (!finished) return;
     replyDue.current = takeSpokenReply(latestUserId);
-    if (!replyDue.current) voiceReplyDone();
   }, [isRunning, threadId, latestUserId]);
 
   useEffect(() => {
@@ -132,12 +124,9 @@ export function SpokenReplyContainer() {
     if (message === undefined || message.status?.type === 'running') return;
     replyDue.current = false;
     // Switching chats ends a run as seen here too; only the chat the voice turn started in is read.
-    if (runThreadId.current !== threadId || !enabled || !spokenReply.canSpeak()) {
-      voiceReplyDone();
-      return;
-    }
+    if (runThreadId.current !== threadId || !enabled || !spokenReply.canSpeak()) return;
     const sentinelLine = approvalLine(message.content, sentinel);
-    const text = sentinelLine ?? limitSpeechWords(finalAnswerSpeech(message.content));
+    const text = sentinelLine ?? answerReadoutText(finalAnswerSpeech(message.content), { readWhole: readWholeEnabled });
     const generation = ++readGeneration.current;
     void speakReply({
       text,
@@ -145,8 +134,8 @@ export function SpokenReplyContainer() {
       sessionId,
       turnId: turnIdOf(message),
       stillWanted: () => readGeneration.current === generation,
-    }).then(voiceReplyDone, voiceReplyDone);
-  }, [isRunning, messages, enabled, sentinel, threadId, sessionId, spokenReply, speakReply]);
+    }).catch(() => undefined);
+  }, [isRunning, messages, enabled, readWholeEnabled, sentinel, threadId, sessionId, spokenReply, speakReply]);
 
   return null;
 }

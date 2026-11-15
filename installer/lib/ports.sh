@@ -75,9 +75,30 @@ port_reserved() {
   return 1
 }
 
-# pick_port START "reserved ports": first free port at or above START that no instance owns.
+# The ports Tailscale serve or funnel is set up for on this computer, one per line. Tailscale answers on them at this
+# computer's Tailscale address, and while another program holds one of them it keeps trying in the background, so it
+# takes the port the moment that program stops. An instance published there would lose its port at the next restart.
+tailscale_serve_ports() {
+  local out
+  command -v tailscale >/dev/null 2>&1 || return 0
+  if command -v run_bounded >/dev/null 2>&1; then
+    out=$(run_bounded 3 tailscale serve status --json 2>/dev/null || true)
+  else
+    out=$(tailscale serve status --json 2>/dev/null || true)
+  fi
+  printf '%s' "$out" | tr -d ' \t\r\n' | grep -o '"TCP":{\("[0-9]*":{[^{}]*},\{0,1\}\)*}' | grep -o '"[0-9]*":' | tr -d '":' | sort -un || true
+}
+
+# True when Tailscale serve or funnel on this computer is set up for the port.
+tailscale_serves_port() { # port
+  tailscale_serve_ports | grep -qx "$1"
+}
+
+# pick_port START "reserved ports": first free port at or above START that no instance owns and Tailscale serve does
+# not use.
 pick_port() {
-  local start=$1 reserved=$2 port limit
+  local start=$1 reserved port limit
+  reserved="$2 $(tailscale_serve_ports | tr '\n' ' ')"
   port=$start
   limit=$((start + 300))
   while [ "$port" -lt "$limit" ] && [ "$port" -le 65535 ]; do
@@ -96,6 +117,9 @@ check_port_usable() {
   valid_port "$1" || die "$3 must be a number between 1024 and 65535"
   if port_reserved "$1" "$2"; then
     die "$3 $1 is already used by another instance or by Aman itself"
+  fi
+  if tailscale_serves_port "$1"; then
+    die "$3 $1 is used by Tailscale serve on this computer (see: tailscale serve status). Turn that entry off, or choose another port with $3, for example $3 $(pick_port $(($1 + 1)) "$2" || echo 8800)."
   fi
   if port_in_use "$1"; then
     holder=$(port_holder "$1")

@@ -8,6 +8,8 @@ import type * as TrueForge from "../../../../index.js";
  */
 export interface UpdateSessionRequest {
     agent?: TrueForge.SessionAgentSpecBody;
+    /** Set only when a chat is created. A value that differs from the chat is refused. */
+    isIncognito?: boolean;
     metadata?: TrueForge.SessionMetadata;
     /** New chat title. Trimmed; must be non-empty after trimming. */
     title?: string;

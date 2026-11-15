@@ -14,7 +14,7 @@ export interface RevokeServerToolGrantsInput {
 }
 
 /**
- * Durable "Always allow this tool" grants: one row per user, connector, and tool. The Sentinel
+ * Durable "Always allow everywhere" grants: one row per user, connector, and tool. The Sentinel
  * classifier reads them through the core `ToolGrantStore` half of this contract.
  */
 export interface IMcpToolGrantStore<TTransaction = never> extends ToolGrantStore {

@@ -44,6 +44,10 @@ export const CreateSessionRequestSchema = z
   .object({
     agent: CreateSessionAgentSchema,
     metadata: SessionMetadataSchema.optional(),
+    is_incognito: z
+      .boolean()
+      .optional()
+      .describe('True starts a private chat: nothing from it is remembered, and it is deleted when closed.'),
   })
   .strict()
   .openapi('CreateSessionRequest');
@@ -70,6 +74,10 @@ export const UpdateSessionRequestSchema = z
       .max(200)
       .optional()
       .describe('New chat title. Trimmed; must be non-empty after trimming.'),
+    is_incognito: z
+      .boolean()
+      .optional()
+      .describe('Set only when a chat is created. A value that differs from the chat is refused.'),
   })
   .strict()
   .openapi('UpdateSessionRequest');
@@ -119,6 +127,11 @@ export const ListSessionsRequestQuerySchema = z
       .optional()
       .describe('When true, only sessions with no folder are returned.')
       .openapi({ type: 'boolean' }),
+    include_private: z
+      .stringbool()
+      .optional()
+      .describe('When true, your own open private chats are included. They are left out by default.')
+      .openapi({ type: 'boolean' }),
     created_by_me: z
       .stringbool()
       .optional()
@@ -167,6 +180,24 @@ export function parseListSessionsQuery(raw: object): ListSessionsRequestQuery {
     }),
   );
 }
+
+export const HostedModelProviderSchema = z
+  .object({
+    type: z.string().describe('Provider type, for example `anthropic` or `custom`.'),
+    name: z.string().describe('The provider name as configured.'),
+  })
+  .openapi('HostedModelProvider');
+
+export const ChatPrivacySchema = z
+  .object({
+    leaves_machine: z.boolean().describe('True when a model that may answer this chat runs off this machine.'),
+    hosted_providers: z
+      .array(HostedModelProviderSchema)
+      .describe('Providers off this machine that may answer this chat; empty when it stays here.'),
+  })
+  .openapi('ChatPrivacy');
+
+export const GetChatPrivacyResponseSchema = z.object({ data: ChatPrivacySchema }).openapi('GetChatPrivacyResponse');
 
 export const GetSessionResponseSchema = z
   .object({

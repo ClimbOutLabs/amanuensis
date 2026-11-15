@@ -3,6 +3,7 @@ import {
   type ServerVoiceApi,
   type ServerVoiceRefusalReason,
   type VoiceAvailability,
+  type VoiceConnection,
   type VoiceInputApi,
   type VoiceTranscription,
 } from '@truefoundry/trueforge-ui';
@@ -65,6 +66,10 @@ function installRouteChangeDispatch(): void {
   window.addEventListener('hashchange', dispatch);
 }
 
+function failedWithStatus(status: number): string {
+  return `The voice request failed with status ${String(status)}. Reload the page, then try again.`;
+}
+
 async function readError(response: Response): Promise<Error> {
   try {
     const body: unknown = await response.json();
@@ -78,9 +83,25 @@ async function readError(response: Response): Promise<Error> {
       return new Error(detail.message);
     }
   } catch (error) {
-    return new Error(`The voice request failed with status ${String(response.status)}.`, { cause: error });
+    return new Error(failedWithStatus(response.status), { cause: error });
   }
-  return new Error(`The voice request failed with status ${String(response.status)}.`);
+  return new Error(failedWithStatus(response.status));
+}
+
+/** Reads the voice line's address from the connect answer: `{ data: { ticket, protocol, path } }`. */
+function parseConnection(value: unknown): VoiceConnection {
+  const data: unknown = isRecord(value) && 'data' in value ? value.data : undefined;
+  if (
+    !isRecord(data) ||
+    typeof data.ticket !== 'string' ||
+    typeof data.protocol !== 'string' ||
+    typeof data.path !== 'string'
+  ) {
+    throw new Error('The voice connection answer was invalid. Reload the page, then try again.');
+  }
+  const url = new URL(apiPath(data.path), window.location.href);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return { url: url.toString(), protocols: [data.protocol, `ticket.${data.ticket}`] };
 }
 
 /** Accepts the `{ data: transcription }` envelope or the bare transcription object. */
@@ -247,6 +268,22 @@ export function createVoiceInputApi(fetcher: typeof fetch, options: CreateVoiceI
         clearTimeout(timeout);
         signal?.removeEventListener('abort', forwardAbort);
       }
+    },
+
+    async connect({ sessionId, signal }: { sessionId: string; signal?: AbortSignal }): Promise<VoiceConnection> {
+      const response = await fetcher(apiPath('/api/v1/voice/connect'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      return parseConnection(await response.json());
     },
   };
 }

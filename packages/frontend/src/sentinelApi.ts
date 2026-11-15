@@ -104,13 +104,19 @@ export function createSentinelApi({ fetcher, listSessionEvents }: SentinelApiDep
       return parseAuditEntries(await response.json());
     },
 
-    async listUserAuditEntries({ limit = 50, pageToken, outcome }) {
+    async listUserAuditEntries({ limit = 50, pageToken, outcome, from, to }) {
       const query = new URLSearchParams({ limit: String(limit) });
       if (pageToken !== undefined) {
         query.set('page_token', pageToken);
       }
       if (outcome !== undefined) {
         query.set('outcome', outcome);
+      }
+      if (from !== undefined) {
+        query.set('from', from);
+      }
+      if (to !== undefined) {
+        query.set('to', to);
       }
       const response = await fetcher(`${USER_AUDIT_LOG_URL}?${query.toString()}`);
       if (!response.ok) {

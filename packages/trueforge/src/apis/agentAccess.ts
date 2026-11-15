@@ -3,10 +3,11 @@
  * and schedule handlers. Lives in the API layer because stores must stay free
  * of request identity.
  */
-import type { TokenPagination } from '@truefoundry/trueforge-core/agent-session';
+import type { SessionRecord, TokenPagination } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentAction, Authorizer } from '../auth/authorizer';
 import type { RequestContext } from '../auth/identity';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import { sessionKeepsNothing } from '../runtime/privateChat';
 
 /** The agent only when the caller may act on it, so callers answer 404 for missing and forbidden alike. */
 export async function agentIfAccessible(input: {
@@ -134,4 +135,27 @@ export async function canReadAgentBoundResource<TTransaction>(input: {
   }
   const managedAgentIds = await resolveManagedAgentIds({ store, context, authorizer });
   return managedAgentIds.includes(agent_id);
+}
+
+/**
+ * Who may read a chat: its creator, or a manager of its named agent. A private chat is its
+ * creator's alone.
+ */
+export async function canReadSession<TTransaction>(input: {
+  store: IAgentStore<TTransaction>;
+  context: RequestContext;
+  authorizer: Authorizer;
+  record: Pick<SessionRecord, 'agent' | 'created_by_subject' | 'is_incognito'>;
+}): Promise<boolean> {
+  const { record } = input;
+  if (sessionKeepsNothing({ session: record })) {
+    return record.created_by_subject.subject_id === input.context.subject.id;
+  }
+  return canReadAgentBoundResource({
+    store: input.store,
+    context: input.context,
+    authorizer: input.authorizer,
+    agent_id: record.agent.type === 'reference' ? record.agent.id : undefined,
+    created_by_subject_id: record.created_by_subject.subject_id,
+  });
 }

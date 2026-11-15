@@ -13,6 +13,7 @@ import * as path from 'path';
 import { Writable } from 'stream';
 import winston from 'winston';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 import { createMemoryClient } from '../../../../src/runtime/memory/createMemoryClient';
@@ -36,10 +37,11 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 
 import type { ILLM } from '@truefoundry/trueforge-core/core';
 import { type IModelProviderStore } from '../../../../src/db/modelProviderStore';
-import { HindsightClient, type RetainOutcome } from '../../../../src/runtime/memory/hindsightClient';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
+import { type RetainOutcome } from '../../../../src/runtime/memory/memoryClient';
 import { submitRetain, submitRetainWithVerification } from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
+import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 const mockSummarize = jest.mocked(summarizeTurnContent);
 
@@ -50,26 +52,23 @@ function makeLogger() {
 /** Minimal fake; the mocked summarizeTurnContent never dereferences the store. */
 function fakeModelProviderStore(): IModelProviderStore {
   return {
+    managedElsewhere: false,
     listProviders: jest.fn(),
     getProvider: jest.fn(),
     getProviderForUpdate: jest.fn(),
     createProvider: jest.fn(),
     upsertProvider: jest.fn(),
+    recordProviderCheck: jest.fn(async () => undefined),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
   };
 }
 
 function retainingClient(): {
-  client: HindsightClient;
-  retain: jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['retain']>>;
+  client: QuietMemoryClient;
+  retain: jest.SpyInstance<Promise<RetainOutcome>, Parameters<QuietMemoryClient['retain']>>;
 } {
-  const client = new HindsightClient({
-    apiBase: 'https://hindsight.test.example',
-    bank: 'aman',
-    headers: {},
-    fetchImpl: () => Promise.reject(new Error('retain tests must not reach the network')),
-  });
+  const client = new QuietMemoryClient();
   return { client, retain: jest.spyOn(client, 'retain') };
 }
 
@@ -79,6 +78,7 @@ function summarizeContext() {
     modelProviderStore: fakeModelProviderStore(),
     summarizationModelFqn: 'openai/gpt-4o',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }
@@ -87,6 +87,7 @@ const TURN = {
   sessionId: 's1',
   turnId: 't1',
   completedAt: '2026-09-19T12:00:00.000Z',
+  origin: 'user_stated' as const,
 };
 
 describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
@@ -103,6 +104,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
@@ -135,6 +137,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'My friend Harry has my book. I need the car back tomorrow.',
@@ -155,6 +158,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     mockSummarize.mockResolvedValue({ status: 'nothing_to_keep' });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'Dog',
@@ -171,6 +175,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'empty-exchange' });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: '',
@@ -195,6 +200,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     mockSummarize.mockResolvedValue(result);
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'My friend Harry has my book and I want it back by Friday.',
@@ -211,6 +217,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     mockSummarize.mockRejectedValue(new Error('should be caught inside'));
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'yes',
@@ -222,11 +229,12 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     expect(retain).not.toHaveBeenCalled();
   });
 
-  it('does not summarize when no summarize context is provided (the exchange is kept for the backend)', async () => {
+  it('does not summarize when no summarize context is provided (the turn is kept in full)', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
 
     await submitRetain({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'hi',
@@ -235,13 +243,38 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     });
 
     expect(mockSummarize).not.toHaveBeenCalled();
-    expect(retain.mock.calls[0]?.[0]?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+    const items = retain.mock.calls[0]?.[0]?.items ?? [];
+    expect(items[0]?.content).toBe('User: hi');
+    expect(items[1]?.content).toContain('reply, ');
+    expect(items[1]?.content).toContain(': hello');
+    expect(items).toHaveLength(2);
   });
 });
 
 describe('submitRetainWithVerification with MEMORY_SUMMARIZE=true', () => {
   beforeEach(() => {
     mockSummarize.mockReset();
+  });
+
+  it('writes and summarizes nothing for a private chat', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+    mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The person keeps a synthetic diary.'] });
+    const privateTurn = {
+      session: { is_incognito: true },
+      ...TURN,
+      client,
+      userText: 'Please remember that I keep a synthetic diary.',
+      assistantText: 'Got it.',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    };
+
+    expect(await submitRetainWithVerification(privateTurn)).toBe(false);
+    await submitRetain(privateTurn);
+
+    expect(mockSummarize).not.toHaveBeenCalled();
+    expect(retain).not.toHaveBeenCalled();
   });
 
   it('invokes the summarizer exactly once across submission and verification resubmission', async () => {
@@ -255,6 +288,7 @@ describe('submitRetainWithVerification with MEMORY_SUMMARIZE=true', () => {
     });
 
     await submitRetainWithVerification({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
@@ -280,6 +314,7 @@ describe('submitRetainWithVerification with MEMORY_SUMMARIZE=true', () => {
 
     await expect(
       submitRetainWithVerification({
+        session: { is_incognito: false },
         ...TURN,
         client,
         userText: 'Dog',
@@ -331,7 +366,12 @@ describe('summarization observability', () => {
     mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The person has a cactus named Gerald.'] });
     const { logger, lines } = capturingLogger();
 
-    await submitRetain({ ...baseSubmit(logger), client, summarize: summarizeContext() });
+    await submitRetain({
+      session: { is_incognito: false },
+      ...baseSubmit(logger),
+      client,
+      summarize: summarizeContext(),
+    });
 
     expect(lines.some(line => line.includes('Turn summarized'))).toBe(true);
   });
@@ -342,7 +382,12 @@ describe('summarization observability', () => {
     mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'no-model-configured' });
     const { logger, lines } = capturingLogger();
 
-    await submitRetain({ ...baseSubmit(logger), client, summarize: summarizeContext() });
+    await submitRetain({
+      session: { is_incognito: false },
+      ...baseSubmit(logger),
+      client,
+      summarize: summarizeContext(),
+    });
 
     expect(lines.some(line => line.includes('Memory summarization skipped'))).toBe(true);
     expect(lines.some(line => line.includes('no-model-configured'))).toBe(true);
@@ -354,7 +399,12 @@ describe('summarization observability', () => {
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'provider down', fallback: 'model_failed' });
     const { logger, lines } = capturingLogger();
 
-    await submitRetain({ ...baseSubmit(logger), client, summarize: summarizeContext() });
+    await submitRetain({
+      session: { is_incognito: false },
+      ...baseSubmit(logger),
+      client,
+      summarize: summarizeContext(),
+    });
 
     expect(lines.some(line => line.includes('Memory summarization failed'))).toBe(true);
   });
@@ -364,7 +414,7 @@ describe('summarization observability', () => {
     retain.mockResolvedValue({ ok: true });
     const { logger, lines } = capturingLogger();
 
-    await submitRetain({ ...baseSubmit(logger), client });
+    await submitRetain({ session: { is_incognito: false }, ...baseSubmit(logger), client });
 
     expect(mockSummarize).not.toHaveBeenCalled();
     expect(lines.some(line => line.includes('context not provided'))).toBe(true);
@@ -377,16 +427,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
   });
 
   function markdownClient(dir: string): MemoryClient {
-    const client = createMemoryClient({
-      backend: 'markdown',
-      markdownDir: dir,
-      namespace: 'tenant-1',
-      hindsight: undefined,
-    });
-    if (client === undefined) {
-      throw new Error('expected a markdown memory client');
-    }
-    return client;
+    return createMemoryClient({ markdownDir: dir, namespace: 'tenant-1' });
   }
 
   it('stores a clean fact entry in the Markdown file and recalls it in a fresh context', async () => {
@@ -397,6 +438,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-e2e-'));
     try {
       await submitRetainWithVerification({
+        session: { is_incognito: false },
         ...TURN,
         client: markdownClient(dir),
         userText: 'Please remember that my houseplant is a cactus named Gerald.',
@@ -412,7 +454,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
       const content = fs.readFileSync(path.join(memoryDir, files[0] ?? ''), 'utf8');
       // The entry format recall relies on: heading with the time, the fact text, a hidden chat id.
       expect(content).toBe(
-        '## 2026-09-21T12:00:00.000Z\n\nThe person has a houseplant, a cactus named Gerald.\n\n<!-- session_id: s1 -->\n\n',
+        '## 2026-09-21T12:00:00.000Z\n\nThe person has a houseplant, a cactus named Gerald.\n\n<!-- session_id: s1 -->\n\n> From you\n\n',
       );
       expect(content).not.toContain('Turn summary');
       expect(content).not.toContain('Chat title');
@@ -421,8 +463,6 @@ describe('markdown round trip (synthetic end-to-end)', () => {
       const recallOutcome = await markdownClient(dir).recall({
         query: 'What is my houseplant named?',
         maxTokens: 2000,
-        queryTimestamp: '2026-09-21T12:01:00.000Z',
-        entityTokens: 0,
         timeoutMs: 5000,
       });
       if (!recallOutcome.ok) {
@@ -442,6 +482,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-nothing-'));
     try {
       await submitRetainWithVerification({
+        session: { is_incognito: false },
         ...TURN,
         client: markdownClient(dir),
         userText: 'Dog',
@@ -460,6 +501,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'summarize-failed-'));
     try {
       await submitRetainWithVerification({
+        session: { is_incognito: false },
         ...TURN,
         client: markdownClient(dir),
         userText: 'Please remember that my houseplant is a cactus named Gerald.',
@@ -519,16 +561,9 @@ describe('a summary model that reasons until it hits the length limit', () => {
   }
 
   async function retainTurn(dir: string): Promise<void> {
-    const client = createMemoryClient({
-      backend: 'markdown',
-      markdownDir: dir,
-      namespace: 'tenant-1',
-      hindsight: undefined,
-    });
-    if (client === undefined) {
-      throw new Error('expected a markdown memory client');
-    }
+    const client = createMemoryClient({ markdownDir: dir, namespace: 'tenant-1' });
     await submitRetainWithVerification({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'Please remember that my houseplant is a cactus named Gerald.',
@@ -572,7 +607,8 @@ describe('a summary model that reasons until it hits the length limit', () => {
     try {
       await retainTurn(dir);
 
-      expect(caps).toHaveLength(2);
+      // The model may already be known to need more room, so only the cap it ended on is checked.
+      expect(caps.at(-1)).toBeGreaterThan(FIRST_CAP);
       expect(storedLogs(dir)).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -621,6 +657,7 @@ describe('turn outcome log at info', () => {
   function submitFor(params: { client: MemoryClient; logger: winston.Logger; interactive: boolean }) {
     return {
       ...TURN,
+      session: { is_incognito: false },
       client: params.client,
       userText,
       assistantText,
@@ -674,6 +711,7 @@ describe('turn outcome log at info', () => {
       expect.objectContaining({
         message: 'Turn memory not saved: it held nothing worth keeping',
         reason: 'nothing_to_keep',
+        seconds: expect.any(Number),
         personaName: 'shared',
       }),
     ]);
@@ -692,7 +730,7 @@ describe('turn outcome log at info', () => {
     expect(infoEntries(lines).map(entry => entry['reason'])).toEqual(['no_summary_model']);
   });
 
-  it('logs one info line when the Hindsight backend is given only an ability note', async () => {
+  it('logs one info line when a memory client is given only an ability note', async () => {
     const { client, retain } = retainingClient();
     mockSummarize.mockResolvedValue({ status: 'summarized', facts: ["I can't read email right now."] });
     const { logger, lines } = captureLogger();
@@ -734,7 +772,7 @@ describe('turn outcome log at info', () => {
     }
   });
 
-  it('keeps a normal summarized turn silent at info', async () => {
+  it('logs how long a kept summary took, without its words', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue({ status: 'summarized', facts: ['The person has a cactus named Gerald.'] });
@@ -742,7 +780,17 @@ describe('turn outcome log at info', () => {
 
     await submitRetain(submitFor({ client, logger, interactive: true }));
 
-    expect(infoEntries(lines)).toHaveLength(0);
+    expect(infoEntries(lines)).toEqual([
+      expect.objectContaining({
+        message: 'Turn memory saved: the summary was kept',
+        sessionId: 's1',
+        turnId: 't1',
+        personaName: 'shared',
+        factCount: 1,
+        seconds: expect.any(Number),
+      }),
+    ]);
+    expect(lines.join('\n')).not.toContain('Gerald');
   });
 
   it('logs nothing at info for a scheduled turn, even when the summary fails', async () => {

@@ -39,6 +39,19 @@ const (
 	guestMaxProcesses = 128
 )
 
+// Home folders of the two kinds of guest, and where a shell command's npm keeps its downloads. npm needs
+// its cache while it installs, and a project's packages are larger than the temporary space, so the
+// cache lives in the chat's workspace.
+const (
+	runCodeHome    = "/scratch"
+	execHome       = "/tmp"
+	execNpmCache   = tree.GuestRoot + "/" + npmCacheDir
+	npmCacheDir    = ".aman/npm-cache"
+	npmCacheIgnore = npmCacheDir + "/.gitignore"
+	// The folder name the sandbox instructions give for a project's Python environment.
+	projectEnvDir = ".venv"
+)
+
 // Termination causes reported for a run.
 const (
 	TermCompleted      = "completed"
@@ -82,7 +95,10 @@ type Server struct {
 	MinFreeBytes int64
 	// TreeDir holds one workspace tree per session, on the slot volume.
 	TreeDir string
-	RootFS  string
+	// SessionsMaxAge bounds how old the sessions listing may be before the trees are walked again;
+	// zero means 30 seconds.
+	SessionsMaxAge time.Duration
+	RootFS         string
 	// OOMKills returns the slot cgroup's cumulative OOM kill count.
 	OOMKills func() int64
 	// MirrorSocketPath is where the package mirror gateway listens inside the control volume;
@@ -94,6 +110,7 @@ type Server struct {
 
 	sem      chan struct{}
 	sessions sessionLocks
+	stats    sessionsCache
 	once     sync.Once
 	mu       sync.Mutex
 	last     attest.Report
@@ -112,6 +129,7 @@ func (s *Server) Handler() http.Handler {
 	s.init()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.health)
+	mux.HandleFunc("GET /v1/sessions", s.sessionsList)
 	mux.HandleFunc("POST /v1/run_code", s.runCode)
 	mux.HandleFunc("POST /v1/exec", s.exec)
 	mux.HandleFunc("POST /v1/fs_read", s.fsRead)
@@ -239,16 +257,21 @@ func validateArgv(argv []string) error {
 // An empty mirror token gives the offline environment, where every package tool is pinned to a
 // dead end. A token gives the mirror environment: the same list, except the package tools point at
 // this slot's loopback mirror forwarder, under that token and nothing else.
-func guestEnv(mirrorToken string) []string {
+//
+// home must be a folder the guest can write. run_code gets its writable /scratch; a shell command has
+// no /scratch, so it gets a folder in its own temporary space.
+func guestEnv(mirrorToken, home string) []string {
 	env := []string{
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 		"LANG=C.UTF-8",
-		"HOME=/scratch",
+		"HOME=" + home,
 		"USER=root",
 		"LOGNAME=root",
 		"TMPDIR=/tmp",
 		"MPLCONFIGDIR=/tmp/matplotlib",
 		"PYTHONDONTWRITEBYTECODE=1",
+		// Downloads are already kept on the host, so pip keeps no second copy and prints no cache warning.
+		"PIP_NO_CACHE_DIR=1",
 		// npm never phones the audit or funding services; on the mirrors those calls would fail.
 		"npm_config_audit=false",
 		"npm_config_fund=false",
@@ -341,7 +364,7 @@ func (s *Server) runCode(w http.ResponseWriter, r *http.Request) {
 		ID:     fmt.Sprintf("lease-%s-%d", req.RunID[:12], time.Now().UnixNano()),
 		RootFS: s.RootFS,
 		Argv:   req.Argv,
-		Env:    guestEnv(req.PackageMirrorToken),
+		Env:    guestEnv(req.PackageMirrorToken, runCodeHome),
 		Cwd:    "/scratch",
 		UID:    guestUID,
 		GID:    guestGID,

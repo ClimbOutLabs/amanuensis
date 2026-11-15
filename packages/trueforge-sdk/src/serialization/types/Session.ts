@@ -20,8 +20,10 @@ export const Session: core.serialization.ObjectSchema<serializers.Session.Raw, T
         createdBySubject: core.serialization.property("created_by_subject", CreatedBySubject),
         folderId: core.serialization.property("folder_id", core.serialization.string().nullable()),
         id: core.serialization.string(),
+        isIncognito: core.serialization.property("is_incognito", core.serialization.boolean()),
         metadata: SessionMetadata,
         metrics: SessionMetrics,
+        privateExpiresAt: core.serialization.property("private_expires_at", core.serialization.string().nullable()),
         source: SessionSource.nullable(),
         title: core.serialization.string().nullable(),
         updatedAt: core.serialization.property("updated_at", core.serialization.string()),
@@ -35,8 +37,10 @@ export declare namespace Session {
         created_by_subject: CreatedBySubject.Raw;
         folder_id?: string | null;
         id: string;
+        is_incognito: boolean;
         metadata: SessionMetadata.Raw;
         metrics: SessionMetrics.Raw;
+        private_expires_at?: string | null;
         source?: SessionSource.Raw | null;
         title?: string | null;
         updated_at: string;

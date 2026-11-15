@@ -4,6 +4,7 @@ import {
   registerCalendarConnectorForBoot,
   registerCalendarConnectorFromSavedAccountInBackground,
   removeCalendarAccount,
+  saveCalendarAccount,
   syncCalendarConnectorWithAccount,
   type CalendarAccountState,
 } from '../../../src/runtime/calendarAccount';
@@ -69,6 +70,21 @@ const connectedReply = (signIn = 'ok') =>
       username: 'u',
       email: 'u@example.invalid',
       sign_in: signIn,
+      accounts: [
+        { url: 'https://nas.example.invalid/dav/', username: 'u', email: 'u@example.invalid', sign_in: signIn },
+      ],
+      default: 'u@example.invalid',
+    }),
+  );
+/** The flat answer an agent that has not learned the list answer yet gives for one saved account. */
+const flatConnectedReply = (signIn = 'ok') =>
+  new Response(
+    JSON.stringify({
+      connected: true,
+      url: 'https://nas.example.invalid/dav/',
+      username: 'u',
+      email: 'u@example.invalid',
+      sign_in: signIn,
     }),
   );
 const emptyReply = () => new Response(JSON.stringify({ connected: false }));
@@ -103,12 +119,47 @@ describe('the Calendar connector follows the saved account', () => {
     expect(rows.get('Calendar')?.first_party).toBe(true);
   });
 
+  it('reads an agent that still answers with one flat account as a list of one', async () => {
+    const state = await getCalendarAccountState({
+      accountUrl: ACCOUNT_URL,
+      secret: SECRET,
+      logger,
+      fetchImpl: replyingWith([flatConnectedReply()]),
+    });
+    expect(state).toEqual({
+      connected: true,
+      sign_in: 'ok',
+      account: { url: 'https://nas.example.invalid/dav/', username: 'u', email: 'u@example.invalid' },
+      accounts: [
+        {
+          account: { url: 'https://nas.example.invalid/dav/', username: 'u', email: 'u@example.invalid' },
+          sign_in: 'ok',
+        },
+      ],
+      default_key: 'u@example.invalid',
+    });
+  });
+
+  it('registers the connector at boot from an agent that still answers with one flat account', async () => {
+    const { rows, store } = makeStore();
+    await registerCalendarConnectorFromSavedAccountInBackground({
+      ...bootDeps(replyingWith([flatConnectedReply()])),
+      mcpServerStore: store,
+    });
+    expect(rows.get('Calendar')?.manifest).toMatchObject({ type: 'remote', url: MCP_URL });
+    expect(rows.get('Calendar')?.first_party).toBe(true);
+  });
+
   it('leaves the connector unregistered when no account is saved, and drops a stale registration', async () => {
     const { rows, store } = makeStore();
     const state: CalendarAccountState = {
       connected: true,
       sign_in: 'ok',
       account: { url: 'https://a.example.invalid/', username: 'u', email: 'u@example.invalid' },
+      accounts: [
+        { account: { url: 'https://a.example.invalid/', username: 'u', email: 'u@example.invalid' }, sign_in: 'ok' },
+      ],
+      default_key: 'u@example.invalid',
     };
     await syncCalendarConnectorWithAccount({ state, mcpUrl: MCP_URL, mcpServerStore: store, tenant_id: 't1', logger });
     expect(rows.size).toBe(1);
@@ -192,6 +243,77 @@ describe('the Calendar connector follows the saved account', () => {
     expect(failure instanceof Error ? failure.message : '').not.toContain(CANARY);
     expect(failure instanceof Error ? failure.cause : undefined).toBeInstanceOf(Error);
   });
+});
+
+describe('saving a calendar account', () => {
+  it('sends a Google save with the address built from the email address', async () => {
+    const bodies: string[] = [];
+    const fetchImpl = jest.fn(async (_input: string | Request | URL, init?: RequestInit) => {
+      bodies.push(typeof init?.body === 'string' ? init.body : '');
+      return new Response(
+        JSON.stringify({
+          connected: true,
+          url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
+          username: 'person@gmail.com',
+          email: 'person@gmail.com',
+          sign_in: 'ok',
+          accounts: [
+            {
+              url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
+              username: 'person@gmail.com',
+              email: 'person@gmail.com',
+              sign_in: 'ok',
+            },
+          ],
+          default: 'person@gmail.com',
+        }),
+      );
+    });
+    const state = await saveCalendarAccount(
+      { accountUrl: ACCOUNT_URL, secret: SECRET, fetchImpl, logger },
+      {
+        provider_key: 'google',
+        email: 'person@gmail.com',
+        password: 'abcd efgh ijkl mnop',
+        username: undefined,
+        calendar_url: undefined,
+      },
+    );
+    expect(JSON.parse(bodies[0] ?? '{}')).toEqual({
+      url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
+      username: 'person@gmail.com',
+      password: 'abcd efgh ijkl mnop',
+      email: 'person@gmail.com',
+    });
+    expect(state.account).toEqual({
+      url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
+      username: 'person@gmail.com',
+      email: 'person@gmail.com',
+    });
+  });
+
+  it.each(['fastmail', 'other'])(
+    'refuses a Gmail address with the %s provider before asking the agent',
+    async provider => {
+      const fetchImpl = jest.fn();
+      await expect(
+        saveCalendarAccount(
+          { accountUrl: ACCOUNT_URL, secret: SECRET, fetchImpl, logger },
+          {
+            provider_key: provider,
+            email: 'person@gmail.com',
+            password: 'abcd efgh ijkl mnop',
+            username: undefined,
+            calendar_url: undefined,
+          },
+        ),
+      ).rejects.toMatchObject({
+        failure: 'invalid_request',
+        message: 'Gmail calendars use the Google provider. Pick Google and try again. Nothing was saved.',
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('the boot step for the Calendar connector', () => {

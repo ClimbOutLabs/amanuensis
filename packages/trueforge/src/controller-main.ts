@@ -12,10 +12,14 @@
  * each tick until the schema is present. The loops call the server over HTTP(S) at
  * `SERVER_URL` (mutual TLS when `TRUEFORGE_MTLS_ENABLED`), so no Redis peering is wired here.
  */
+import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+
 import configuration, { isPlaceholderTrueForgeApiKey } from './config';
 import { runController } from './controller';
 import { createDb } from './db/postgres/client';
 import { PostgresScheduleStore } from './db/postgres/schedule-store/PostgresScheduleStore';
+import { PostgresSessionStore } from './db/postgres/session-store/PostgresSessionStore';
+import { TelegramStore } from './db/telegramStore';
 import { createControllerLogger } from './logger';
 import { PACKAGE_VERSION } from './packageVersion';
 
@@ -39,6 +43,13 @@ try {
     poolMax: configuration.DATABASE_POOL_MAX,
     statementTimeoutMs: configuration.POSTGRES_STATEMENT_TIMEOUT_MS,
     idleInTransactionSessionTimeoutMs: configuration.POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS,
+    connectionTimeoutMs: configuration.POSTGRES_CONNECT_TIMEOUT_MS,
+    onIdleClientError: error => {
+      logger.error(
+        'A Postgres connection in the pool broke; the next query opens a new one',
+        extractErrorLogFields(error),
+      );
+    },
   });
 
   if (isPlaceholderTrueForgeApiKey(configuration.TRUEFORGE_API_KEY)) {
@@ -54,6 +65,7 @@ try {
     scheduleStore: new PostgresScheduleStore(db),
     withTransaction: callback => db.transaction().execute(callback),
     logger,
+    telegram: { store: new TelegramStore(db), sessionStore: new PostgresSessionStore(db) },
     gracefulTimeoutSeconds: configuration.GRACEFUL_TIMEOUT_SECONDS,
     onStopped: () => db.destroy(),
   });

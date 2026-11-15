@@ -320,6 +320,9 @@ async function createRestoredSession(
     metadata: session.metadata,
     source: session.source,
     custom: null,
+    // Private chats never reach an import (see withoutPrivateChats), so a restored chat is an ordinary one.
+    is_incognito: false,
+    private_expires_at: null,
   });
   context.onSessionCreated?.(session.session_id);
   if (session.folder_id !== null) {

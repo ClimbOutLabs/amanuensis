@@ -71,14 +71,20 @@ type AgentBody = Record<string, unknown>;
 
 const NOT_CONNECTED: AgentBody = { connected: false };
 
-/** A connected agent body for a typed calendar address. */
-const CONNECTED: AgentBody = {
-  connected: true,
-  url: 'https://nas.example.invalid/dav/',
-  username: 'owner@example.invalid',
-  email: 'owner@example.invalid',
-  sign_in: 'ok',
-};
+/** A connected agent body for a typed calendar address, in the list shape the agent answers with. */
+function connectedBody(overrides: AgentBody = {}): AgentBody {
+  const flat: AgentBody = {
+    connected: true,
+    url: 'https://nas.example.invalid/dav/',
+    username: 'owner@example.invalid',
+    email: 'owner@example.invalid',
+    sign_in: 'ok',
+    ...overrides,
+  };
+  const { connected: _connected, sign_in, ...account } = flat;
+  const email = flat['email'];
+  return { ...flat, accounts: [{ ...account, sign_in }], default: typeof email === 'string' ? email : null };
+}
 
 /** A fake MCP store for the connector registration the handlers keep in step; `failing` makes writes throw. */
 function makeFakeStore() {
@@ -174,7 +180,9 @@ describe('the calendar settings endpoints', () => {
     expect(data.available).toBe(true);
     expect(data.state).toBe('not_connected');
     expect(data.email).toBeNull();
+    expect(data.provider_key).toBe('google');
     expect(data.providers.map((provider: { key: string }) => provider.key)).toEqual([
+      'google',
       'fastmail',
       'yahoo',
       'gmx',
@@ -186,14 +194,17 @@ describe('the calendar settings endpoints', () => {
         key: preset.key,
         name: preset.name,
         server_url: preset.server_url,
+        account_url_template: preset.account_url_template,
         help_url: preset.help_url,
         help_hint: preset.help_hint,
+        setup_steps: preset.setup_steps,
       })),
     );
+    expect(data.providers[0]?.setup_steps).toHaveLength(4);
   });
 
   it('reports Connected with the email, and never the password', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, password: CANARY } }]);
+    agent.script([{ status: 200, body: connectedBody({ password: CANARY }) }]);
     const { status, text } = await call({ method: 'GET', path: '/status' });
     expect(status).toBe(200);
     expect(text).not.toContain(CANARY);
@@ -204,13 +215,53 @@ describe('the calendar settings endpoints', () => {
   });
 
   it('works the provider out from the saved address', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, url: 'https://caldav.fastmail.com/dav/' } }]);
+    agent.script([{ status: 200, body: connectedBody({ url: 'https://caldav.fastmail.com/dav/' }) }]);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.provider_key).toBe('fastmail');
   });
 
+  it('reports a saved Google account as the Google provider', async () => {
+    agent.script([
+      {
+        status: 200,
+        body: connectedBody({
+          url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
+          username: 'person@gmail.com',
+          email: 'person@gmail.com',
+        }),
+      },
+    ]);
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.provider_key).toBe('google');
+  });
+
+  it('saves a Google login with the address built from the email address', async () => {
+    agent.script([
+      {
+        status: 200,
+        body: connectedBody({
+          url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
+          username: 'person@gmail.com',
+          email: 'person@gmail.com',
+        }),
+      },
+    ]);
+    const { status } = await call({
+      method: 'POST',
+      path: '/',
+      body: { provider_key: 'google', email: 'person@gmail.com', password: 'abcd efgh ijkl mnop' },
+    });
+    expect(status).toBe(201);
+    expect(JSON.parse(agent.calls[0]?.body ?? '{}')).toEqual({
+      url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
+      username: 'person@gmail.com',
+      password: 'abcd efgh ijkl mnop',
+      email: 'person@gmail.com',
+    });
+  });
+
   it('reports a stopped sign-in in plain words', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, sign_in: 'refused' } }]);
+    agent.script([{ status: 200, body: connectedBody({ sign_in: 'refused' }) }]);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.state).toBe('sign_in_stopped');
   });
@@ -236,7 +287,7 @@ describe('the calendar settings endpoints', () => {
   });
 
   it('saves a Fastmail login with the built-in address, and registers the connector', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, url: 'https://caldav.fastmail.com/dav/' } }]);
+    agent.script([{ status: 200, body: connectedBody({ url: 'https://caldav.fastmail.com/dav/' }) }]);
     const { status, text } = await call({
       method: 'POST',
       path: '/',
@@ -260,7 +311,7 @@ describe('the calendar settings endpoints', () => {
   });
 
   it('uses the GMX address for the email domain, and a typed login name when given', async () => {
-    agent.script([{ status: 200, body: CONNECTED }]);
+    agent.script([{ status: 200, body: connectedBody() }]);
     await call({
       method: 'POST',
       path: '/',
@@ -273,7 +324,7 @@ describe('the calendar settings endpoints', () => {
   });
 
   it('sends a typed address for Other, and only for Other', async () => {
-    agent.script([{ status: 200, body: CONNECTED }]);
+    agent.script([{ status: 200, body: connectedBody() }]);
     const ok = await call({
       method: 'POST',
       path: '/',
@@ -308,7 +359,11 @@ describe('the calendar settings endpoints', () => {
       },
       {
         body: { provider_key: 'fastmail', email: 'person@gmail.com', password: CANARY },
-        says: 'use the Google connector',
+        says: 'Pick Google and try again',
+      },
+      {
+        body: { provider_key: 'other', email: 'person@gmail.com', password: CANARY },
+        says: 'Pick Google and try again',
       },
       { body: { provider_key: 'other', email: EMAIL, password: CANARY }, says: 'Type the calendar address' },
       {
@@ -399,7 +454,7 @@ describe('the calendar settings endpoints', () => {
   });
 
   it('a save answer that echoes the password is dropped by the status parser', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, password: CANARY, debug: CANARY } }]);
+    agent.script([{ status: 200, body: connectedBody({ password: CANARY, debug: CANARY }) }]);
     const { status, text } = await call({
       method: 'POST',
       path: '/',
@@ -412,7 +467,7 @@ describe('the calendar settings endpoints', () => {
 
   it('remove deletes the account and the connector registration', async () => {
     agent.script([
-      { status: 200, body: CONNECTED },
+      { status: 200, body: connectedBody() },
       { status: 200, body: NOT_CONNECTED },
     ]);
     await call({ method: 'POST', path: '/', body: { provider_key: 'fastmail', email: EMAIL, password: CANARY } });
@@ -428,7 +483,7 @@ describe('the calendar settings endpoints', () => {
   it('presents the instance secret to the agent on every call, and nothing else as a credential', async () => {
     agent.script([
       { status: 200, body: NOT_CONNECTED },
-      { status: 200, body: CONNECTED },
+      { status: 200, body: connectedBody() },
       { status: 200, body: NOT_CONNECTED },
     ]);
     await call({ method: 'GET', path: '/status' });
@@ -446,7 +501,7 @@ describe('the calendar settings endpoints', () => {
   });
 
   it('gives the saved address and login back for the form, and never the password', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, username: 'owner-login', password: CANARY } }]);
+    agent.script([{ status: 200, body: connectedBody({ username: 'owner-login', password: CANARY }) }]);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(text).not.toContain(CANARY);
     const data = JSON.parse(text).data;
@@ -456,7 +511,7 @@ describe('the calendar settings endpoints', () => {
   });
 
   it('says not working when the saved account cannot be signed in to right now, and keeps the connector', async () => {
-    agent.script([{ status: 200, body: { ...CONNECTED, sign_in: 'unreachable' } }]);
+    agent.script([{ status: 200, body: connectedBody({ sign_in: 'unreachable' }) }]);
     const { text } = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(text).data.state).toBe('not_working');
     expect(fakeStore.rows.size).toBe(1);
@@ -464,8 +519,8 @@ describe('the calendar settings endpoints', () => {
 
   it('keeps the connector registered when a saved login is refused on a status read, and shows the stopped state', async () => {
     agent.script([
-      { status: 200, body: CONNECTED },
-      { status: 200, body: { ...CONNECTED, sign_in: 'refused' } },
+      { status: 200, body: connectedBody() },
+      { status: 200, body: connectedBody({ sign_in: 'refused' }) },
     ]);
     await call({ method: 'GET', path: '/status' });
     expect(fakeStore.rows.size).toBe(1);
@@ -482,7 +537,7 @@ describe('the calendar settings endpoints', () => {
 
   it('every status read settles the registration from what the agent holds', async () => {
     agent.script([
-      { status: 200, body: CONNECTED },
+      { status: 200, body: connectedBody() },
       { status: 200, body: NOT_CONNECTED },
     ]);
     await call({ method: 'GET', path: '/status' });
@@ -505,7 +560,7 @@ describe('the calendar settings endpoints', () => {
 
   it('a save the connector registration could not follow still answers connected, and the next status read attaches it', async () => {
     fakeStore.control.failing = true;
-    agent.script([{ status: 200, body: CONNECTED }]);
+    agent.script([{ status: 200, body: connectedBody() }]);
     const saved = await call({
       method: 'POST',
       path: '/',
@@ -514,13 +569,13 @@ describe('the calendar settings endpoints', () => {
     expect(saved.status).toBe(201);
     expect(fakeStore.rows.size).toBe(0);
     fakeStore.control.failing = false;
-    agent.script([{ status: 200, body: CONNECTED }]);
+    agent.script([{ status: 200, body: connectedBody() }]);
     await call({ method: 'GET', path: '/status' });
     expect(fakeStore.rows.size).toBe(1);
   });
 
   it('a save that timed out asks the agent what it really holds, and attaches the connector when it saved', async () => {
-    agent.script([{ fails: true }, { status: 200, body: CONNECTED }]);
+    agent.script([{ fails: true }, { status: 200, body: connectedBody() }]);
     const { status, text } = await call({
       method: 'POST',
       path: '/',
@@ -535,7 +590,7 @@ describe('the calendar settings endpoints', () => {
   });
 
   it('a removal that timed out asks the agent again, and detaches the connector when it was removed', async () => {
-    agent.script([{ status: 200, body: CONNECTED }]);
+    agent.script([{ status: 200, body: connectedBody() }]);
     await call({ method: 'GET', path: '/status' });
     expect(fakeStore.rows.size).toBe(1);
     agent.script([{ fails: true }, { status: 200, body: NOT_CONNECTED }]);
@@ -580,7 +635,7 @@ describe('the calendar settings endpoints', () => {
       calendarMcpUrl: undefined,
       calendarAccountUrl: ACCOUNT_URL,
     });
-    agent.script([{ status: 200, body: CONNECTED }]);
+    agent.script([{ status: 200, body: connectedBody() }]);
     const saved = await call({
       method: 'POST',
       path: '/',

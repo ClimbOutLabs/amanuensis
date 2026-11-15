@@ -9,7 +9,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
   && npm cache clean --force
 
 # The account agent and the supervisor that starts the tool server while an account is saved.
-COPY account.mjs signin.mjs agent.mjs entrypoint.mjs ./
+COPY account.mjs signin.mjs agent.mjs entrypoint.mjs mux.mjs ./
 
 # The account folder is made here, owned by the node user, so the volume Compose mounts on it starts
 # out owned by the sidecar and by nobody else. The node user is built into the base image; no root.

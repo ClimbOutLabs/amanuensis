@@ -41,6 +41,10 @@ export interface PersonaContent {
   model_name: string;
   /** Reading voice for this persona's spoken replies; null falls back to the person's own voice choice. */
   voice: string | null;
+  /** Email accounts this persona may use, by address; absent means every connected account. */
+  mail_accounts?: string[] | undefined;
+  /** Calendar accounts this persona may use, by email address; absent means every connected account. */
+  calendar_accounts?: string[] | undefined;
 }
 
 /** The names that invoke a persona; all that name matching and collision checks read. */

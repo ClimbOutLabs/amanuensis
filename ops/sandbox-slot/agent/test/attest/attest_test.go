@@ -380,3 +380,22 @@ func TestDiskModeIsReportedAndOnlyAHardLimitIsCalledHard(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreFreeBytesIsReadFromTheWorkspaceFilesystem(t *testing.T) {
+	w := newWorld(t)
+	c := w.collector()
+	c.Workspace = "/workspace"
+	c.StatfsFree = func(path string) (int64, error) {
+		if path != "/workspace" {
+			t.Errorf("free space read at %q, want the workspace path", path)
+		}
+		return 42 * gib, nil
+	}
+	if r := c.Collect(); r.Facts.StoreFreeBytes != 42*gib {
+		t.Fatalf("store_free_bytes = %d, want %d", r.Facts.StoreFreeBytes, 42*gib)
+	}
+	c.StatfsFree = func(string) (int64, error) { return 0, os.ErrNotExist }
+	if r := c.Collect(); r.Facts.StoreFreeBytes != 0 {
+		t.Fatalf("an unreadable workspace must report 0 free, got %d", r.Facts.StoreFreeBytes)
+	}
+}

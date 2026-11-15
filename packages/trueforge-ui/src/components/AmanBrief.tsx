@@ -9,6 +9,7 @@ import { useOptionalSentinelApiState } from '../sentinel/SentinelApiContext.js';
 import { greetingLine } from './AmanTour.js';
 import {
   briefFooterLine,
+  briefOmittedLine,
   briefWhenLabel,
   buildBriefView,
   summarizeBriefAudit,
@@ -20,6 +21,8 @@ import {
 import { useOptionalPersonalization } from './PersonalizationContext.js';
 import { personDisplayName } from './personDisplayName.js';
 
+/** The most audit entries one read can ask for. */
+const BRIEF_AUDIT_READ = 100;
 /** The fade a done row takes before its Undo shows. */
 const DONE_FADE_MS = 225;
 /** How long Undo stays in a row's place. */
@@ -27,6 +30,8 @@ const UNDO_WINDOW_MS = 5000;
 
 export type AmanBriefProps = {
   brief: MorningBrief;
+  /** Items in the answer that did not fit the brief's shape and were left out. */
+  omittedCount: number;
   /** Identifies this brief for the greeting heading's id. */
   briefId: string;
   /** The chat the brief came from: the audit entries for the trust line, and where done marks are logged. */
@@ -41,7 +46,7 @@ function prefersReducedMotion(): boolean {
 }
 
 /** A plain card with the brief's greeting, digest, sections and trust line. */
-export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
+export function AmanBrief({ brief, omittedCount, briefId, sessionId }: AmanBriefProps) {
   const api = useOptionalSentinelApiState()?.api ?? null;
   const profile = useOptionalPersonalization()?.profile;
   const name = personDisplayName({ profile, signInName: undefined });
@@ -150,7 +155,9 @@ export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
             onUndo={undo}
           />
         ))}
-        {total === 0 ? <p className="text-base text-text-secondary">Nothing needs you this morning.</p> : null}
+        {total === 0 && omittedCount === 0 ? (
+          <p className="text-base text-text-secondary">Nothing needs you this morning.</p>
+        ) : null}
         {view.hiddenCount > 0 || expanded ? (
           <button
             type="button"
@@ -169,6 +176,12 @@ export function AmanBrief({ brief, briefId, sessionId }: AmanBriefProps) {
           </p>
         )}
       </div>
+
+      {omittedCount > 0 ? (
+        <p data-testid="brief-omitted" className="text-sm text-text-secondary">
+          {briefOmittedLine(omittedCount)}
+        </p>
+      ) : null}
 
       <BriefFooter sessionId={sessionId} />
     </div>
@@ -334,9 +347,10 @@ function BriefFooter({ sessionId }: { sessionId: string | undefined }) {
     if (api === null || sessionId === undefined) return;
     let cancelled = false;
     api
-      .listAuditEntries({ sessionId, limit: 200 })
+      .listAuditEntries({ sessionId, limit: BRIEF_AUDIT_READ })
       .then(entries => {
-        if (!cancelled) setSummary(summarizeBriefAudit(entries));
+        // A full read may have left entries out, so no count is shown rather than a partial one.
+        if (!cancelled) setSummary(entries.length < BRIEF_AUDIT_READ ? summarizeBriefAudit(entries) : null);
       })
       .catch(() => {
         if (!cancelled) setSummary(null);

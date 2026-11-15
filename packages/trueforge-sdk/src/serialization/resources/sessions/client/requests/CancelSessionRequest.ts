@@ -7,8 +7,12 @@ import type * as serializers from "../../../../index.js";
 export const CancelSessionRequest: core.serialization.Schema<
     serializers.CancelSessionRequest.Raw,
     TrueForge.CancelSessionRequest
-> = core.serialization.object({});
+> = core.serialization.object({
+    turnId: core.serialization.property("turn_id", core.serialization.string().optional()),
+});
 
 export declare namespace CancelSessionRequest {
-    export type Raw = {};
+    export interface Raw {
+        turn_id?: string | null;
+    }
 }

@@ -13,6 +13,7 @@ const OWNER = { tenant_id: 't1', created_by: 'ada' };
 const EVAL_FIXTURE_DIR = path.resolve(__dirname, '..', '..', '..', 'evals', 'fixtures');
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
+const DRIVE = 'https://www.googleapis.com/auth/drive.file';
 
 function record(overrides: Partial<GoogleConnectionRecord> = {}): GoogleConnectionRecord {
   return {
@@ -96,6 +97,45 @@ describe('googleCapability for mail', () => {
   it('mounts the read tools for a connected user', async () => {
     await store.save(record());
     expect(await toolNames(await mount())).toContain('read_email');
+  });
+
+  it('mounts the Drive tools when Google granted Drive alongside mail', async () => {
+    await store.save(record({ granted_scopes: [READ, DRIVE] }));
+    const names = await toolNames(await mount());
+    expect(names).toEqual(expect.arrayContaining(['list_files', 'read_drive_file', 'create_doc', 'append_rows']));
+  });
+
+  it('mounts the Drive tools on a Drive-only grant, with no mail tools', async () => {
+    await store.save(record({ granted_scopes: [DRIVE] }));
+    const names = await toolNames(await mount());
+    expect(names).toEqual(expect.arrayContaining(['list_files', 'read_drive_file', 'create_doc', 'append_rows']));
+    expect(names).not.toContain('read_email');
+  });
+
+  it('mounts no Drive tools without the Drive grant', async () => {
+    await store.save(record());
+    const names = await toolNames(await mount());
+    expect(names).not.toContain('list_files');
+    expect(names).not.toContain('create_doc');
+  });
+
+  it('mounts no Drive tools in eval mode, which has no Drive fixture', async () => {
+    const capability = await googleCapability({
+      connections: undefined,
+      evalSources: buildEvalSources(EVAL_FIXTURE_DIR),
+      owner: OWNER,
+      tracing: NOOP_AGENT_TRACING,
+      sentinel: createSentinelHostContext({
+        ...OWNER,
+        conversation_id: 'c1',
+        services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      }),
+      attachmentStager: undefined,
+      logger: createLogger({ silent: true }),
+      timeZone: undefined,
+      fetchImpl: () => Promise.reject(new Error('no network in eval mode')),
+    });
+    expect(await toolNames(capability)).not.toContain('list_files');
   });
 
   it('mounts nothing while the login needs reconnecting, so chat stops offering mail', async () => {

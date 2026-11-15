@@ -15,7 +15,7 @@ import type { Logger } from 'winston';
 import { getAllowedOrigins, getPublicBaseUrl, type OIDCConfig } from '../config';
 import { ADDRESS_NOT_LISTED_MESSAGE, OriginNotAllowedError, requestAllowedOrigin } from './allowedOrigins';
 import { buildAuthorizationRequestParams, type IdTokenClaims } from './claims';
-import { ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, setAuthCookie } from './cookies';
+import { cookiesAreSecure, ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, setAuthCookie } from './cookies';
 import { assertEmailAllowed } from './emailAllowlist';
 import { isProxiableIssuer } from './loginProxy';
 import { safeReturnTo } from './safeReturnTo';
@@ -23,6 +23,9 @@ import { safeReturnTo } from './safeReturnTo';
 const CALLBACK_PATH = '/api/v1/auth/callback';
 const OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 const ID_TOKEN_COOKIE_MAX_AGE_SECONDS = 24 * 60 * 60;
+// Where the sign-in cookie travels over plain http, at any of the addresses the instance answers on, it is kept
+// for less time, since nothing protects it on the way.
+const ID_TOKEN_COOKIE_MAX_AGE_PLAIN_HTTP_SECONDS = 12 * 60 * 60;
 
 /** JWKS + claim config used by cookie JWT verification when auth is enabled. */
 export interface OidcVerify {
@@ -249,6 +252,8 @@ export async function exchangeAuthorizationCode(params: {
     context: params.context,
     name: ID_TOKEN_COOKIE,
     value: idToken,
-    maxAgeSeconds: ID_TOKEN_COOKIE_MAX_AGE_SECONDS,
+    maxAgeSeconds: cookiesAreSecure(params.context)
+      ? ID_TOKEN_COOKIE_MAX_AGE_SECONDS
+      : ID_TOKEN_COOKIE_MAX_AGE_PLAIN_HTTP_SECONDS,
   });
 }

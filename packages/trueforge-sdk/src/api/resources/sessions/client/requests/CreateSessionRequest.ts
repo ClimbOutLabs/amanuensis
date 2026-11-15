@@ -12,5 +12,7 @@ import type * as TrueForge from "../../../../index.js";
  */
 export interface CreateSessionRequest {
     agent: TrueForge.CreateSessionAgent;
+    /** True starts a private chat: nothing from it is remembered, and it is deleted when closed. */
+    isIncognito?: boolean;
     metadata?: TrueForge.SessionMetadata;
 }

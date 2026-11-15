@@ -10,17 +10,57 @@ import type { Persona } from '../personas/persona';
 export const CHAT_ASSISTANT_DESCRIPTION = 'Runs the schedules you make in a chat.';
 
 const CHAT_ASSISTANT_NAME_PREFIX = 'assistant-';
-const UNNAMED_ASSISTANT = 'Your assistant';
+/** The name used for an assistant the person has not named. */
+export const UNNAMED_ASSISTANT = 'Your assistant';
+/** The longest name an agent may have, and how many numbered names are tried when one is taken. */
+const AGENT_NAME_MAX = 64;
+const AGENT_NAME_TRIES = 20;
+
+/** The name a person gave their assistant, or the plain default when they gave none. */
+export async function assistantNameFor({
+  personalizationStore,
+  owner,
+}: {
+  personalizationStore: Pick<IPersonalizationStore, 'getProfile'>;
+  owner: { tenant_id: string; created_by: string };
+}): Promise<string> {
+  const profile = await personalizationStore.getProfile({ tenant_id: owner.tenant_id, created_by: owner.created_by });
+  return profile?.assistant_name ?? UNNAMED_ASSISTANT;
+}
 
 /** Who a schedule made in one chat runs as, settled by the host so the model never names it. */
 export interface ChatAssistant {
-  /** The persona or assistant name, for the "runs as" line. */
-  display_name: string;
+  /** The persona or saved agent name for the "runs as" line; null when a new schedule is listed under its own agent. */
+  display_name: string | null;
   persona_id: string | null;
   /** Changes whenever the chat's assistant does, so an approval covers only the one it was shown. */
   approval_key: string;
-  /** The stored agent the schedule binds to. A plain chat's is made on first use, so call it only once approved. */
+  /** The stored agent a reminder binds to. A plain chat's is made on first use. */
   agent: () => Promise<AgentRecord>;
+  /** In a plain chat, how a new schedule gets its own saved agent; null in a chat that runs as a saved agent. */
+  ownAgent: ScheduleAgentMaker | null;
+}
+
+/** What the person has set up that a schedule's own agent may be given, and the check a saved agent must pass. */
+export interface ScheduleAgentChoices {
+  available: () => Promise<{ connectors: string[]; skills: string[] }>;
+  /** Null when the setup can be saved as an agent, else what is wrong with it. */
+  problemWith: (spec: AgentSpec) => Promise<string | null>;
+}
+
+/** Makes the saved agent a schedule from a plain chat runs as: one per schedule, named after it. */
+export interface ScheduleAgentMaker extends ScheduleAgentChoices {
+  /** The chat's own setup, which the new agent starts from. */
+  spec: AgentSpec;
+  /** The schedule's name, or that name with a number when an agent already has it; null when none is free. */
+  freeName: (scheduleName: string) => Promise<string | null>;
+  /** Throws AgentNameConflictError when the name was taken meanwhile. */
+  create: (input: { name: string; spec: AgentSpec; transaction: unknown }) => Promise<AgentRecord>;
+}
+
+/** The description on the saved agent made for one schedule. */
+export function scheduleAgentDescription(scheduleName: string): string {
+  return `Runs your schedule ${scheduleName}.`;
 }
 
 /** What runs the chat: its saved agent, or a plain chat's own setup. */
@@ -106,9 +146,8 @@ export function resolveChatAssistant(input: {
   owner: CreatedBySubject;
   runner: ChatRunner;
   persona: Persona | undefined;
-  /** The name the owner gave their assistant; null when unset. */
-  assistantName: string | null;
   agentStore: Pick<IAgentStore<unknown>, 'getAgent' | 'createAgent'>;
+  scheduleAgentChoices: ScheduleAgentChoices;
 }): ChatAssistant {
   const { runner, persona } = input;
   const persona_id = persona?.id ?? null;
@@ -119,11 +158,12 @@ export function resolveChatAssistant(input: {
       persona_id,
       approval_key: `agent:${runner.agent.id}|${personaKey}`,
       agent: () => Promise.resolve(runner.agent),
+      ownAgent: null,
     };
   }
   const name = chatAssistantAgentName({ owner: input.owner, spec: runner.spec });
   return {
-    display_name: persona?.display_name ?? input.assistantName ?? UNNAMED_ASSISTANT,
+    display_name: persona?.display_name ?? null,
     persona_id,
     approval_key: `chat:${name}|${personaKey}`,
     agent: () =>
@@ -134,6 +174,33 @@ export function resolveChatAssistant(input: {
         spec: runner.spec,
         agentStore: input.agentStore,
       }),
+    ownAgent: {
+      ...input.scheduleAgentChoices,
+      spec: runner.spec,
+      freeName: async scheduleName => {
+        for (let count = 1; count <= AGENT_NAME_TRIES; count++) {
+          const suffix = count === 1 ? '' : `-${String(count)}`;
+          const candidate = `${scheduleName.slice(0, AGENT_NAME_MAX - suffix.length).replace(/-+$/, '')}${suffix}`;
+          if ((await input.agentStore.getAgent({ tenant_id: input.tenant_id, name: candidate })) === undefined) {
+            return candidate;
+          }
+        }
+        return null;
+      },
+      create: ({ name: agentName, spec, transaction }) =>
+        input.agentStore.createAgent(
+          {
+            tenant_id: input.tenant_id,
+            name: agentName,
+            description: scheduleAgentDescription(agentName),
+            manifest: spec,
+            external_id: null,
+            host_managed: false,
+            created_by_subject: input.owner,
+          },
+          transaction,
+        ),
+    },
   };
 }
 

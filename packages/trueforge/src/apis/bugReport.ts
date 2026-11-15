@@ -10,11 +10,11 @@ import { hasAdminRole, type ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import type { IAgentStore } from '../db/agentStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { PACKAGE_VERSION } from '../packageVersion';
 import { createSessionBugReportRoute } from '../routes/sessionRoutes';
+import { PRIVATE_CHAT_BUG_REPORT_MESSAGE, sessionKeepsNothing } from '../runtime/privateChat';
 import { EVENTS_PAGE_LIMIT } from '../schemas/common';
 import { buildBugReportBundle } from './bugReportRedactor';
 import { readLocalCapabilitiesData, toBuildIdentity } from './capabilities';
@@ -26,7 +26,6 @@ const BUG_REPORT_MAX_EVENT_PAGES = 5;
 export interface BugReportRouterDeps<TTransaction> {
   sessions: Sessions<SessionCustom, TurnCustom>;
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
-  mcpServerStore: IMcpServerStore<TTransaction>;
   agentStore: IAgentStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
@@ -97,6 +96,10 @@ export function createBugReportRouter<TTransaction>(deps: BugReportRouterDeps<TT
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
     }
+    // Nothing from a private chat leaves in a report, not even its trace.
+    if (sessionKeepsNothing({ session: session.record })) {
+      return c.json({ error: { message: PRIVATE_CHAT_BUG_REPORT_MESSAGE } }, 422);
+    }
 
     // config_flags are sourced from the persisted sandbox status only: generating a bug report
     // must stay local and read-only, never dialing the sandbox provider or mutating its state.
@@ -106,7 +109,6 @@ export function createBugReportRouter<TTransaction>(deps: BugReportRouterDeps<TT
       fetchRecentEvents(session),
       readLocalCapabilitiesData({
         sandboxProviderStore: deps.sandboxProviderStore,
-        mcpServerStore: deps.mcpServerStore,
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         isAdmin: hasAdminRole(requestContext),

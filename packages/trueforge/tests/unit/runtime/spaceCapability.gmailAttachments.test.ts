@@ -30,27 +30,24 @@ const logger = createLogger({ silent: true });
 
 const MEMORY_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
-  recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
+  pages: { maxCount: 6, maxTokens: 1500 },
 };
 const NO_SCREEN: ToolOutputScreenConfig = { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500 };
 const memory: MemoryTurnContext = {
+  keepsNothing: false,
   client: undefined,
   config: MEMORY_CONFIG,
   sessionId: 's1',
   previousTurnId: null,
   summarize: undefined,
-  providerServerName: undefined,
 };
 
 const STORE: SpaceToolStore = {
@@ -168,6 +165,7 @@ describe('download_attachment follows the chat sandbox', () => {
         logger: createLogger({ silent: true }),
       },
       {
+        deletedChats: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         sessionStore: new SqliteSessionStore(env.db),
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },

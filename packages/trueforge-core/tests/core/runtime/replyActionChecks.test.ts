@@ -1,6 +1,12 @@
 import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import type { TurnStepKind } from '../../../src/core/mcp/executeToolCalls';
-import { findUnbackedClaim, stepKindsOf } from '../../../src/core/runtime/replyActionChecks';
+import {
+  browserPageSeen,
+  changesSeenBy,
+  countsTowardWriteCap,
+  findUnbackedClaim,
+  stepKindsOf,
+} from '../../../src/core/runtime/replyActionChecks';
 
 function check(
   text: string,
@@ -149,5 +155,77 @@ describe('stepKindsOf', () => {
   it('does not count the clock or a bundle load as a read', () => {
     expect(stepKindsOf(info({ server: 'clock', tool: 'get_current_datetime', readOnly: true }))).toEqual([]);
     expect(stepKindsOf(info({ server: 'host', tool: 'load_bundle', readOnly: true }))).toEqual([]);
+  });
+});
+
+function browserInfo(input: {
+  tool: string;
+  server?: string;
+  type?: 'truefoundry-system' | 'mcp';
+}): InternalToolCallInfo {
+  const server = input.server ?? 'browser';
+  return {
+    type: input.type ?? 'truefoundry-system',
+    mcp_server_id: server,
+    mcp_server_name: server,
+    original_tool_name: input.tool,
+  };
+}
+
+describe('countsTowardWriteCap', () => {
+  const asked = { tier: 3 as const };
+
+  it("never counts a step of Aman's own browser, which asks on its own card", () => {
+    expect(
+      countsTowardWriteCap({ ...browserInfo({ tool: 'browser_click' }), ...asked }, { staysInWorkspace: false }),
+    ).toBe(false);
+    expect(
+      countsTowardWriteCap({ ...browserInfo({ tool: 'browser_type' }), ...asked }, { staysInWorkspace: false }),
+    ).toBe(false);
+  });
+
+  it('still counts the same action from a tool that only shares a browser tool name', () => {
+    expect(
+      countsTowardWriteCap(
+        { ...browserInfo({ tool: 'browser_click', server: 'web-tools', type: 'mcp' }), ...asked },
+        { staysInWorkspace: false },
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('changesSeenBy', () => {
+  const turn = { changesThisTurn: 5, browserPageChangesThisTurn: 2 };
+
+  it("gives Aman's browser steps the page count and every other call the turn's changes", () => {
+    expect(changesSeenBy(browserInfo({ tool: 'browser_scroll' }), turn)).toBe(2);
+    expect(changesSeenBy(browserInfo({ tool: 'browser_read' }), turn)).toBe(2);
+    expect(changesSeenBy(info({ server: 'sandbox', tool: 'exec' }), turn)).toBe(5);
+  });
+
+  it('never gives the page count to a tool that only shares a browser tool name', () => {
+    expect(changesSeenBy(browserInfo({ tool: 'browser_scroll', server: 'web-tools' }), turn)).toBe(5);
+    expect(changesSeenBy(browserInfo({ tool: 'browser_scroll', type: 'mcp' }), turn)).toBe(5);
+    expect(changesSeenBy(browserInfo({ tool: 'page_notes' }), turn)).toBe(5);
+  });
+});
+
+describe('browserPageSeen', () => {
+  it('digests the page a moving step or a read showed', () => {
+    const scrolled = browserPageSeen({ info: browserInfo({ tool: 'browser_scroll' }), text: '# Page, screen 1' });
+    const read = browserPageSeen({ info: browserInfo({ tool: 'browser_read' }), text: '# Page, screen 1' });
+    expect(scrolled).toBeDefined();
+    expect(read?.digest).toBe(scrolled?.digest);
+    expect(
+      browserPageSeen({ info: browserInfo({ tool: 'browser_scroll' }), text: '# Page, screen 2' })?.digest,
+    ).not.toBe(scrolled?.digest);
+  });
+
+  it('sees no page for a screenshot or for a tool from another tool set with a browser name', () => {
+    expect(browserPageSeen({ info: browserInfo({ tool: 'browser_screenshot' }), text: 'x' })).toBeUndefined();
+    expect(
+      browserPageSeen({ info: browserInfo({ tool: 'browser_scroll', server: 'web-tools' }), text: 'x' }),
+    ).toBeUndefined();
+    expect(browserPageSeen({ info: browserInfo({ tool: 'browser_read', type: 'mcp' }), text: 'x' })).toBeUndefined();
   });
 });

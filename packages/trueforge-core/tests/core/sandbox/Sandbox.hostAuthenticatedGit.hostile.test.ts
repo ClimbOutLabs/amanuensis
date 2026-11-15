@@ -20,15 +20,16 @@ import {
 import { SANDBOX_EXEC_TOOL_NAME, Sandbox } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
+import { hostToolsPresent } from './hostTools';
 
 const execFileAsync = promisify(execFile);
 
 // Assembled at runtime so secret scanners do not mistake the synthetic value for a real token.
 const TOKEN = ['ghp', 'SyntheticTokenForTestsOnly0123456789'].join('_');
 const GIT = '/usr/bin/git';
-const HAS_TOOLS = ['/usr/bin/git', '/usr/bin/env', '/usr/bin/flock'].every(path => existsSync(path));
-const describeWithTools = HAS_TOOLS ? describe : describe.skip;
-const describeWithOpenssl = HAS_TOOLS && existsSync('/usr/bin/openssl') ? describe : describe.skip;
+const TOOLS = [GIT, '/usr/bin/env', '/usr/bin/flock'];
+const describeWithTools = hostToolsPresent(TOOLS) ? describe : describe.skip;
+const describeWithOpenssl = hostToolsPresent([...TOOLS, '/usr/bin/openssl']) ? describe : describe.skip;
 
 function initRepo(root: string): string {
   const repo = join(root, 'repo');

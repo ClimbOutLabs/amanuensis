@@ -2,10 +2,11 @@
 import type { ThreadMessageLike } from '@assistant-ui/react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { useEffect, useRef, type ReactNode } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { isNewChatView, ThreadContainer } from '@/containers/ThreadContainer.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
+import { endLiveLine, getVoiceMode, hasLiveLine, setLiveLine, setVoiceMode } from '@/utils/voiceMode.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
 function EditAgentBootstrap({ children }: { children: ReactNode }) {
@@ -137,5 +138,54 @@ describe('ThreadContainer', () => {
   it('omits the composer area entirely while loading', () => {
     renderThread([], { isLoading: true, composer: <div data-testid="composer-slot" /> });
     expect(screen.queryByTestId('composer-slot')).not.toBeInTheDocument();
+  });
+});
+
+describe('the live voice line in the real chat', () => {
+  beforeAll(() => {
+    // jsdom has no scrollTo, which the chat's auto-scroll calls once the messages show.
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', { value: () => undefined, configurable: true });
+  });
+  afterAll(() => {
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo');
+  });
+  afterEach(() => {
+    endLiveLine();
+  });
+
+  const chat = ({ isLoading }: { isLoading: boolean }) => (
+    <RuntimeHarness
+      messages={[
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'hello there' },
+      ]}
+      isLoading={isLoading}
+      threadId="thread-1"
+      remoteId="chat-1"
+    >
+      <ThreadContainer />
+    </RuntimeHarness>
+  );
+
+  it('stays open while the chat shows its loading skeleton, which replaces the composer, and ends when the chat goes', async () => {
+    const stop = vi.fn();
+    const view = render(chat({ isLoading: false }));
+    setLiveLine({ stop, sessionId: 'chat-1' });
+    setVoiceMode('listening');
+
+    view.rerender(chat({ isLoading: true }));
+    expect(await screen.findByRole('status', { name: 'Loading conversation' })).toBeInTheDocument();
+    expect(stop).not.toHaveBeenCalled();
+    expect(hasLiveLine()).toBe(true);
+    expect(getVoiceMode()).toBe('listening');
+
+    view.rerender(chat({ isLoading: false }));
+    expect(await screen.findByText('hello there')).toBeInTheDocument();
+    expect(stop).not.toHaveBeenCalled();
+    expect(hasLiveLine()).toBe(true);
+
+    view.unmount();
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(getVoiceMode()).toBe('off');
   });
 });

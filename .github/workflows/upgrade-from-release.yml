@@ -1,0 +1,46 @@
+name: Upgrade from the last release
+
+# The last release, filled with one of each thing a person keeps, then moved to this code on the
+# same data folder. Other suites start from empty tables, so a change that only upgrades an empty
+# install shows here.
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/upgrade-from-release.yml'
+      - 'scripts/upgrade-from-release.mjs'
+      - 'scripts/packed-app.mjs'
+      - 'packages/trueforge/src/db/**/migrations/**'
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade-from-release:
+    name: Last release upgrades with its data kept
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # The whole history with its tags: the last release is found by its tag and checked out beside this code.
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The script builds this code and the last release, so this job has no build step of its own.
+      - name: Fill the last release, upgrade it and read everything back
+        run: pnpm nightly:upgrade-from-release

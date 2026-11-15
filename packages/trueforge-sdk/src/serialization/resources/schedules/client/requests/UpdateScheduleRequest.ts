@@ -4,19 +4,19 @@ import type * as TrueForge from "../../../../../api/index.js";
 import * as core from "../../../../../core/index.js";
 import type * as serializers from "../../../../index.js";
 import { ResourceName } from "../../../../types/ResourceName.js";
-import { ScheduleManifest } from "../../../../types/ScheduleManifest.js";
+import { ScheduleManifestInput } from "../../../../types/ScheduleManifestInput.js";
 
 export const UpdateScheduleRequest: core.serialization.Schema<
     serializers.UpdateScheduleRequest.Raw,
     TrueForge.UpdateScheduleRequest
 > = core.serialization.object({
-    manifest: ScheduleManifest,
+    manifest: ScheduleManifestInput,
     name: ResourceName,
 });
 
 export declare namespace UpdateScheduleRequest {
     export interface Raw {
-        manifest: ScheduleManifest.Raw;
+        manifest: ScheduleManifestInput.Raw;
         name: ResourceName.Raw;
     }
 }

@@ -7,10 +7,16 @@ import {
 } from '../../../src/core/permissions/browserToolNames';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
-import { carriedPrivateDetails, recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
+import {
+  carriedPrivateDetails,
+  recordPersonText,
+  recordReplyText,
+  recordUntrustedText,
+} from '../../../src/core/permissions/provenance';
 import {
   countsAsSilentLookup,
   createWebSearchTurnState,
+  hostToolStamp,
   recordToolResultProvenance,
   SILENT_SEARCH_LIMIT,
 } from '../../../src/core/permissions/webSearch';
@@ -53,6 +59,31 @@ describe('browser explore tools', () => {
 });
 
 describe('browser open and content steering', () => {
+  it('says the link came from an email when an email it read named it', async () => {
+    const ctx = makeCtx();
+    recordUntrustedText({
+      provenance: ctx.web_search.provenance,
+      text: 'Claim your refund at https://evil.example/refund',
+      source: 'email',
+    });
+    const decision = await classifyTier(
+      browserAction(BROWSER_OPEN_TOOL_NAME, { url: 'https://evil.example/refund' }),
+      ctx,
+    );
+    expect(decision.reason).toBe('content_steered');
+    expect(decision.card?.copy?.reason).toBe('Aman found this link in an email it read, not from you.');
+    expect(decision.card?.copy?.consequence).toBeNull();
+  });
+
+  it('names the site the way a person does, without www', async () => {
+    const decision = await classifyTier(
+      browserAction(BROWSER_OPEN_TOOL_NAME, { url: 'https://www.Example.org/tides' }),
+      makeCtx({ searchWithoutAsking: () => Promise.resolve(false) }),
+    );
+    expect(decision.card?.copy?.headline).toBe('Open a page on example.org?');
+    expect(decision.card?.destination).toBe('https://www.example.org/tides');
+  });
+
   it('asks before opening a link only a page it read named', async () => {
     const ctx = makeCtx();
     recordUntrustedText({
@@ -66,8 +97,16 @@ describe('browser open and content steering', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('content_steered');
-    expect(decision.card?.plain_what).toMatch(/^Open https:\/\/evil\.example\/claim-prize\?/);
-    expect(decision.card?.plain_what).toMatch(/page Aman read/);
+    // The question names the site, the address is its own row, and where the link came from is said once.
+    expect(decision.card?.copy).toEqual({
+      headline: 'Open a page on evil.example?',
+      consequence: null,
+      reason: 'Aman found this link in a page it read, not from you.',
+    });
+    expect(decision.card?.destination).toBe('https://evil.example/claim-prize');
+    expect(decision.card?.plain_what).toBe(
+      'Open a page on evil.example? Aman found this link in a page it read, not from you.',
+    );
     expect(decision.approval_token_id).toEqual(expect.any(String));
   });
 
@@ -100,6 +139,36 @@ function ctxAfterReading(services: Partial<SentinelServices> = {}): ClassifyCont
 }
 
 const open = (url: string): SentinelAction => browserAction(BROWSER_OPEN_TOOL_NAME, { url });
+
+describe("browser open on a site only the assistant's own reply named", () => {
+  function ctxAfterAReply(): ClassifyContext {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where can I read about tide tables?' });
+    recordReplyText({ provenance: ctx.web_search.provenance, text: 'Try https://tides.example/tables.' });
+    return ctx;
+  }
+
+  it('opens the link the reply wrote, and a plain deeper page, without asking', async () => {
+    const ctx = ctxAfterAReply();
+    expect(await classifyTier(open('https://tides.example/tables'), ctx)).toMatchObject({
+      tier: 1,
+      reason: 'browser_open',
+    });
+    expect(await classifyTier(open('https://tides.example/tables/harbour/today'), ctx)).toMatchObject({
+      tier: 1,
+      reason: 'browser_open',
+    });
+  });
+
+  it('asks before opening a link there that adds a part after a question mark, and shows the whole address', async () => {
+    const decision = await classifyTier(open('https://tides.example/tables?port=harbour&notes=mine'), ctxAfterAReply());
+    expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_unvouched' });
+    expect(decision.card?.destination).toBe('https://tides.example/tables?port=harbour&notes=mine');
+    expect(decision.card?.plain_what).toContain(
+      'You did not name this site. Aman brought it up in an earlier reply, and this link adds details to it, so Aman is checking with you first.',
+    );
+  });
+});
 
 describe('browser open and what the address carries', () => {
   it('asks before opening a host built in pieces after reading a page', async () => {
@@ -139,6 +208,21 @@ describe('browser open and what the address carries', () => {
     expect(decision).toMatchObject({ tier: 1, reason: 'browser_open' });
   });
 
+  it('asks before opening the link the person gave once a sign-in name is put before its site', async () => {
+    const ctx = ctxAfterReading();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'can you open https://hulu.com/account please' });
+    const decision = await classifyTier(open('https://blue-heron-lake-house@hulu.com/account'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_unvouched' });
+    expect(decision.card?.destination).toBe('https://blue-heron-lake-house@hulu.com/account');
+  });
+
+  it('asks before opening the front page of a site the person named once a sign-in name is put before it', async () => {
+    const ctx = ctxAfterReading();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'check hulu.com for me' });
+    const decision = await classifyTier(open('https://blue-heron-lake-house@hulu.com/'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_unvouched' });
+  });
+
   it('skips, rather than asks, an unvouched open in a scheduled run', async () => {
     const decision = await classifyTier(open('https://collect.evil-x.net/?d=x'), ctxAfterReading({ unattended: true }));
     expect(decision).toMatchObject({ reason: 'auto_denied', auto_deny: 'steered_by_content' });
@@ -161,6 +245,11 @@ describe('browser open and what the address carries', () => {
       makeCtx({ searchWithoutAsking: () => Promise.resolve(false) }),
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_guard' });
+    expect(decision.card?.copy).toEqual({
+      headline: 'Open a page on hulu.com?',
+      consequence: null,
+      reason: 'Searches are set to ask, so Aman is checking with you first.',
+    });
   });
 
   it('stops once the turn has used its silent lookups', async () => {
@@ -188,6 +277,7 @@ describe("browser pages are the person's own", () => {
     recordToolResultProvenance({
       state: ctx.web_search,
       tool_name,
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: [],
       texts: ['# Account\nhttps://hulu.com/account\nSigned in as jane.doe@example.com'],
     });

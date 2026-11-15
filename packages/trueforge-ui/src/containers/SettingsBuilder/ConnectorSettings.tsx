@@ -10,15 +10,25 @@ import { CatalogLogo } from '@/atoms/primitives/CatalogLogo.js';
 import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import SearchInput from '@/atoms/primitives/SearchInput.js';
 import { Icon } from '@/icons/Icon.js';
+import { HOME_ASSISTANT_SERVER_NAME } from '@truefoundry/trueforge-core/core/homeassistant/toolContract';
+
 import { hasCalendarSetup, type CalendarAccountStatus } from '@/server/calendarSetup.js';
-import { hasConnectorConnectionTest, type ConnectorConnectionFailureKind } from '@/server/connectorChecks.js';
+import {
+  hasConnectorConnectionTest,
+  hasHomeAssistantCheck,
+  type ConnectorConnectionFailureKind,
+  type HomeAssistantCheck,
+} from '@/server/connectorChecks.js';
 import { hasEmailSetup, type EmailAccountStatus } from '@/server/emailSetup.js';
 import { hasGoogleSetup, type GoogleConnectionStatus } from '@/server/googleSetup.js';
+import { hasNotesFolderSetup, type NotesFolderStatus } from '@/server/notesFolderSetup.js';
 import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
+import { hasTelegramSetup, type TelegramAccountStatus } from '@/server/telegramSetup.js';
 import type { AgentSpec, ConnectorAuth, ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
+import { buildHomeAssistantEndpoint } from '@/utils/homeAssistantPreset.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import AccountConnectorCard from './AccountConnectorCard.js';
@@ -28,8 +38,9 @@ import CalendarSetupPanel from './CalendarSetupPanel.js';
 import ConnectorDetails from './ConnectorDetails.js';
 import EmailSetupPanel from './EmailSetupPanel.js';
 import GoogleSetupPanel from './GoogleSetupPanel.js';
-import { isMemoryProvider, memoryProviderUpdateRequest, withRemediation } from './memoryProvider.js';
-import { searchProviderForNewConnector } from './searchProvider.js';
+import NotesFolderSetupPanel from './NotesFolderSetupPanel.js';
+import { searchProviderForNewConnector, searchProviderUpdateRequest } from './searchProvider.js';
+import TelegramSetupPanel from './TelegramSetupPanel.js';
 
 type ConnectorListItem =
   { connector: ConnectorBase; isConfigured: true } | { connector: ConnectorCatalogEntry; isConfigured: false };
@@ -52,6 +63,29 @@ function connectionTestSuccessMessage(toolCount: number): string {
  * Always what the endpoint said, never a generic failure line. A rejected credential and an
  * endpoint that cannot be reached are fixed in different places, so each carries its own next step.
  */
+/** The Home Assistant check in the brief's words: the counts it found, or the one thing to fix. */
+function homeAssistantCheckMessage(result: HomeAssistantCheck): ConnectorCheckStatus {
+  if (result.status === 'failed') {
+    return { ok: false, message: result.reason };
+  }
+  if (result.entityCount === null) {
+    return { ok: true, message: `Connected. ${String(result.toolCount)} tools available.` };
+  }
+  return {
+    ok: true,
+    message: `Connected. ${String(result.toolCount)} ${result.toolCount === 1 ? 'tool' : 'tools'}, ${String(result.entityCount)} exposed ${result.entityCount === 1 ? 'entity' : 'entities'}`,
+  };
+}
+
+/** Joins a message the API wrote to a remediation line without doubling its punctuation. */
+function withRemediation({ message, remediation }: { message: string; remediation: string }): string {
+  const trimmed = message.trim();
+  if (trimmed === '') {
+    return remediation;
+  }
+  return /[.!?]$/.test(trimmed) ? `${trimmed} ${remediation}` : `${trimmed}. ${remediation}`;
+}
+
 function connectionTestFailureMessage(result: { kind: ConnectorConnectionFailureKind; message: string }): string {
   if (result.kind === 'auth_required') {
     return withRemediation({ message: result.message, remediation: 'Reconnect it or replace its key.' });
@@ -130,10 +164,22 @@ const ConnectorSettings = () => {
   const [calendarStatusFailed, setCalendarStatusFailed] = useState(false);
   const [calendarPanelOpen, setCalendarPanelOpen] = useState(false);
 
+  const [telegramStatus, setTelegramStatus] = useState<TelegramAccountStatus | null>(null);
+  const [telegramStatusFailed, setTelegramStatusFailed] = useState(false);
+  const [telegramPanelOpen, setTelegramPanelOpen] = useState(false);
+  const [notesFolderStatus, setNotesFolderStatus] = useState<NotesFolderStatus | null>(null);
+  const [notesFolderStatusFailed, setNotesFolderStatusFailed] = useState(false);
+  const [notesFolderPanelOpen, setNotesFolderPanelOpen] = useState(false);
+
   const [catalog, setCatalog] = useState<ConnectorCatalogEntry[]>([]);
   const [addMcpServerFormOpen, setAddMcpServerFormOpen] = useState(false);
   const [editingConnector, setEditingConnector] = useState<ConnectorBase | null>(null);
   const [connectorAwaitingKey, setConnectorAwaitingKey] = useState<ConnectorCatalogEntry | null>(null);
+  const [connectorAwaitingHomeAssistant, setConnectorAwaitingHomeAssistant] = useState<ConnectorCatalogEntry | null>(
+    null,
+  );
+  const [homeAssistantAddress, setHomeAssistantAddress] = useState('');
+  const [homeAssistantToken, setHomeAssistantToken] = useState('');
   const [selectedConnector, setSelectedConnector] = useState<ConnectorBase | null>(null);
   const [apiKey, setApiKey] = useState('');
   // A native window.confirm() blocks the JS event loop until dismissed, which reads as a frozen
@@ -193,6 +239,19 @@ const ConnectorSettings = () => {
         setCalendarStatus(next !== null && next.available ? next : null);
         setCalendarStatusFailed(next === null);
       }
+      // The Telegram card likewise.
+      if (hasTelegramSetup(connectorCatalog)) {
+        const next = await connectorCatalog.getTelegramStatus().catch(() => null);
+        setTelegramStatus(next !== null && next.available ? next : null);
+        setTelegramStatusFailed(next === null);
+      }
+      // The Notes folder card likewise, but it has no "available" state: the folder is a local
+      // path, so every instance offers it and only a failed read shows as a failure.
+      if (hasNotesFolderSetup(connectorCatalog)) {
+        const next = await connectorCatalog.getNotesFolderStatus().catch(() => null);
+        setNotesFolderStatus(next);
+        setNotesFolderStatusFailed(next === null);
+      }
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load connectors'));
     } finally {
@@ -220,10 +279,7 @@ const ConnectorSettings = () => {
   const matchingConnected = useMemo(() => {
     const result: ConnectorBase[] = [];
     for (const item of matchingConnectors) {
-      // The memory bank is stored as an MCP server row but is not a connector a user acts on:
-      // it is never offered in a chat, the model never chooses to call it, and Settings → Memory
-      // owns its whole lifecycle. Listing it here too would invite treating it as a connector.
-      if (item.isConfigured && !isMemoryProvider(item.connector)) {
+      if (item.isConfigured) {
         const authenticated = connectors.authStatusById.get(item.connector.id) ?? item.connector.authenticated;
         result.push(
           authenticated === item.connector.authenticated ? item.connector : { ...item.connector, authenticated },
@@ -298,6 +354,13 @@ const ConnectorSettings = () => {
   };
 
   const handleConnect = (entry: ConnectorCatalogEntry) => {
+    if (entry.name === HOME_ASSISTANT_SERVER_NAME) {
+      setHomeAssistantAddress('');
+      setHomeAssistantToken('');
+      setFormError(null);
+      setConnectorAwaitingHomeAssistant(entry);
+      return;
+    }
     if (entry.auth.type === 'header') {
       setApiKey('');
       setFormError(null);
@@ -325,10 +388,10 @@ const ConnectorSettings = () => {
       const existing = connectors.ordered.find(({ connector }) => connector.id === entry.id);
       const existingConnector = existing?.isConfigured ? existing.connector : undefined;
       if (existingConnector) {
-        // updateConnector sends the full manifest, so the memory-provider flag has to be
-        // resupplied here too or it would be silently cleared by this unrelated key change.
+        // updateConnector sends the full manifest, so the search-provider flag is resupplied
+        // here or this unrelated key change would silently clear it.
         await connectorCatalog.updateConnector(
-          memoryProviderUpdateRequest({ ...existingConnector, auth }, isMemoryProvider(existingConnector)),
+          searchProviderUpdateRequest({ ...existingConnector, auth }, isSearchProvider(existingConnector)),
         );
         // The credential just changed, so any earlier connection test no longer speaks to what
         // is stored now; go back to unverified until it is tested again.
@@ -342,6 +405,34 @@ const ConnectorSettings = () => {
           title: `${entry.name} ${existingConnector ? 'updated' : 'connected'}`,
         });
       }, 100);
+    }, setFormError).catch(() => {});
+  };
+
+  const closeHomeAssistantModal = () => {
+    setConnectorAwaitingHomeAssistant(null);
+    setHomeAssistantAddress('');
+    setHomeAssistantToken('');
+    setFormError(null);
+  };
+
+  // The preset builds the endpoint and the Authorization header from the two fields, so the
+  // person never types either. The token is stored like every other connector key and is never
+  // shown again. Once saved, the check runs and its line lands on the connector's row.
+  const handleHomeAssistantSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!connectorAwaitingHomeAssistant || !homeAssistantToken.trim()) return;
+    const built = buildHomeAssistantEndpoint(homeAssistantAddress);
+    if ('problem' in built) {
+      setFormError(built.problem);
+      return;
+    }
+    const entry = connectorAwaitingHomeAssistant;
+    setFormError(null);
+    void runMutation(async () => {
+      const auth: ConnectorAuth = { type: 'header', apiKey: homeAssistantToken, headerName: 'Authorization' };
+      await createFromCatalog({ ...entry, url: built.url }, auth);
+      closeHomeAssistantModal();
+      handleConnectionTest({ id: entry.id, name: entry.name });
     }, setFormError).catch(() => {});
   };
 
@@ -448,11 +539,17 @@ const ConnectorSettings = () => {
     ? (req: { id: string }) => connectorCatalog.testConnector(req)
     : undefined;
 
+  // The Home Assistant check rides the same status slot as the connection test, with its own
+  // words: the tool and exposed entity counts, or the one thing to fix.
+  const homeAssistantChecker = hasHomeAssistantCheck(connectorCatalog)
+    ? (req: { id: string }) => connectorCatalog.checkHomeAssistant(req)
+    : undefined;
+
   const canUpdateChat = shellIsMutable(mode) && agentSpec != null && updateAgentSpec != null;
   const isPlainDraft = mode.status === 'active' && mode.isMutable && mode.agentId == null && pendingSessionId == null;
 
-  const handleConnectionTest = (connector: ConnectorBase) => {
-    if (connectionTester === undefined || checkInFlightIds.has(connector.id)) {
+  const handleConnectionTest = (connector: Pick<ConnectorBase, 'id' | 'name'>) => {
+    if ((connectionTester === undefined && homeAssistantChecker === undefined) || checkInFlightIds.has(connector.id)) {
       return;
     }
     // Captured now, checked when the response lands: if invalidateConnectionCheck bumped this
@@ -463,17 +560,23 @@ const ConnectorSettings = () => {
     checkGenerationById.current.set(connector.id, generation);
     setCheckInFlightIds(current => new Set(current).add(connector.id));
     const isCurrent = () => checkGenerationById.current.get(connector.id) === generation;
-    void connectionTester({ id: connector.id })
+    const status: Promise<ConnectorCheckStatus> =
+      connector.name === HOME_ASSISTANT_SERVER_NAME && homeAssistantChecker !== undefined
+        ? homeAssistantChecker({ id: connector.id }).then(homeAssistantCheckMessage)
+        : connectionTester === undefined
+          ? Promise.reject(new Error('The connection test is not available'))
+          : connectionTester({ id: connector.id }).then(result => ({
+              ok: result.ok,
+              message: result.ok
+                ? connectionTestSuccessMessage(result.toolNames.length)
+                : connectionTestFailureMessage(result),
+            }));
+    void status
       .then(result => {
         if (!isCurrent()) return;
         setCheckStatusById(current => {
           const next = new Map(current);
-          next.set(connector.id, {
-            ok: result.ok,
-            message: result.ok
-              ? connectionTestSuccessMessage(result.toolNames.length)
-              : connectionTestFailureMessage(result),
-          });
+          next.set(connector.id, result);
           return next;
         });
       })
@@ -638,6 +741,9 @@ const ConnectorSettings = () => {
 
   const emailMatchesQuery = normalizedQuery === '' || 'email mail'.includes(normalizedQuery);
   const calendarMatchesQuery = normalizedQuery === '' || 'calendar caldav events'.includes(normalizedQuery);
+  const telegramMatchesQuery = normalizedQuery === '' || 'telegram bot chat messages'.includes(normalizedQuery);
+  const notesFolderMatchesQuery =
+    normalizedQuery === '' || 'notes folder obsidian markdown vault'.includes(normalizedQuery);
 
   const googleMatchesQuery = normalizedQuery === '' || 'google gmail email mail'.includes(normalizedQuery);
 
@@ -718,9 +824,7 @@ const ConnectorSettings = () => {
 
         <div className="min-w-0 flex-1">
           <h5 className="truncate text-sm font-medium text-text-primary">{entry.name}</h5>
-          <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">
-            {entry.description ?? entry.url}
-          </p>
+          <p className="mt-0.5 text-sm text-text-secondary">{entry.description ?? entry.url}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
@@ -808,8 +912,8 @@ const ConnectorSettings = () => {
           <h4 className="text-sm font-semibold text-text-primary">Get connected in three steps</h4>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-text-secondary">
             <li>
-              Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
-              Connect. Most need an API key or token from that service.
+              Find a connector under <span className="font-medium text-text-primary">Add a connector</span> below and
+              choose Connect. Most need an API key or token from that service.
             </li>
             <li>Choose it in the message box so {assistant} can use its tools in that chat.</li>
             <li>
@@ -841,7 +945,7 @@ const ConnectorSettings = () => {
               }}
             >
               <Icon name="plus" size="1rem" className="mr-1" />
-              Add MCP Server
+              Add a custom connector
             </Button>
           </div>
 
@@ -903,6 +1007,57 @@ const ConnectorSettings = () => {
             ) : null}
 
             {!loading &&
+            (telegramStatus !== null || telegramStatusFailed) &&
+            telegramMatchesQuery &&
+            hasTelegramSetup(connectorCatalog) ? (
+              <AccountConnectorCard
+                id="telegram"
+                title="Telegram"
+                glyph="T"
+                description="Message your assistant from Telegram. Replies, reminders and ok requests come back there; the bot answers only you."
+                connectedLine={
+                  telegramStatus?.botName
+                    ? `Connected as ${telegramStatus.botName}${telegramStatus.botUsername !== null ? ` (@${telegramStatus.botUsername})` : ''}.`
+                    : null
+                }
+                stoppedLine="The bot stopped answering. Open Manage to connect it again."
+                notWorkingLine="Telegram could not be reached just now. Check your internet connection, then open Manage."
+                failedLabel="Couldn't check Telegram right now"
+                pillLabel={telegramStatus?.state === 'awaiting_pairing' ? 'Waiting for pairing' : undefined}
+                lineOverride={
+                  telegramStatus?.state === 'awaiting_pairing'
+                    ? 'Your bot is connected. Open Manage and enter the code it sent you to finish pairing.'
+                    : undefined
+                }
+                actionLabel={telegramStatus?.state === 'awaiting_pairing' ? 'Pair' : undefined}
+                state={telegramStatus?.state === 'connected' ? 'connected' : 'not_connected'}
+                failed={telegramStatusFailed}
+                onOpen={() => setTelegramPanelOpen(true)}
+                onRetry={() => void refresh()}
+              />
+            ) : null}
+
+            {!loading &&
+            (notesFolderStatus !== null || notesFolderStatusFailed) &&
+            notesFolderMatchesQuery &&
+            hasNotesFolderSetup(connectorCatalog) ? (
+              <AccountConnectorCard
+                id="notes-folder"
+                title="Notes folder"
+                glyph="N"
+                description="Search and read the Markdown notes in a folder on this computer, like an Obsidian vault, and add to them. Nothing you wrote is ever changed."
+                connectedLine={notesFolderStatus?.folderPath ? `Connected to ${notesFolderStatus.folderPath}.` : null}
+                stoppedLine="The folder could not be read. Open Manage and check the path."
+                notWorkingLine="Your notes folder could not be found just now. Check the folder is still there, then open Manage."
+                failedLabel="Couldn't check your notes folder right now"
+                state={notesFolderStatus?.state ?? 'not_connected'}
+                failed={notesFolderStatusFailed}
+                onOpen={() => setNotesFolderPanelOpen(true)}
+                onRetry={() => void refresh()}
+              />
+            ) : null}
+
+            {!loading &&
             (googleStatus !== null || googleStatusFailed) &&
             googleMatchesQuery &&
             hasGoogleSetup(connectorCatalog) ? (
@@ -923,7 +1078,7 @@ const ConnectorSettings = () => {
                   id="available-connectors-heading"
                   className="mb-2 text-[0.8125rem] font-semibold uppercase text-text-secondary"
                 >
-                  Available · {availableConnectors.length}
+                  Add a connector · {availableConnectors.length}
                 </h4>
                 <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
                   {availableConnectors.map(entry => renderCatalogEntry(entry))}
@@ -997,6 +1152,75 @@ const ConnectorSettings = () => {
             </form>
           </CenteredModal>
 
+          <CenteredModal
+            open={connectorAwaitingHomeAssistant !== null}
+            onOpenChange={open => {
+              if (!open) closeHomeAssistantModal();
+            }}
+            title="Connect Home Assistant"
+            description="Your Home Assistant address and a long-lived access token."
+            contentSized
+            className="md:max-w-xl"
+          >
+            <form onSubmit={handleHomeAssistantSubmit}>
+              <div className="space-y-5 px-5 py-5">
+                <div>
+                  <label
+                    htmlFor="home-assistant-address"
+                    className="mb-2 block text-xs font-semibold uppercase tracking-wide text-text-secondary"
+                  >
+                    Home Assistant address
+                  </label>
+                  <input
+                    id="home-assistant-address"
+                    type="text"
+                    value={homeAssistantAddress}
+                    onChange={event => {
+                      setHomeAssistantAddress(event.target.value);
+                    }}
+                    placeholder="https://homeassistant.local:8123"
+                    autoFocus
+                    required
+                    className={auiInputClass('h-11')}
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="home-assistant-token"
+                    className="mb-2 block text-xs font-semibold uppercase tracking-wide text-text-secondary"
+                  >
+                    Long-lived access token
+                  </label>
+                  <input
+                    id="home-assistant-token"
+                    type="password"
+                    value={homeAssistantToken}
+                    onChange={event => {
+                      setHomeAssistantToken(event.target.value);
+                    }}
+                    placeholder="Paste the token from Home Assistant"
+                    required
+                    className={auiInputClass('h-11')}
+                  />
+                  <p className="mt-2 text-sm text-text-secondary">
+                    In Home Assistant, open your profile, then Security, and make a long-lived access token. Then add
+                    the Model Context Protocol Server integration under Settings, Devices and services. Only entities
+                    you expose to voice assistants are visible to Aman.
+                  </p>
+                </div>
+                {formError ? <p className="text-failure-bg text-sm">{formError}</p> : null}
+              </div>
+              <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">
+                <Button variant="ghost" type="button" onClick={closeHomeAssistantModal} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!homeAssistantAddress.trim() || !homeAssistantToken.trim() || busy}>
+                  Connect
+                </Button>
+              </footer>
+            </form>
+          </CenteredModal>
+
           {hasGoogleSetup(connectorCatalog) ? (
             <GoogleSetupPanel
               open={googlePanelOpen}
@@ -1023,6 +1247,28 @@ const ConnectorSettings = () => {
             <CalendarSetupPanel
               open={calendarPanelOpen}
               onOpenChange={setCalendarPanelOpen}
+              port={connectorCatalog}
+              onChanged={() => {
+                void refresh();
+              }}
+            />
+          ) : null}
+
+          {hasTelegramSetup(connectorCatalog) ? (
+            <TelegramSetupPanel
+              open={telegramPanelOpen}
+              onOpenChange={setTelegramPanelOpen}
+              port={connectorCatalog}
+              onChanged={() => {
+                void refresh();
+              }}
+            />
+          ) : null}
+
+          {hasNotesFolderSetup(connectorCatalog) ? (
+            <NotesFolderSetupPanel
+              open={notesFolderPanelOpen}
+              onOpenChange={setNotesFolderPanelOpen}
               port={connectorCatalog}
               onChanged={() => {
                 void refresh();

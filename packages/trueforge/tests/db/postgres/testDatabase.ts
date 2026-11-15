@@ -75,6 +75,8 @@ export async function createPostgresTestDatabase(
     poolMax: 5,
     statementTimeoutMs: 60_000,
     idleInTransactionSessionTimeoutMs: 60_000,
+    connectionTimeoutMs: 70_000,
+    onIdleClientError: () => undefined,
   });
   try {
     if (targetMigrationName === undefined) {

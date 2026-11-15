@@ -76,7 +76,7 @@ export function ComposerShell({
     <div
       data-slot="aui_composer-shell"
       className={cn(
-        'border-border bg-card-bg focus-within:border-gold-line flex w-full flex-col gap-2 rounded-[1.25rem] border px-3.5 pt-3.5 pb-2.5 transition-colors',
+        'border-border bg-card-bg focus-within:border-gold-line flex w-full flex-col gap-2 rounded-[1.25rem] border px-3.5 pt-3.5 pb-2.5 transition-colors shadow-[var(--shadow-raise)]',
         className,
       )}
     >
@@ -92,7 +92,7 @@ export function ComposerShell({
         </div>
         <div className="aui-composer-actions ml-auto flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
           {modelLabel && !isRunning && (
-            <span className="text-text-secondary flex max-w-[10rem] items-center gap-1 truncate px-2 text-sm">
+            <span className="aui-composer-model-label text-text-secondary flex max-w-[10rem] items-center gap-1 truncate px-2 text-sm">
               {modelIcon}
               <span className="truncate">{modelLabel}</span>
             </span>

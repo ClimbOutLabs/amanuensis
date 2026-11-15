@@ -92,7 +92,7 @@ describe('a card whose request ended', () => {
     state.server = null;
   });
 
-  it('shows the ended note with Dismiss and no Approve or Deny, even on the newest message', async () => {
+  it('shows the ended note with Dismiss and no Allow or Deny, even on the newest message', async () => {
     const server = fakeServer([]);
     state.server = server;
     renderCard(newestPendingCard);
@@ -121,7 +121,7 @@ describe('a card whose request ended', () => {
     expect(state.reload).toHaveBeenCalledOnce();
   });
 
-  it('does not judge a card while its turn is still being saved, then keeps Approve once it is paused', async () => {
+  it('does not judge a card while its turn is still being saved, then keeps Allow once it is paused', async () => {
     // The card streams in before the turn is saved as paused, so the first read finds the tip running.
     const server = fakeServer([CARD_ID], ['running', 'done']);
     state.server = server;
@@ -134,7 +134,7 @@ describe('a card whose request ended', () => {
     expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
   });
 
-  it('keeps Approve and Deny on a request the server still lists as waiting', async () => {
+  it('keeps Allow and Deny on a request the server still lists as waiting', async () => {
     state.server = fakeServer([CARD_ID]);
     renderCard(newestPendingCard);
 

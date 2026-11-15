@@ -23,6 +23,21 @@ Amanuensis is maintained by a single maintainer. Response times are best effort,
 - Updates as the investigation and fix progress.
 - Credit in the release notes when the fix ships, unless you prefer to remain anonymous.
 
+## Checking a download
+
+The Windows download, Aman-Setup.exe, is not signed with a Windows publisher certificate. Every release instead carries `manifest.json`, which lists each file with its SHA-256 hash, and `manifest.json.minisig`, its signature made with the Aman release key. The release key is:
+
+```
+RWR8aR0vofffsH8dRDfeCxHcPAo2hBKQp6W9krptCFjneeXPDr+ZB0wr
+```
+
+To check a file, put it in one folder with `manifest.json` and `manifest.json.minisig`, then:
+
+1. Check the signature with [minisign](https://github.com/jedisct1/minisign): `minisign -Vm manifest.json -P <the key above>`. It must say the signature is verified.
+2. Work out the file's hash (`Get-FileHash` in Windows PowerShell, `shasum -a 256` on a Mac, `sha256sum` on Linux) and find the same hash next to its name in `manifest.json`.
+
+If you already have Aman, `aman verify <file>` does both steps with the same key built into it. Each release page repeats these steps.
+
 ## Supported versions
 
 Only the latest `main` is supported. There are no maintained older release branches.

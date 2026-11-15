@@ -12,6 +12,7 @@ import {
   putSessionFolderRoute,
   setSessionFolderRoute,
 } from '../routes/sessionFolderRoutes';
+import { PRIVATE_CHAT_FOLDER_MESSAGE, sessionKeepsNothing } from '../runtime/privateChat';
 import type { SessionFolder } from '../schemas/sessionFolder';
 import { checkSessionAccess, FORBIDDEN_SESSION_ACCESS, TENANT_ID } from './sessions';
 
@@ -95,7 +96,7 @@ export function createSessionFolderAssignmentsRouter(deps: {
     if (!checkSessionAccess({ userRef, createdBy: session.created_by_subject.subject_id })) {
       return { error: 'forbidden' as const };
     }
-    return { error: null };
+    return { error: null, session };
   };
 
   const setHandler: RouteHandler<typeof setSessionFolderRoute> = async c => {
@@ -107,6 +108,10 @@ export function createSessionFolderAssignmentsRouter(deps: {
     }
     if (ownership.error === 'forbidden') {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    // A folder keeps a chat; a private chat is kept nowhere.
+    if (sessionKeepsNothing({ session: ownership.session })) {
+      return c.json({ error: { message: PRIVATE_CHAT_FOLDER_MESSAGE } }, 422);
     }
 
     const { folder_id: folderId } = c.req.valid('json');

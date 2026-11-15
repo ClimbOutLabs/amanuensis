@@ -8,7 +8,11 @@ import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/Noo
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import type { TokenFactoryBudget, TokenFactoryDay } from '../../../src/runtime/tokenFactoryBudget';
 import type { UsageSummaryInput } from '../../../src/runtime/usageSummary';
-import { USAGE_SUMMARY_TOOL_NAME, usageSummaryCapability } from '../../../src/runtime/usageSummaryCapability';
+import {
+  USAGE_SUMMARY_TOOL_NAME,
+  usageSummaryCapability,
+  type DeletedChatUsageReader,
+} from '../../../src/runtime/usageSummaryCapability';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
 import { seedDoneChat, usageEvent } from '../../fixtures/usageEvents';
 
@@ -108,8 +112,13 @@ describe('usage_summary tool result text', () => {
     await env?.teardown();
   });
 
-  async function resultText(input: UsageSummaryInput, day: TokenFactoryDay = UNCAPPED): Promise<string> {
+  async function resultText(
+    input: UsageSummaryInput,
+    day: TokenFactoryDay = UNCAPPED,
+    deletedChats: DeletedChatUsageReader = { listDeletedChatModelUsage: () => Promise.resolve([]) },
+  ): Promise<string> {
     const capability = usageSummaryCapability({
+      deletedChats,
       sessionStore: store,
       budget: budgetFor(day),
       authority: { tenantId: TENANT, userRef: ME },
@@ -145,6 +154,60 @@ describe('usage_summary tool result text', () => {
     );
     expect(text).not.toContain('{');
     expect(() => JSON.parse(text)).toThrow();
+  });
+
+  it('counts deleted and incognito chats, without naming them in the top chats', async () => {
+    await seedDoneChat({
+      store,
+      tenantId: TENANT,
+      sessionId: 'chat-incognito',
+      owner: ME,
+      title: 'Surprise party',
+      privateUntil: new Date('2026-10-22T12:00:00Z'),
+      events: [
+        usageEvent({
+          createdAt: '2026-10-20T09:00:00Z',
+          modelId: 'nvidia/nemotron-3-super-120b-a12b',
+          displayName: 'Nemotron 3 Super',
+          inputTokens: 200,
+          outputTokens: 100,
+          costUsd: 0.0001,
+        }),
+      ],
+    });
+    const deletedChats: DeletedChatUsageReader = {
+      listDeletedChatModelUsage: input =>
+        Promise.resolve(
+          input.created_by_subject_id === ME
+            ? [
+                {
+                  event_id: 'deleted-1',
+                  model_id: 'nvidia/nemotron-3-super-120b-a12b',
+                  display_name: 'Nemotron 3 Super',
+                  input_tokens: 600,
+                  output_tokens: 100,
+                  cost_usd: 0.0003,
+                  created_at: '2026-10-06T09:00:00.000Z',
+                },
+              ]
+            : [],
+        ),
+    };
+
+    const text = await resultText({ period: 'this_month' }, UNCAPPED, deletedChats);
+
+    expect(text).toContain('Total: 2900 tokens (2100 in, 800 out).');
+    expect(text).toContain('- 2026-10-06: 700 tokens; cost $0.0003.');
+    const topChats = text.slice(text.indexOf('Top chats:'), text.indexOf('Daily Token Factory cap'));
+    expect(topChats).toBe(
+      [
+        'Top chats:',
+        '- Trip plan: 1500 tokens; cost $0.00075.',
+        '- Untitled chat: 400 tokens; cost not shown, because 400 tokens have no known price.',
+        '',
+      ].join('\n'),
+    );
+    expect(text).not.toContain('Surprise party');
   });
 
   it('shows the total cost when every call in the period is priced', async () => {

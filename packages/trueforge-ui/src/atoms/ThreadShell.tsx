@@ -1,5 +1,7 @@
 import { forwardRef, type ComponentPropsWithRef, type CSSProperties } from 'react';
 
+import { useOptionalResolvedThemeTokens } from '../theme/ThemeProvider.js';
+import { chatFontSizeStyle, useChatFontSize } from '../utils/chatFontSizePreference.js';
 import { cn } from './lib/cn.js';
 
 const THREAD_CSS_VARS: CSSProperties & { '--thread-max-width': string; '--composer-padding': string } = {
@@ -15,17 +17,24 @@ const THREAD_CSS_VARS: CSSProperties & { '--thread-max-width': string; '--compos
 export type ThreadRootShellProps = ComponentPropsWithRef<'div'>;
 
 export const ThreadRootShell = forwardRef<HTMLDivElement, ThreadRootShellProps>(
-  ({ className, style, ...rest }, ref) => (
-    <div
-      ref={ref}
-      className={cn(
-        'font-sans-flex aui-root aui-thread-root bg-primary-bg @container flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden',
-        className,
-      )}
-      style={{ ...THREAD_CSS_VARS, ...style }}
-      {...rest}
-    />
-  ),
+  ({ className, style, ...rest }, ref) => {
+    // The person's chat text size scales the theme's type scale on this root only, so the
+    // chat surface (messages and composer) scales and the app around it does not. A host
+    // style still wins over both, as it does over THREAD_CSS_VARS today.
+    const { size: chatFontSize } = useChatFontSize();
+    const themeTokens = useOptionalResolvedThemeTokens();
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          'font-sans-flex aui-root aui-thread-root bg-primary-bg @container flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden',
+          className,
+        )}
+        style={{ ...THREAD_CSS_VARS, ...chatFontSizeStyle(chatFontSize, themeTokens), ...style }}
+        {...rest}
+      />
+    );
+  },
 );
 ThreadRootShell.displayName = 'ThreadRootShell';
 

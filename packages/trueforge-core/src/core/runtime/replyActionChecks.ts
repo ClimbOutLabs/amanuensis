@@ -1,10 +1,14 @@
+import { createHash } from 'node:crypto';
+
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import {
   isHostVouchedRead,
   isReadOnlyCall,
   MAX_WRITE_CALLS_PER_TURN,
   type TurnStepKind,
+  type TurnToolCallLedger,
 } from '../mcp/executeToolCalls';
+import { BROWSER_READ_TOOL_NAME, isAmanBrowserCall, movesBrowserPage } from '../permissions/browserToolNames';
 import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -12,6 +16,7 @@ import {
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
   SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
   SANDBOX_WRITE_FILE_TOOL_NAME,
 } from '../sandbox/Sandbox';
 
@@ -45,15 +50,47 @@ export const WRITE_CAP_STOP_MESSAGE = `Stopped after ${String(MAX_WRITE_CALLS_PE
  * Work its own server says stays in its workspace (staysInWorkspace) does not count, so a coding
  * task is not cut off part way. A read the host vouches for (a search, a page read, a map lookup)
  * never counts; a server's own read-only claim is not enough. A call held for the owner does not run now.
+ * A step of Aman's own browser never counts: it acts only in the tab of the site it opened, each press
+ * or typing that could send something asks first on its own card, and the repeat stop ends a loop.
  */
 export function countsTowardWriteCap(info: InternalToolCallInfo, input: { staysInWorkspace: boolean }): boolean {
-  return info.tier === 3 && info.held_for_owner === undefined && !isHostVouchedRead(info) && !input.staysInWorkspace;
+  return (
+    info.tier === 3 &&
+    info.held_for_owner === undefined &&
+    !isHostVouchedRead(info) &&
+    !isAmanBrowserCall(info) &&
+    !input.staysInWorkspace
+  );
+}
+
+/**
+ * The change count an identical call is judged against: the browser's own page count for a call of
+ * Aman's browser, and the turn's changes for everything else, so a scroll never lets another tool
+ * repeat, and a file edit never lets the browser repeat.
+ */
+export function changesSeenBy(
+  info: InternalToolCallInfo,
+  turn: Pick<TurnToolCallLedger, 'changesThisTurn' | 'browserPageChangesThisTurn'>,
+): number {
+  return isAmanBrowserCall(info) ? turn.browserPageChangesThisTurn : turn.changesThisTurn;
+}
+
+/**
+ * The page a successful browser call showed, as a digest of its text: a step that moves the page,
+ * or a read. Undefined for a call that shows no page (a screenshot, any other tool).
+ */
+export function browserPageSeen(input: { info: InternalToolCallInfo; text: string }): { digest: string } | undefined {
+  const showsPage =
+    movesBrowserPage(input.info) ||
+    (isAmanBrowserCall(input.info) && input.info.original_tool_name === BROWSER_READ_TOOL_NAME);
+  return showsPage ? { digest: createHash('sha256').update(input.text).digest('hex') } : undefined;
 }
 
 /**
  * Whether a call that ran changed something, so a different call made the same way may sensibly run
  * again (tests run again after a file edit, for example): any action the cap counts, and a sandbox
- * step whose effect is an edit, a commit or a push.
+ * step whose effect is an edit, a commit or a push. The browser's page has a count of its own
+ * (TurnToolCallLedger.browserPageChangesThisTurn).
  */
 export function changesState(info: InternalToolCallInfo, input: { countsTowardCap: boolean }): boolean {
   if (input.countsTowardCap) {
@@ -97,6 +134,7 @@ const SANDBOX_COMMAND_TOOLS: ReadonlySet<string> = new Set([
   SANDBOX_EXEC_TOOL_NAME,
   SANDBOX_RUN_CODE_TOOL_NAME,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
 ]);
 
 /** Connector tools that clone or download, as opposed to ones that only search or list repositories. */

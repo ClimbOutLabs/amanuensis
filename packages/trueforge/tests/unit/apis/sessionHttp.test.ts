@@ -23,6 +23,7 @@ import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
+import { SqliteChatDeletionStore } from '../../../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
@@ -30,7 +31,9 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteSessionMetricsStore } from '../../../src/db/sqlite/session-metrics/SqliteSessionMetricsStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
+import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
+import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { ListSessionsResponseSchema } from '../../../src/schemas/session';
 import {
   GetSessionMetricsChartDataResponseSchema,
@@ -101,6 +104,8 @@ describe('sessions HTTP agent binding', () => {
     });
 
     const deps: SessionsRouterDeps = {
+      chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
+      turnDrains: new TurnDrainRegistry(),
       sessions,
       sessionStore,
       sentinelAuditStore: new SentinelAuditStore(db),
@@ -249,6 +254,8 @@ describe('sessions HTTP agent binding', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     await sessionStore.createSession({
       tenant_id: 'default',
@@ -259,6 +266,8 @@ describe('sessions HTTP agent binding', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const start = new Date(Date.now() - 60 * 60 * 1000);
     const end = new Date(Date.now() + 60 * 60 * 1000);
@@ -306,6 +315,8 @@ describe('sessions HTTP agent binding', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const managerAuthorizer: Authorizer = {
       listAgentAccess: input =>
@@ -406,6 +417,8 @@ describe('sessions HTTP agent binding', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
 
     const created = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
@@ -956,6 +969,8 @@ describe('sessions HTTP agent binding', () => {
       metadata: {},
       external_id: 'run-theirs',
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const forbidden = await app.request(
       '/api/internal/sessions/get-or-create-by-external-id',

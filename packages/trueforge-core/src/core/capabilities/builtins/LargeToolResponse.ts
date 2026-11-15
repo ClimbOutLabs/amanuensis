@@ -198,6 +198,12 @@ function sandboxRawOutputStorageGuidance(content: string): string {
  * written back over the whole space by a later edit.
  */
 export const PAGE_READ_TOKEN_BUDGET = 2_500;
+/**
+ * What all the pages of one extract result share. It stays under the single-result threshold with room
+ * for the JSON around the pages, so a read of two or three pages reaches the model instead of being
+ * saved to a file it can only open by running a command.
+ */
+export const EXTRACT_READ_TOKEN_BUDGET = DEFAULT_INDIVIDUAL_TOOL_TOKEN_THRESHOLD - 1_000;
 export const SANDBOX_OUTPUT_EDGE_LINES = 40;
 
 const EXEC_OUTPUT_HINT =
@@ -297,7 +303,10 @@ export function budgetPageText(input: { text: string; request: ReadonlySet<strin
   return `${body}\n\n(Only part of this page is shown: about ${String(omitted)} more tokens were left out, and no tool can show them.)`;
 }
 
-/** Trims each page's text in a Tavily extract result to the page budget. The JSON shape stays. */
+/**
+ * Trims each page's text in a Tavily extract result to an equal share of the extract budget, and never
+ * more than the page budget. The JSON shape stays.
+ */
 export function budgetExtractPages(input: { content: string; request: ReadonlySet<string> }): string | undefined {
   let parsed: unknown;
   try {
@@ -308,6 +317,8 @@ export function budgetExtractPages(input: { content: string; request: ReadonlySe
   if (!isRecord(parsed) || !Array.isArray(parsed['pages'])) {
     return undefined;
   }
+  const textPages = parsed['pages'].filter(page => isRecord(page) && typeof page['text'] === 'string').length;
+  const maxTokens = Math.min(PAGE_READ_TOKEN_BUDGET, Math.floor(EXTRACT_READ_TOKEN_BUDGET / Math.max(1, textPages)));
   const pages: unknown[] = [];
   let changed = false;
   for (const page of parsed['pages']) {
@@ -316,7 +327,7 @@ export function budgetExtractPages(input: { content: string; request: ReadonlySe
       pages.push(page);
       continue;
     }
-    const text = budgetPageText({ text: original, request: input.request, maxTokens: PAGE_READ_TOKEN_BUDGET });
+    const text = budgetPageText({ text: original, request: input.request, maxTokens });
     changed ||= text !== original;
     pages.push({ ...page, text });
   }

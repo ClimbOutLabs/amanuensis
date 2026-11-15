@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"aman/slotagent/src/tree"
 )
@@ -129,5 +130,53 @@ func TestTransferDirAllowsLargerFiles(t *testing.T) {
 	}
 	if tree.ReadLimit("/workspace/.aman/transfer/../../x") != tree.MaxReadBytes {
 		t.Fatal("a path that only looks like the transfer dir gets the ordinary cap")
+	}
+}
+
+func TestSessionsMeasuresEveryTree(t *testing.T) {
+	parent := t.TempDir()
+	root, err := tree.Ensure(parent, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Write(root, "/workspace/a/b.txt", []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if _, err := tree.Ensure(parent, other); err != nil {
+		t.Fatal(err)
+	}
+	// A folder that is not a session and a stray file are not sessions.
+	if err := os.Mkdir(filepath.Join(parent, "not-a-session"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "stray"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	used := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(root, used, used); err != nil {
+		t.Fatal(err)
+	}
+	got := tree.Sessions(parent)
+	if len(got) != 2 {
+		t.Fatalf("got %d sessions, want 2: %+v", len(got), got)
+	}
+	byID := map[string]tree.Session{}
+	for _, s := range got {
+		byID[s.ID] = s
+	}
+	s := byID[sid]
+	// The root, the a folder and b.txt.
+	if s.Entries != 3 {
+		t.Errorf("entries = %d, want 3", s.Entries)
+	}
+	if s.Bytes < 5 {
+		t.Errorf("bytes = %d, want at least the file's 5", s.Bytes)
+	}
+	if !s.LastUsed.Equal(used) {
+		t.Errorf("last used = %v, want %v", s.LastUsed, used)
+	}
+	if e := byID[other]; e.Entries != 1 || e.Bytes != 0 {
+		t.Errorf("empty tree = %+v, want one entry and no bytes", e)
 	}
 }

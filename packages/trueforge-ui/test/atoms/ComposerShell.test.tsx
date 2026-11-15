@@ -16,7 +16,10 @@ describe('ComposerShell', () => {
           onSubmit={() => undefined}
         />,
       );
-      expect(screen.getByRole('status')).toHaveTextContent(/^Working on it$/);
+      const status = screen.getByRole('status');
+      expect(status).toHaveTextContent(/^Working on it$/);
+      expect(status).toHaveClass('text-sm');
+      expect(status.className).not.toMatch(/text-\[0\.8125rem\]/);
 
       act(() => {
         vi.advanceTimersByTime(125_000);
@@ -45,7 +48,9 @@ describe('ComposerShell', () => {
     expect(shell).toHaveClass('consumer-class');
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Hello');
     expect(screen.getByText('design.png')).toBeInTheDocument();
-    expect(screen.getByText('Connected')).toBeInTheDocument();
+    const connectorStatus = screen.getByText('Connected');
+    expect(connectorStatus).toHaveClass('text-sm');
+    expect(connectorStatus.className).not.toMatch(/text-\[0\.8125rem\]/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
     expect(onSubmit).toHaveBeenCalledOnce();
@@ -70,6 +75,21 @@ describe('ComposerShell', () => {
     expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('marks the model label so narrow screens can give it a line of its own', () => {
+    const { container } = render(
+      <ComposerShell
+        input={<textarea aria-label="Message" />}
+        disabled={false}
+        canSubmit={false}
+        modelLabel="GPT 5"
+        onSubmit={() => {}}
+      />,
+    );
+
+    const label = container.querySelector('.aui-composer-model-label');
+    expect(label).toHaveTextContent('GPT 5');
   });
 
   it('omits optional composer chrome when labels and attachment handling are absent', () => {

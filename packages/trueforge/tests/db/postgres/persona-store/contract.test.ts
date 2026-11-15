@@ -36,6 +36,8 @@ describePg('PostgresPersonaStore (IPersonaStore contract)', () => {
           metadata: {},
           agent: { type: 'inline', spec: makeAgentSpec() },
           custom: null,
+          is_incognito: false,
+          private_expires_at: null,
         });
       }
     }

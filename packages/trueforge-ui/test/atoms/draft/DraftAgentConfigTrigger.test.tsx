@@ -34,7 +34,7 @@ describe('DraftAgentConfigTrigger', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Enter builder' }));
 
-    const trigger = screen.getByRole('button', { name: 'Agent config' });
+    const trigger = screen.getByRole('button', { name: 'Agent setup' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');

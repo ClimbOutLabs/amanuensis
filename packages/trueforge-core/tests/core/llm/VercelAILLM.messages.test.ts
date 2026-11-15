@@ -14,7 +14,7 @@ import {
   toUserContent,
   VERCEL_AI_PROVIDER_NAMES,
 } from '../../../src/core/llm/VercelAILLM';
-import { internalSystemTag, untrustedDocumentTag } from '../../../src/core/runtime/contextUtils';
+import { hostPictureMessage, internalSystemTag, untrustedDocumentTag } from '../../../src/core/runtime/contextUtils';
 
 // ─────────── parseMimeFromDataUri ───────────
 
@@ -409,6 +409,36 @@ describe('convertMessages', () => {
       },
       { role: 'user', content: 'current question' },
     ]);
+  });
+
+  it("host context stays on the person's message when a picture the host attached follows a tool result", () => {
+    const picture = hostPictureMessage({
+      note: 'The browser screenshot you took. It shows a web page.',
+      imageUrl: 'data:image/png;base64,AAAA',
+    });
+    const { messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'system', content: 'Host context for this reply.' },
+        { role: 'user', content: 'Book me the 9am slot' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'browser_screenshot', arguments: '{}' } }],
+        },
+        { role: 'tool', tool_call_id: 'call-1', content: '{"status":"ok"}' },
+        picture,
+      ],
+      provider: 'openai',
+      providerName: 'openai',
+    });
+    const contextAt = result.findIndex(
+      message =>
+        Array.isArray(message.content) && JSON.stringify(message.content).includes('Host context for this reply.'),
+    );
+    expect(result[contextAt + 1]).toEqual({ role: 'user', content: 'Book me the 9am slot' });
+    expect(result.at(-1)?.role).toBe('user');
+    expect(JSON.stringify(result.at(-1))).toContain('[host-picture]');
   });
 
   it("host context goes before the person's message, not before attached file text that follows it", () => {

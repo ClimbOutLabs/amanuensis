@@ -6,7 +6,6 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import { getMemorySummarizeRoute, putMemorySummarizeRoute } from '../routes/memorySummarizeRoutes';
 import {
   MEMORY_SUMMARIZE_SETTING_KEY,
-  isMemorySummarizeEffective,
   readMemorySummarizeSetting,
   type MemorySummarizeSetting,
 } from '../runtime/memorySummarizeSettings';
@@ -22,7 +21,6 @@ function toMemorySummarize(setting: MemorySummarizeSetting): MemorySummarize {
     enabled: setting.enabled,
     overridden: setting.overridden,
     default_enabled: setting.defaultEnabled,
-    effective_enabled: setting.effectiveEnabled,
   };
 }
 
@@ -30,9 +28,7 @@ function toMemorySummarize(setting: MemorySummarizeSetting): MemorySummarize {
  * Admin/settings turn-summarization surface (mounted at
  * /api/v1/settings/memory-summarize). `enabled` is the stored setting —
  * the persisted override when one is stored, else the env default;
- * `overridden` reports whether a persisted override is stored;
- * `effective_enabled` is what the server will actually do (markdown-only gate
- * applied) — the truth the Settings toggle shows.
+ * `overridden` reports whether a persisted override is stored.
  */
 export function createMemorySummarizeRouter<TTransaction>(deps: MemorySummarizeRouterDeps<TTransaction>) {
   const router = new OpenAPIHono();
@@ -64,7 +60,6 @@ export function createMemorySummarizeRouter<TTransaction>(deps: MemorySummarizeR
       enabled,
       overridden: body.enabled !== null,
       defaultEnabled,
-      effectiveEnabled: isMemorySummarizeEffective(enabled),
     };
     return c.json({ data: toMemorySummarize(confirmed) }, 200);
   };

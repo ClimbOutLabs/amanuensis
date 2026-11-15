@@ -22,8 +22,6 @@ import {
   INSTALL_DRY_RUN_LINES,
   INSTALL_EMAIL_QUESTION,
   INSTALL_IMAGE_UNAVAILABLE,
-  INSTALL_KEY_EMPTY_LINE,
-  INSTALL_KEY_QUESTION,
   INSTALL_NO_ANSWER,
   INSTALL_NO_FREE_PORT,
   INSTALL_NOT_WINDOWS,
@@ -34,6 +32,7 @@ import {
   INSTALL_PHONE_QUESTION,
   INSTALL_RELEASE_DOWNLOAD_FAILED,
   INSTALL_RELEASE_NOT_THERE,
+  INSTALL_REMOVAL_NOTE_STUCK,
   INSTALL_RESTART_NEEDED,
   INSTALL_RESUME_FAILED,
   INSTALL_SOURCE_FAILED,
@@ -233,15 +232,15 @@ async function ensureDockerReady(deps: InstallDeps, options: { resumed: boolean 
 interface Answers {
   email: string;
   password: string;
-  key: string;
   phone: boolean;
 }
 
-// The plan's four questions, one at a time, each prompt ending with a
-// colon. The password is judged by the shell installer's own rule
-// here, at the question, and asked again while it falls short or the
-// two typings differ. The key may be empty. Nothing else is asked:
-// ports are picked, the instance is main, and backups are daily.
+// The three questions, one at a time, each prompt ending with a colon.
+// The password question names the whole rule, and the password is
+// judged by the shell installer's own rule as soon as it is typed, so
+// a password that falls short is asked again before it is typed a
+// second time. Nothing else is asked: ports are picked, the instance
+// is main, backups are daily, and the model is added in Aman itself.
 async function askQuestions(deps: InstallDeps): Promise<Answers | null> {
   const { print } = deps;
   let email = '';
@@ -258,28 +257,20 @@ async function askQuestions(deps: InstallDeps): Promise<Answers | null> {
     if (first === null) {
       return null;
     }
-    const second = await deps.askSecret(INSTALL_PASSWORD_AGAIN_QUESTION);
-    if (second === null) {
-      return null;
-    }
     const problem = installPasswordProblem(first);
     if (problem !== null) {
       print(problem);
       continue;
+    }
+    const second = await deps.askSecret(INSTALL_PASSWORD_AGAIN_QUESTION);
+    if (second === null) {
+      return null;
     }
     if (first !== second) {
       print(INSTALL_PASSWORD_MISMATCH_LINE);
       continue;
     }
     password = first;
-  }
-  const keyAnswer = await deps.askSecret(INSTALL_KEY_QUESTION);
-  if (keyAnswer === null) {
-    return null;
-  }
-  const key = keyAnswer.trim();
-  if (key === '') {
-    print(INSTALL_KEY_EMPTY_LINE);
   }
   let phone: boolean | null = null;
   while (phone === null) {
@@ -296,7 +287,7 @@ async function askQuestions(deps: InstallDeps): Promise<Answers | null> {
       print(INSTALL_YES_OR_NO_LINE);
     }
   }
-  return { email, password, key, phone };
+  return { email, password, phone };
 }
 
 // The newest release's source, fetched and checked the way the
@@ -373,9 +364,8 @@ async function unpackNewestSource(deps: InstallDeps): Promise<boolean> {
 
 // The install itself, run by the shell inside the setup container
 // with the upgrade's container shape plus the input the answers ride
-// on: the password on the first line, and the key on the second, in
-// the order the shell reads them, only when a key was given. The
-// secrets are never on the command line and never printed here; the
+// on: the password, on one line. It is never on the command line and
+// never printed here; the
 // shell's own output is shown as it stands.
 async function runContainerInstall(deps: InstallDeps, answers: Answers): Promise<number> {
   const { jobs, print } = deps;
@@ -393,9 +383,8 @@ async function runContainerInstall(deps: InstallDeps, answers: Answers): Promise
     email: answers.email,
     appPort: ports.appPort,
     loginPort: ports.loginPort,
-    hasKey: answers.key !== '',
   });
-  const stdin = answers.key === '' ? `${answers.password}\n` : `${answers.password}\n${answers.key}\n`;
+  const stdin = `${answers.password}\n`;
   const result = await deps.runner.runBytes(
     'docker',
     [
@@ -555,6 +544,14 @@ export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }
       print(line);
     }
     return 0;
+  }
+  // An earlier removal's note that Docker is cleared stops being true
+  // the moment this install puts anything there, finished or not.
+  try {
+    await jobs.clearDockerSideRemoved();
+  } catch {
+    print(problemText(INSTALL_REMOVAL_NOTE_STUCK));
+    return 1;
   }
   const resumed = await jobs.runOnceResumePending().catch(() => false);
   if (resumed) {

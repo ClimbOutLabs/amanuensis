@@ -13,6 +13,7 @@ import { formatMemoryBlock } from '../../../../src/runtime/memory/memoryCapabili
 import type { TurnToolResult } from '../../../../src/runtime/memory/memoryNotesSummarize';
 import { submitRetain } from '../../../../src/runtime/memory/memoryRetain';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 /** The next scripted answer for each of the two model calls a turn can make. */
@@ -58,11 +59,13 @@ jest.mock('../../../../src/runtime/memory/memoryNotesSummarize', () => {
 });
 
 const unusedStore: IModelProviderStore = {
+  managedElsewhere: false,
   listProviders: jest.fn(),
   getProvider: jest.fn(),
   getProviderForUpdate: jest.fn(),
   createProvider: jest.fn(),
   upsertProvider: jest.fn(),
+  recordProviderCheck: jest.fn(async () => undefined),
   listModels: jest.fn(),
   deleteProvider: jest.fn(),
 };
@@ -97,6 +100,7 @@ describe('turn memory with findings and reply notes', () => {
     assistantName?: string;
   }): Promise<void> {
     await submitRetain({
+      session: { is_incognito: false },
       client,
       sessionId: 'chat-1',
       turnId: turn.id,
@@ -111,6 +115,7 @@ describe('turn memory with findings and reply notes', () => {
         modelProviderStore: unusedStore,
         summarizationModelFqn: 'provider/model',
         tokenFactoryBudget: uncappedTokenFactoryBudget,
+        globalSettingsStore: inMemoryGlobalSettingsStore(),
         modelUsage: discardedModelUsage,
         assistantName: turn.assistantName,
       },
@@ -129,7 +134,8 @@ describe('turn memory with findings and reply notes', () => {
     const file = await dayFile();
     expect(file).toContain('My dentist is Dr Okafor.');
     expect(file).not.toContain('note:');
-    expect(file).not.toContain('> Source: read content');
+    expect(file).not.toContain('External source');
+    expect(file).toContain('> From you');
     expect(file.match(/^## /gm)).toHaveLength(1);
   });
 
@@ -157,6 +163,7 @@ describe('turn memory with findings and reply notes', () => {
     });
     const retain = jest.spyOn(client, 'retain');
     await submitRetain({
+      session: { is_incognito: false },
       client,
       sessionId: 'chat-1',
       turnId: 't2b',
@@ -171,14 +178,15 @@ describe('turn memory with findings and reply notes', () => {
         modelProviderStore: unusedStore,
         summarizationModelFqn: 'provider/model',
         tokenFactoryBudget: uncappedTokenFactoryBudget,
+        globalSettingsStore: inMemoryGlobalSettingsStore(),
         modelUsage: discardedModelUsage,
       },
     });
     const content = retain.mock.calls[0]?.[0].items[0]?.content ?? '';
     expect(content.endsWith('<!-- note: email 2026-10-29 -->')).toBe(true);
     const block = formatMemoryBlock({
+      today: '2026-11-13',
       results: [{ id: 'h1', occurred_start: '2026-10-29', text: content }],
-      entities: [],
       budgetTokens: 2000,
     }).block;
     expect(block).toContain('found earlier by the assistant] From an email, found Oct 29: Priya asked');
@@ -205,8 +213,6 @@ describe('turn memory with findings and reply notes', () => {
     const recalled = await client.recall({
       query: 'page ended line',
       maxTokens: 1000,
-      queryTimestamp: '2026-10-30T09:00:00.000Z',
-      entityTokens: 0,
       timeoutMs: 5000,
     });
     if (!recalled.ok) {
@@ -214,7 +220,7 @@ describe('turn memory with findings and reply notes', () => {
     }
     expect(recalled.results).toHaveLength(1);
     expect(recalled.results[0]?.metadata?.['note_source']).toBeUndefined();
-    const block = formatMemoryBlock({ results: recalled.results, entities: [], budgetTokens: 2000 }).block;
+    const block = formatMemoryBlock({ today: '2026-11-13', results: recalled.results, budgetTokens: 2000 }).block;
     expect(block).toContain('It ended with this line.');
     expect(block).not.toContain('found earlier by the assistant');
   });
@@ -229,7 +235,7 @@ describe('turn memory with findings and reply notes', () => {
     if (!listed.ok) {
       throw new Error('expected a listing');
     }
-    expect(listed.entries[0]?.text).toContain('> Source: assistant reply');
+    expect(listed.entries[0]?.text).toContain('> External source: assistant reply');
     expect(listed.entries[0]?.text).not.toContain('read content');
   });
 
@@ -248,7 +254,7 @@ describe('turn memory with findings and reply notes', () => {
       throw new Error('expected a listing');
     }
     expect(listed.entries.map(entry => entry.text.includes('12 Elm Street'))).toEqual([true]);
-    expect(listed.entries[0]?.text).toContain('> Source: read content');
+    expect(listed.entries[0]?.text).toContain('> External source: read content');
   });
 
   it('stores the same finding once across turns, and keeps a different one', async () => {
@@ -283,6 +289,7 @@ describe('turn memory with findings and reply notes', () => {
     });
     for (const id of ['p1', 'p2', 'p3']) {
       await submitRetain({
+        session: { is_incognito: false },
         client: persona,
         sessionId: 'chat-2',
         turnId: id,
@@ -297,6 +304,7 @@ describe('turn memory with findings and reply notes', () => {
           modelProviderStore: unusedStore,
           summarizationModelFqn: 'provider/model',
           tokenFactoryBudget: uncappedTokenFactoryBudget,
+          globalSettingsStore: inMemoryGlobalSettingsStore(),
           modelUsage: discardedModelUsage,
         },
       });
@@ -364,15 +372,13 @@ describe('turn memory with findings and reply notes', () => {
     const recalled = await client.recall({
       query: 'signed form Priya',
       maxTokens: 1000,
-      queryTimestamp: '2026-10-30T09:00:00.000Z',
-      entityTokens: 0,
       timeoutMs: 5000,
     });
     if (!recalled.ok) {
       throw new Error('expected recall');
     }
     expect(recalled.results[0]?.metadata).toMatchObject({ note_source: 'email', note_date: '2026-10-29' });
-    const block = formatMemoryBlock({ results: recalled.results, entities: [], budgetTokens: 2000 }).block;
+    const block = formatMemoryBlock({ today: '2026-11-13', results: recalled.results, budgetTokens: 2000 }).block;
     expect(block).toContain('found earlier by the assistant');
     expect(block).toContain('From an email, found Oct 29: Priya asked for the signed form by 2026-11-03.');
   });

@@ -9,7 +9,9 @@ import {
   SandboxPathIsDirectoryError,
 } from '../SandboxErrors';
 import type { CodeModeTransport } from '../codeMode/CodeModeTransport';
-import { PACKAGE_UNAVAILABLE_RULE } from '../packageMirrors';
+import { hasEnvBeyondCommitIdentity } from '../gitCommitIdentity';
+import { GIT_PROCESS_PINS } from '../hostAuthenticatedGit';
+import { PACKAGE_UNAVAILABLE_RULE, PYTHON_PROJECT_ENVIRONMENT_RULE } from '../packageMirrors';
 import {
   executeVerifiedWorkspaceCommit,
   type ExecResult,
@@ -53,6 +55,33 @@ export interface SlotSandboxProviderOptions {
   sleepMs: ((ms: number) => Promise<void>) | undefined;
   /** Carries out network git on the host; without it, git commands that need the network simply fail offline. */
   gitBridge: GitBridge | undefined;
+  /**
+   * Remembers whether the slots were last seen full, so the warning is logged when that changes rather than on
+   * every check. A host that makes a provider per call passes one shared log; without it each provider keeps its own.
+   */
+  fullStateLog?: SlotFullStateLog | undefined;
+}
+
+/** Logs "every sandbox slot is full" once when the slots fill up, and again only after room came back. */
+export class SlotFullStateLog {
+  #full = false;
+
+  report(input: {
+    logger: Logger;
+    full: readonly { index: number; sessions: number; capacity: number }[] | null;
+  }): void {
+    if (input.full === null) {
+      this.#full = false;
+      return;
+    }
+    if (this.#full) {
+      return;
+    }
+    this.#full = true;
+    input.logger.warn('every sandbox slot is full', {
+      slots: input.full.map(slot => ({ slot: slot.index + 1, sessions: slot.sessions, capacity: slot.capacity })),
+    });
+  }
 }
 
 function parseSandboxId(sandboxId: string): { slot: number; sessionId: string } | undefined {
@@ -99,6 +128,15 @@ function describeAgentError(error: SlotCallError): string {
 }
 
 /**
+ * A host-built git command pins its home, PATH and prompts. A guest already has a fixed, empty home and
+ * PATH, reads no per-user or system git settings and has no terminal, and its agent refuses those names.
+ * Only the exact pins are left out; any other value for those names still reaches the agent and is refused.
+ */
+function withoutGuestPinnedEnv(env: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter(([name, value]) => GIT_PROCESS_PINS[name] !== value));
+}
+
+/**
  * Shell and file tools on sandbox slots. A sandbox is a workspace tree pinned to one slot; every command
  * runs in a fresh gVisor guest that mounts that tree at /workspace. Background processes end with the call.
  */
@@ -117,6 +155,7 @@ export class SlotSandboxProvider implements SandboxProvider {
   private readonly logger: Logger;
   private readonly sleepMs: (ms: number) => Promise<void>;
   private readonly gitBridge: GitBridge | undefined;
+  private readonly fullStateLog: SlotFullStateLog;
   private gitToken: string | null = null;
   readonly hostGit: HostGitCapability | undefined;
 
@@ -128,6 +167,7 @@ export class SlotSandboxProvider implements SandboxProvider {
     this.logger = options.logger.child({ module: 'SlotSandboxProvider' });
     this.sleepMs = options.sleepMs ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
     this.gitBridge = options.gitBridge;
+    this.fullStateLog = options.fullStateLog ?? new SlotFullStateLog();
     this.hostGit = options.gitBridge === undefined ? undefined : this.createHostGit(options.gitBridge);
   }
 
@@ -172,9 +212,9 @@ export class SlotSandboxProvider implements SandboxProvider {
     const cwd = params.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, params.cwd);
     const request = {
       session_id: target.sessionId,
-      argv: ['bash', '-c', params.command],
+      argv: params.argv === undefined ? ['bash', '-c', params.command] : [...params.argv],
       cwd,
-      env: params.env ?? {},
+      env: withoutGuestPinnedEnv(params.env ?? {}),
       timeout_ms: Math.max(SLOT_MIN_AGENT_TIMEOUT_MS, timeoutMs - SLOT_AGENT_TIMEOUT_MARGIN_MS),
       disk_mb: this.treeDiskMb,
       ...(params.packageMirrorToken === undefined ? {} : { package_mirror_token: params.packageMirrorToken }),
@@ -275,8 +315,10 @@ export class SlotSandboxProvider implements SandboxProvider {
       'SANDBOX RULES:',
       '- Every command starts in a fresh, offline sandbox. Files under /workspace persist between commands; processes do not, so a background process ends when its command returns.',
       '- Python 3, Node.js with TypeScript, bash, git and gcc/g++/make are installed.',
-      '- No general network from code or the shell, by design. The one exception is package downloads: when the person has allowed downloads for the repo this chat is working on, pip, npm, Go and Cargo can fetch packages from the public package sites. Packages that come from a git address cannot be fetched. When downloads are not allowed for the repo, packages cannot be downloaded; ' +
+      '- No general network from code or the shell, by design. The one exception is package downloads: when the person has allowed downloads for this chat (per repository, or one switch for chats without a project), pip, npm, Go and Cargo can fetch packages from the public package sites. Packages that come from a git address cannot be fetched. When downloads are not allowed, packages cannot be downloaded; ' +
         PACKAGE_UNAVAILABLE_RULE,
+      `- ${PYTHON_PROJECT_ENVIRONMENT_RULE}`,
+      "- run_code runs only the code it is given, in an empty folder: it cannot see /workspace or anything installed there. Check a project's files with exec and its code with its tests, not with run_code.",
     ].join('\n');
   }
 
@@ -313,7 +355,7 @@ export class SlotSandboxProvider implements SandboxProvider {
   private bridgedGit(params: SandboxExecParams): Promise<ExecResult> | undefined {
     const bridge = this.gitBridge;
     const plan = bridge?.plan(params.command);
-    if (bridge === undefined || plan === undefined || Object.keys(params.env ?? {}).length > 0) {
+    if (bridge === undefined || plan === undefined || hasEnvBeyondCommitIdentity(params.env)) {
       return undefined;
     }
     return bridge.run({
@@ -324,6 +366,8 @@ export class SlotSandboxProvider implements SandboxProvider {
       guest: this.guestFor(params.sandboxId),
       sandboxId: params.sandboxId,
       cwd: params.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, params.cwd),
+      // Past the check above, the environment holds the commit name and nothing else.
+      commitIdentityEnv: params.env,
       timeoutSeconds: params.timeoutSeconds,
       signal: params.signal,
     });
@@ -348,6 +392,7 @@ export class SlotSandboxProvider implements SandboxProvider {
           guest: this.guestFor(input.sandboxId),
           sandboxId: input.sandboxId,
           cwd: input.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, input.cwd),
+          commitIdentityEnv: undefined,
           timeoutSeconds: undefined,
           signal: input.signal,
         });
@@ -451,7 +496,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       })),
     );
     const problems: string[] = [];
-    const full: string[] = [];
+    const full: { index: number; sessions: number; capacity: number }[] = [];
     const usable: { index: number; sessions: number }[] = [];
     for (const { index, health } of probes) {
       if (!health.ok) {
@@ -463,7 +508,7 @@ export class SlotSandboxProvider implements SandboxProvider {
         // On a slot with its own fixed disk the chats' quotas must fit, or one slot filling up fails for all its chats.
         const capacity = chatCapacity({ facts: health.value.attestation.facts, treeDiskMb: this.treeDiskMb });
         if (capacity !== undefined && health.value.sessions >= capacity) {
-          full.push(`slot ${String(index + 1)} holds ${String(capacity)} chats`);
+          full.push({ index, sessions: health.value.sessions, capacity });
         } else {
           usable.push({ index, sessions: health.value.sessions });
         }
@@ -475,12 +520,16 @@ export class SlotSandboxProvider implements SandboxProvider {
     const emptiest = usable.filter(slot => slot.sessions === fewest);
     const chosen = emptiest[Math.floor(Math.random() * emptiest.length)];
     if (chosen !== undefined) {
+      this.fullStateLog.report({ logger: this.logger, full: null });
       return { ok: true, index: chosen.index };
     }
     if (problems.length === 0 && full.length > 0) {
+      this.fullStateLog.report({ logger: this.logger, full });
       return {
         ok: false,
-        reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full.join('; ')}). Delete old chats, then try again.`,
+        reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full
+          .map(slot => `slot ${String(slot.index + 1)} holds ${String(slot.capacity)} chats`)
+          .join('; ')}). Delete old chats, then try again.`,
       };
     }
     this.logger.warn('no sandbox slot is usable', { problems });
@@ -501,7 +550,9 @@ export class SlotSandboxProvider implements SandboxProvider {
         return {
           success: false,
           error: withTail(
-            `The command timed out after ${String(Math.round(input.timeoutMs / 1000))}s and was stopped.`,
+            `The command timed out after ${String(Math.round(input.timeoutMs / 1000))}s and was stopped.${
+              input.timeoutMs < MAX_TIMEOUT_MS ? ' If it needs longer, run it again with a larger timeout_seconds.' : ''
+            }`,
           ),
         };
       case 'oom':

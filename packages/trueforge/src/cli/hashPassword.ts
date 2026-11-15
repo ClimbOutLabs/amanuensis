@@ -1,11 +1,9 @@
-import bcrypt from 'bcryptjs';
-
+import { hashPasswordValue, PASSWORD_MAX_BYTES } from '../auth/passwordHash';
 import type { Command } from './command';
 import { UsageError } from './io';
 
-const BCRYPT_ROUNDS = 10;
 /** bcrypt ignores everything past 72 bytes, so a longer password would be silently truncated. */
-const BCRYPT_MAX_PASSWORD_BYTES = 72;
+const BCRYPT_MAX_PASSWORD_BYTES = PASSWORD_MAX_BYTES;
 
 function stripTrailingNewline(value: string): string {
   if (value.endsWith('\r\n')) {
@@ -28,8 +26,7 @@ export const hashPassword: Command = async ({ args, io }) => {
       `The password is longer than ${String(BCRYPT_MAX_PASSWORD_BYTES)} bytes, which bcrypt cannot hash.`,
     );
   }
-  // Dex documents the $2a$ prefix; the hash is identical to $2b$ for passwords under 72 bytes.
-  const hash = (await bcrypt.hash(password, BCRYPT_ROUNDS)).replace(/^\$2b\$/, '$2a$');
+  const hash = await hashPasswordValue(password);
   await io.stdout(`${JSON.stringify({ hash })}\n`);
   return 0;
 };

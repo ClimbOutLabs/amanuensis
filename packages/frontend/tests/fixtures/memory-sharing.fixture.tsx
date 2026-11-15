@@ -3,10 +3,10 @@ import '@truefoundry/trueforge-ui/styles.css';
 import { createRoot } from 'react-dom/client';
 
 /**
- * The real shell with seven invented agents and a sharing config. Every other API call
+ * The real shell with ten invented agents and a sharing config. Every other API call
  * answers 503, so the shell renders its chrome without a backend.
  */
-const AGENT_NAMES = ['Anna', 'Cole', 'Dana', 'Eli', 'Farah', 'Gus', 'Hana'];
+const AGENT_NAMES = ['Anna', 'Cole', 'Dana', 'Eli', 'Farah', 'Gus', 'Hana', 'Ivo', 'Jun', 'Kit'];
 const agents: Persona[] = AGENT_NAMES.map((name, index) => ({
   id: `agent-${index}`,
   display_name: name,

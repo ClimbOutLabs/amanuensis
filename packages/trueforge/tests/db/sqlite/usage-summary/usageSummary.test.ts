@@ -84,6 +84,7 @@ describe('usage summary over the session store', () => {
   async function summaryFor(input: Parameters<typeof resolveUsagePeriod>[0]['input']) {
     const period = resolveUsagePeriod({ input, now: NOW, timeZone: 'UTC' });
     const entries = await collectUsageEntries({
+      deletedChats: { listDeletedChatModelUsage: () => Promise.resolve([]) },
       sessionStore: store,
       tenantId: TENANT,
       userRef: ME,

@@ -8,10 +8,12 @@
  * in-memory (offline off, nothing relaxed, so Tier 2 asks) so core works
  * without server wiring.
  */
+import { inMemoryApprovedMailDrafts, type ApprovedMailDrafts } from '../email/mailConnector/approvedDrafts';
 import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 import type { AuditLogWriter } from './audit';
 import { seedShellAllowlist, type ShellAllowlistConfig } from './shellAllowlist';
-import type { Tier2ActionKind } from './tier';
+import type { SkillNetworkAnswer } from './skillNetworkCards';
+import type { Tier2ActionKind, Tier3SkillNetwork } from './tier';
 import { InMemoryToolGrantStore, type ToolGrantStore } from './toolGrants';
 import { InMemoryTrackedExecutableStore, type TrackedExecutableStore } from './trackedExecutables';
 import { createWebSearchTurnState, type WebSearchTurnState } from './webSearch';
@@ -29,29 +31,68 @@ export interface SentinelServices {
   searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Whether the user lets embedded maps run without asking, behind the outbound secret guard. Off unless the host says. */
   mapsWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
+  /** Records that the user answered a maps card with "Always allow everywhere": maps run without asking from then on. */
+  allowMapsWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<void>;
   /** Whether the user lets in-sandbox work (code, commands, workspace files, package installs) run without asking. Default off. */
   sandboxWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Exact secret values the host holds for this user, for the outbound secret guard. */
   outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
   /** True when no person watches this turn (a scheduled run), so a call that would ask is held for the owner. */
   unattended: boolean;
+  /** True in an incognito chat: a call that would make or change something that outlives the chat is refused. */
+  incognito: boolean;
   /** On a demo instance, the only addresses mail may go to; null when this is not a demo. Empty allows no send. */
   demoSendAllowlist: readonly string[] | null;
-  /** Addresses the Email connector may send to without a new-recipient card, lowercased. Empty allows no send. */
-  mail_listed_addresses: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
   /**
-   * Adds exact addresses to the Email send list, then waits until the sidecar loads it. The default adds nothing,
-   * so a host that does not implement it fails closed.
+   * Addresses the Email connector may send to from one account without a new-recipient card, lowercased.
+   * The account is named by its address; null means the default account. Empty allows no send.
+   */
+  mail_listed_addresses: (input: {
+    tenant_id: string;
+    created_by: string;
+    account: string | null;
+  }) => Promise<readonly string[]>;
+  /**
+   * Adds exact addresses to one account's Email send list, then waits until the sidecar loads it. The
+   * default adds nothing, so a host that does not implement it fails closed.
    */
   mail_add_recipients: (
-    input: { tenant_id: string; created_by: string },
+    input: { tenant_id: string; created_by: string; account: string },
     addresses: readonly string[],
   ) => Promise<MailAddRecipientsResult>;
+  /**
+   * The connected Email accounts and which of them is the default, for the approval card's account
+   * picker. Empty when no account is connected or the accounts cannot be read.
+   */
+  mail_accounts: (input: {
+    tenant_id: string;
+    created_by: string;
+  }) => Promise<{ accounts: readonly string[]; default_account: string | null }>;
   /**
    * Waits until the sidecar runs the Email list the server holds. Checked before every approved mail send, so a
    * send never runs on a list the sidecar has not loaded. Fails closed by default.
    */
   mail_list_loaded: (input: { tenant_id: string; created_by: string }) => Promise<MailListLoadedResult>;
+  /**
+   * The Email drafts the person approved and has not sent yet. A send or a forward through the Email
+   * connector goes out only when it matches one. The default keeps them in memory.
+   */
+  mail_approved_drafts: ApprovedMailDrafts;
+  /**
+   * Records the owner's answer to a skill network card: allow once for this chat, always allow
+   * for the skill, or deny. The default records nothing, so a host without skill wiring never
+   * grants a site by answering. An implementation that binds the answer to the skill's code
+   * version may refuse it, recording nothing, by rejecting with an error named
+   * SkillCodePinRefusedError whose message is written for the person: the send carrying the
+   * answer is refused with that message and the card stays undecided.
+   */
+  skill_network_record_answer: (input: {
+    tenant_id: string;
+    created_by: string;
+    session_id: string;
+    skill_network: Tier3SkillNetwork;
+    answer: SkillNetworkAnswer;
+  }) => Promise<void>;
 }
 
 /** `loaded`: the sidecar runs the new list. `not_loaded`: it did not in time. `refused`: an address is not allowed. */
@@ -78,6 +119,7 @@ export const DEFAULT_PINNED_PATH = '/usr/bin:/bin';
 
 /** Default services for tests and unconfigured servers. */
 export function defaultSentinelServices(input: { pinned_path: string }): SentinelServices {
+  let mapsAllowed = false;
   return {
     tracked_store: new InMemoryTrackedExecutableStore(),
     token_store: new InMemoryApprovalTokenStore(),
@@ -87,32 +129,46 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     isOffline: () => Promise.resolve(false),
     tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
     searchWithoutAsking: () => Promise.resolve(true),
-    mapsWithoutAsking: () => Promise.resolve(false),
+    mapsWithoutAsking: () => Promise.resolve(mapsAllowed),
+    allowMapsWithoutAsking: () => {
+      mapsAllowed = true;
+      return Promise.resolve();
+    },
     sandboxWithoutAsking: () => Promise.resolve(false),
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
+    incognito: false,
     demoSendAllowlist: null,
     mail_listed_addresses: () => Promise.resolve([]),
     mail_add_recipients: () => Promise.resolve('not_loaded'),
+    mail_accounts: () => Promise.resolve({ accounts: [], default_account: null }),
     mail_list_loaded: () => Promise.resolve('not_loaded'),
+    mail_approved_drafts: inMemoryApprovedMailDrafts(),
+    skill_network_record_answer: () => Promise.resolve(),
   };
 }
 
 /**
- * Services with the user's Tier 2 relaxations switched off, so such an action asks. Used for every
- * turn of a scheduled chat: its context holds what the run read, so the owner's relaxations must
- * not apply even once they are typing. Token and grant stores stay shared with the session.
+ * Services with the user's relaxations switched off: the Tier 2 ones and the sandbox "without asking" switch, so
+ * such an action asks. Used for every turn of a scheduled chat: its context holds what the run read, so the
+ * owner's relaxations must not apply even once they are typing. Token and grant stores stay shared with the session.
  */
 export function withoutRelaxations(services: SentinelServices): SentinelServices {
-  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()) };
+  return {
+    ...services,
+    tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
+    sandboxWithoutAsking: () => Promise.resolve(false),
+  };
 }
 
-/**
- * Services for one unattended turn: no relaxations, and a call that would ask is held for the
- * owner while nobody watches.
- */
+/** Services for one unattended turn: no relaxations, and a call that would ask is held for the owner while nobody watches. */
 export function forUnattendedRun(services: SentinelServices): SentinelServices {
   return { ...withoutRelaxations(services), unattended: true };
+}
+
+/** Services for a turn of an incognito chat. Token and grant stores stay shared with the session. */
+export function forIncognitoChat(services: SentinelServices): SentinelServices {
+  return { ...services, incognito: true };
 }
 
 /**

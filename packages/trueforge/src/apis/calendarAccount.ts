@@ -4,6 +4,7 @@
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
 import {
+  CALDAV_GOOGLE_PROVIDER_KEY,
   CALDAV_PROVIDER_PRESETS,
   caldavProviderKeyForUrl,
 } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
@@ -15,10 +16,12 @@ import {
   getCalendarAccountState,
   removeCalendarAccount,
   saveCalendarAccount,
+  setCalendarDefaultAccount,
   syncCalendarConnectorWithAccount,
   type PublicCalendarAccount,
 } from '../runtime/calendarAccount';
-import { connectionStateOf } from '../runtime/connectorAccount';
+import { connectionStateForSignIn, connectionStateOf } from '../runtime/connectorAccount';
+import { invalidateTodayCalendarCache } from '../runtime/todayCalendar';
 import type { CalendarAccountStatus, SaveCalendarAccountRequest } from '../schemas/calendarAccount';
 import { createConnectorAccountHandlers } from './connectorAccountHandlers';
 import { requireJsonOrSameOrigin } from './crossSite';
@@ -33,15 +36,17 @@ interface CalendarAccountRouterDeps {
   mcpServerStore: Pick<IMcpServerStore, 'upsertServer' | 'deleteServer' | 'getServer'>;
 }
 
-const DEFAULT_PROVIDER_KEY = 'fastmail';
+const DEFAULT_PROVIDER_KEY = CALDAV_GOOGLE_PROVIDER_KEY;
 
 function providerTable(): CalendarAccountStatus['providers'] {
   return CALDAV_PROVIDER_PRESETS.map(preset => ({
     key: preset.key,
     name: preset.name,
     server_url: preset.server_url,
+    account_url_template: preset.account_url_template,
     help_url: preset.help_url,
     help_hint: preset.help_hint,
+    setup_steps: [...preset.setup_steps],
   }));
 }
 
@@ -67,6 +72,8 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
       username: null,
       calendar_url: null,
       provider_key: DEFAULT_PROVIDER_KEY,
+      accounts: [],
+      default_address: null,
       providers: providerTable(),
     }),
     statusBody: state => ({
@@ -76,6 +83,15 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
       username: state.account?.username ?? null,
       calendar_url: state.account?.url ?? null,
       provider_key: state.account === null ? DEFAULT_PROVIDER_KEY : caldavProviderKeyForUrl(state.account.url),
+      accounts: state.accounts.map(entry => ({
+        email: entry.account.email,
+        username: entry.account.username,
+        calendar_url: entry.account.url,
+        provider_key: caldavProviderKeyForUrl(entry.account.url),
+        state: connectionStateForSignIn(entry.sign_in),
+        is_default: entry.account.email === state.default_key,
+      })),
+      default_address: state.default_key,
       providers: providerTable(),
     }),
     readState: options => getCalendarAccountState(clientDeps(), options),
@@ -87,7 +103,8 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
         username: request.username,
         calendar_url: request.calendar_url,
       }),
-    remove: () => removeCalendarAccount(clientDeps()),
+    remove: key => removeCalendarAccount(clientDeps(), key),
+    setDefault: key => setCalendarDefaultAccount(clientDeps(), key),
     sync: state =>
       syncCalendarConnectorWithAccount({
         state,
@@ -107,13 +124,25 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
   router.openapi(calendarAccountRoutes.save, async c => {
     const answer = await handlers.save(c.req.valid('json'));
     if (answer.status === 201) {
+      // The account changed, so the rail's cached calendar read is stale from this moment.
+      invalidateTodayCalendarCache();
       return c.json(answer.body, 201);
     }
     return answer.status === 400 ? c.json(answer.body, 400) : c.json(answer.body, 502);
   });
   router.openapi(calendarAccountRoutes.remove, async c => {
-    const answer = await handlers.remove();
+    const answer = await handlers.remove(c.req.valid('json').address);
+    if (answer.status === 200) {
+      invalidateTodayCalendarCache();
+    }
     return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, 502);
+  });
+  router.openapi(calendarAccountRoutes.setDefault, async c => {
+    const answer = await handlers.setDefault(c.req.valid('json').address);
+    if (answer.status === 200) {
+      return c.json(answer.body, 200);
+    }
+    return answer.status === 400 ? c.json(answer.body, 400) : c.json(answer.body, 502);
   });
   return router;
 }

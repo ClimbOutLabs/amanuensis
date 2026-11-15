@@ -60,6 +60,8 @@ const PersonaVoiceSchema = VoiceIdSchema.nullable()
   )
   .openapi({ example: 'af_bella' });
 
+const PersonaAccountListSchema = z.array(z.string().trim().min(3).max(320)).max(16).optional();
+
 const PersonaContentBaseSchema = z
   .object({
     display_name: PersonaNameSchema.describe('Name shown in the UI and typed to invoke the persona.').openapi({
@@ -74,6 +76,12 @@ const PersonaContentBaseSchema = z
     ),
     model_name: PersonaModelNameSchema,
     voice: PersonaVoiceSchema,
+    mail_accounts: PersonaAccountListSchema.describe(
+      'Email accounts this persona may use, by address. Omitted means every connected account.',
+    ),
+    calendar_accounts: PersonaAccountListSchema.describe(
+      'Calendar accounts this persona may use, by email address. Omitted means every connected account.',
+    ),
   })
   .strict();
 

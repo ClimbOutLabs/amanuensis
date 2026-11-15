@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -9,21 +6,13 @@ import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const PHONE = { width: 390, height: 844 };
-
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-approval-phone-'));
-}
 
 test('both approval cards fit a 390 px phone with every choice in reach', { timeout: 180_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -56,8 +45,8 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
 
     const ticket = page.getByTestId('ticket-card');
     const plain = page.getByTestId('plain-card');
-    const ticketChoices = ['Allow', 'Not now', 'Always allow this here'];
-    const plainChoices = ['Allow', 'Not now', 'Always allow this here'];
+    const ticketChoices = ['Allow', 'Not now', 'Always allow in this chat'];
+    const plainChoices = ['Allow', 'Not now', 'Always allow in this chat'];
     await ticket
       .getByRole('button', { name: ticketChoices[0], exact: true })
       .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
@@ -76,6 +65,20 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
         const box = await choice.boundingBox();
         assert.ok(box !== null, `${name} has no box`);
         assert.ok(box.x >= 0 && box.x + box.width <= PHONE.width, `${name} runs off the screen`);
+        // 2.75rem: the smallest comfortable tap target, kept even though the card's text is small.
+        assert.ok(Math.round(box.height) >= 44, `${name} is ${String(box.height)} px tall, too short to tap`);
+      }
+      // Allow comes first, and every choice has the same outlined look, so none is pushed.
+      const looks = await card.locator('.aui-approval-card__actions button').evaluateAll(buttons =>
+        buttons.map(button => {
+          const style = getComputedStyle(button);
+          return { label: (button.textContent ?? '').trim(), background: style.backgroundColor, color: style.color };
+        }),
+      );
+      assert.equal(looks[0]?.label, 'Allow', `the first choice is ${String(looks[0]?.label)}, not Allow`);
+      for (const look of looks) {
+        assert.equal(look.background, looks[0]?.background, `"${look.label}" is filled differently from Allow`);
+        assert.equal(look.color, looks[0]?.color, `"${look.label}" has a different ink from Allow`);
       }
     }
 
@@ -89,9 +92,11 @@ test('both approval cards fit a 390 px phone with every choice in reach', { time
       'the recipient runs off the screen',
     );
 
-    const dir = await screenshotDir();
-    await ticket.screenshot({ path: join(dir, 'approval-ticket-390.png') });
-    await plain.screenshot({ path: join(dir, 'approval-plain-390.png') });
+    await ticket.screenshot({ path: await featureShotPath({ surface: 'screen:approval-card', step: 'phone-ticket' }) });
+    await plain.screenshot({ path: await featureShotPath({ surface: 'screen:approval-card', step: 'phone-plain' }) });
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:approval-card' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();

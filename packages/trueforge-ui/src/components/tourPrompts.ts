@@ -3,9 +3,9 @@ import type { HelpAreaId } from '@truefoundry/trueforge-core/schemas/personaliza
 
 /** What this instance can do, so the home only offers examples that will work here. */
 export type TourCapabilities = {
-  /** Gmail read is granted. */
+  /** Mail can be read: Gmail read is granted, or an email account is connected. */
   email: boolean;
-  /** Calendar read is granted. */
+  /** The calendar can be read: Google Calendar read is granted, or a calendar account is connected. */
   calendar: boolean;
   /** A sandbox is configured, so the assistant can run code and skills. */
   sandbox: boolean;

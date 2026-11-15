@@ -3,6 +3,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
+import { PRIVATE_CHAT_BRIEF_MESSAGE } from '../../../src/runtime/privateChat';
 import {
   ListBriefItemCompletionsResponseSchema,
   MarkBriefItemDoneResponseSchema,
@@ -56,7 +57,7 @@ describe('morning brief completions route', () => {
     await server.close();
   });
 
-  async function createChat(user: string): Promise<string> {
+  async function createChat(user: string, privateUntil?: Date): Promise<string> {
     const sessionId = uniqueName(`${user}-chat`);
     await server.sessionStore().createSession({
       tenant_id: 'default',
@@ -70,6 +71,8 @@ describe('morning brief completions route', () => {
         spec: AgentSpecSchema.parse({ model: { name: 'p/m' }, instructions: 'Answer the user.' }),
       },
       custom: null,
+      is_incognito: privateUntil !== undefined,
+      private_expires_at: privateUntil ?? null,
     });
     return sessionId;
   }
@@ -120,6 +123,18 @@ describe('morning brief completions route', () => {
     expect(rows.map(row => [row.tool_name, row.outcome, row.conversation_id])).toEqual([
       ['brief.item_done', 'logged', chat],
     ]);
+  });
+
+  it('refuses an item from a private chat, and writes nothing', async () => {
+    const alice = uniqueName('alice');
+    const chat = await createChat(alice, new Date(Date.now() + 60_000));
+
+    const response = await markDone(alice, itemIn(chat, 'bi_private'));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: { message: PRIVATE_CHAT_BRIEF_MESSAGE } });
+    expect(await listFor(alice)).toEqual([]);
+    expect(await auditRows(alice)).toEqual([]);
   });
 
   it('marking the same item again keeps one row with the new title', async () => {

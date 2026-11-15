@@ -5,7 +5,11 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 
 import Database from 'better-sqlite3';
+import { z } from 'zod';
 
+import { SqliteChatDeletionStore } from '../db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
+import { createSqliteDb } from '../db/sqlite/client';
+import { SqliteTurnArtifactStore } from '../db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { Command } from './command';
 import { processEnv, type CliEnv } from './env';
 import { errorCode } from './errorCode';
@@ -43,6 +47,32 @@ async function pathExists(target: string): Promise<boolean> {
   }
 }
 
+const TableColumnsSchema = z.array(z.object({ name: z.string() }));
+
+/** A database from before private chats has none to remove. */
+function hasPrivateChats(file: string): boolean {
+  const db = new Database(file, { fileMustExist: true, readonly: true });
+  try {
+    const columns = TableColumnsSchema.parse(db.pragma('table_info(session)'));
+    return columns.some(column => column.name === 'is_incognito');
+  } finally {
+    db.close();
+  }
+}
+
+/** A private chat is gone when it closes, so a backup must not keep one that was open at backup time. */
+async function removePrivateChats(file: string): Promise<void> {
+  if (!hasPrivateChats(file)) {
+    return;
+  }
+  const db = createSqliteDb(file);
+  try {
+    await new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }).deletePrivateChats();
+  } finally {
+    await db.destroy();
+  }
+}
+
 /** Online backup API, so a running app keeps writing; the copy must pass an integrity check. */
 export async function backupSqliteFile({ source, dest }: { source: string; dest: string }): Promise<void> {
   const db = new Database(source, { fileMustExist: true });
@@ -51,6 +81,7 @@ export async function backupSqliteFile({ source, dest }: { source: string; dest:
   } finally {
     db.close();
   }
+  await removePrivateChats(dest);
   // Opened read-write so SQLite removes its -wal and -shm sidecars when it closes, leaving one file.
   const copy = new Database(dest, { fileMustExist: true });
   try {

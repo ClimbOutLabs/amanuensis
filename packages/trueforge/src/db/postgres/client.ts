@@ -41,18 +41,37 @@ export function createDb(options: {
   statementTimeoutMs: number;
   /** Postgres `idle_in_transaction_session_timeout` in ms. Applied to every pooled connection. */
   idleInTransactionSessionTimeoutMs: number;
+  /**
+   * How long a query waits for a connection, in ms. pg uses one limit for both opening a new
+   * connection and waiting for a busy pool to free one, so it must cover a full pool of slow queries.
+   */
+  connectionTimeoutMs: number;
+  /** Called when an idle pooled connection breaks (for example Postgres restarted). */
+  onIdleClientError: (error: Error) => void;
 }): Kysely<Database> {
-  const { connectionString, poolMax, statementTimeoutMs, idleInTransactionSessionTimeoutMs } = options;
+  const {
+    connectionString,
+    poolMax,
+    statementTimeoutMs,
+    idleInTransactionSessionTimeoutMs,
+    connectionTimeoutMs,
+    onIdleClientError,
+  } = options;
   configurePgTypeParsers();
+  const pool = new Pool({
+    connectionString,
+    max: poolMax,
+    connectionTimeoutMillis: connectionTimeoutMs,
+    statement_timeout: statementTimeoutMs,
+    idle_in_transaction_session_timeout: idleInTransactionSessionTimeoutMs,
+    options: `-c search_path=${TRUEFORGE_SCHEMA}`,
+  });
+  // Idle clients emit 'error' when the backend closes; without a listener Node exits. The pool
+  // drops that client and opens a fresh one for the next query.
+  pool.on('error', onIdleClientError);
   return new Kysely<Database>({
     dialect: new PostgresDialect({
-      pool: new Pool({
-        connectionString,
-        max: poolMax,
-        statement_timeout: statementTimeoutMs,
-        idle_in_transaction_session_timeout: idleInTransactionSessionTimeoutMs,
-        options: `-c search_path=${TRUEFORGE_SCHEMA}`,
-      }),
+      pool,
     }),
   });
 }
