@@ -71,13 +71,22 @@ async function call(
 
 const originalBrowserUrl = configuration.BROWSER_URL;
 const originalBrowserSecret = configuration.BROWSER_SECRET;
+const originalBrowserEnabled = configuration.BROWSER_ENABLED;
 
 beforeEach(() => {
-  Object.assign(configuration, { BROWSER_URL: 'http://browser-relay:8792', BROWSER_SECRET: SECRET });
+  Object.assign(configuration, {
+    BROWSER_ENABLED: true,
+    BROWSER_URL: 'http://browser-relay:8792',
+    BROWSER_SECRET: SECRET,
+  });
 });
 
 afterEach(() => {
-  Object.assign(configuration, { BROWSER_URL: originalBrowserUrl, BROWSER_SECRET: originalBrowserSecret });
+  Object.assign(configuration, {
+    BROWSER_ENABLED: originalBrowserEnabled,
+    BROWSER_URL: originalBrowserUrl,
+    BROWSER_SECRET: originalBrowserSecret,
+  });
   jest.restoreAllMocks();
 });
 
@@ -96,7 +105,7 @@ describe('browser live routes', () => {
     const response = await call(app, { method: 'GET', path: '/api/browser/live/tabs' });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      data: { tabs: [{ tab: 'chat-1', title: 'Sign in', url: 'https://example.test/login' }] },
+      data: { tabs: [{ tab: 'chat-1', title: 'Sign in', url: 'https://example.test/login' }], browser_on: true },
     });
     expect(sent).toEqual([
       {
@@ -105,6 +114,15 @@ describe('browser live routes', () => {
         body: { owner: 'default:user-a' },
       },
     ]);
+  });
+
+  it('answers an empty list without asking the browser when the browser is off', async () => {
+    Object.assign(configuration, { BROWSER_ENABLED: false });
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok', tabs: [] } }));
+    const response = await call(app, { method: 'GET', path: '/api/browser/live/tabs' });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { tabs: [], browser_on: false } });
+    expect(sent).toEqual([]);
   });
 
   it("returns one frame of the caller's own tab", async () => {
@@ -174,6 +192,149 @@ describe('browser live routes', () => {
       { owner: 'default:user-a', tab: 'chat-1', kind: 'key', key: 'Enter' },
       { owner: 'default:user-a', tab: 'chat-1', kind: 'wheel', dy: -240 },
     ]);
+  });
+
+  it('forwards pasted text as a paste, not as typing', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/input',
+      body: { tab: 'chat-1', kind: 'paste', text: 'line one\nline two' },
+    });
+    expect(response.status).toBe(200);
+    expect(sent.map(entry => entry.body)).toEqual([
+      { owner: 'default:user-a', tab: 'chat-1', kind: 'paste', text: 'line one\nline two' },
+    ]);
+  });
+
+  it('refuses an empty or too long paste, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    for (const text of ['', 'x'.repeat(10_001)]) {
+      const response = await call(app, {
+        method: 'POST',
+        path: '/api/browser/live/input',
+        body: { tab: 'chat-1', kind: 'paste', text },
+      });
+      expect(response.status).toBe(400);
+    }
+    expect(sent).toEqual([]);
+  });
+
+  it("copies the text selected in the caller's own tab", async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok', text: 'ORDER-12345' } }));
+    const response = await call(app, { method: 'POST', path: '/api/browser/live/copy', body: { tab: 'chat-1' } });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { text: 'ORDER-12345' } });
+    expect(sent).toEqual([
+      {
+        url: 'http://browser-relay:8792/live/copy',
+        headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
+        body: { owner: 'default:user-a', tab: 'chat-1' },
+      },
+    ]);
+  });
+
+  it('says what to do when nothing is selected, the selection is a password, or the tab closed', async () => {
+    for (const [status, message] of [
+      ['nothing_selected', 'Nothing is selected in the page. Select some text in the picture first.'],
+      ['password', 'Passwords cannot be copied out of the page. Copy it from your password manager.'],
+      ['closed', 'That tab has closed. Ask Aman to open the page again.'],
+    ] as const) {
+      const { app } = buildApp(() => ({ json: { status } }));
+      const response = await call(app, { method: 'POST', path: '/api/browser/live/copy', body: { tab: 'chat-1' } });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({ error: { message } });
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('refuses a copy request that names the profile, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok', text: 'x' } }));
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/copy',
+      body: { tab: 'chat-1', owner: 'default:someone-else' },
+    });
+    expect(response.status).toBe(400);
+    expect(sent).toEqual([]);
+  });
+
+  it("ends the session by closing the caller's own tab, and treats a tab already closed as ended", async () => {
+    for (const status of ['ok', 'closed'] as const) {
+      const { app, sent } = buildApp(() => ({ json: { status } }));
+      const response = await call(app, { method: 'POST', path: '/api/browser/live/close', body: { tab: 'chat-1' } });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ data: { status: 'ok' } });
+      expect(sent).toEqual([
+        {
+          url: 'http://browser-relay:8792/live/close',
+          headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
+          body: { owner: 'default:user-a', tab: 'chat-1' },
+        },
+      ]);
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('refuses a close request that names the profile, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/close',
+      body: { tab: 'chat-1', owner: 'default:someone-else' },
+    });
+    expect(response.status).toBe(400);
+    expect(sent).toEqual([]);
+  });
+
+  it('forwards a pointer move, a press and a release from takeover', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    for (const body of [
+      { tab: 'chat-1', kind: 'move', x: 30, y: 40, image_width: 640, image_height: 400 },
+      { tab: 'chat-1', kind: 'down', x: 30, y: 40 },
+      { tab: 'chat-1', kind: 'up', x: 35, y: 45 },
+    ]) {
+      const response = await call(app, { method: 'POST', path: '/api/browser/live/input', body });
+      expect(response.status).toBe(200);
+    }
+    expect(sent.map(entry => entry.body)).toEqual([
+      { owner: 'default:user-a', tab: 'chat-1', kind: 'move', x: 30, y: 40, image_width: 640, image_height: 400 },
+      { owner: 'default:user-a', tab: 'chat-1', kind: 'down', x: 30, y: 40 },
+      { owner: 'default:user-a', tab: 'chat-1', kind: 'up', x: 35, y: 45 },
+    ]);
+  });
+
+  it("hands the caller's own tab over, and back, and says which hand holds it", async () => {
+    const { app, sent } = buildApp(path =>
+      path === '/live/takeover' ? { json: { status: 'ok', takeover: true } } : { json: { status: 'ok' } },
+    );
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/takeover',
+      body: { tab: 'chat-1', on: true },
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { status: 'ok', takeover: true } });
+    expect(sent).toEqual([
+      {
+        url: 'http://browser-relay:8792/live/takeover',
+        headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
+        body: { owner: 'default:user-a', tab: 'chat-1', on: true },
+      },
+    ]);
+  });
+
+  it('refuses a takeover request that names the profile or is not a yes or no, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok', takeover: true } }));
+    for (const body of [
+      { tab: 'chat-1', on: true, owner: 'default:someone-else' },
+      { tab: 'chat-1', on: 'yes' },
+      { tab: 'chat-1' },
+    ]) {
+      const response = await call(app, { method: 'POST', path: '/api/browser/live/takeover', body });
+      expect(response.status).toBe(400);
+    }
+    expect(sent).toEqual([]);
   });
 
   it('refuses an input it does not know, without calling the sidecar', async () => {
@@ -253,7 +414,14 @@ describe('browser live routes', () => {
   it('refuses a form posted from another site, without calling the sidecar', async () => {
     const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
     const formBody = JSON.stringify({ tab: 'chat-1', kind: 'type', text: 'x' });
-    for (const path of ['/api/browser/live/input', '/api/browser/live/frame', '/api/browser/live/upload']) {
+    for (const path of [
+      '/api/browser/live/input',
+      '/api/browser/live/frame',
+      '/api/browser/live/copy',
+      '/api/browser/live/close',
+      '/api/browser/live/upload',
+      '/api/browser/live/takeover',
+    ]) {
       const response = await app.request(`http://localhost${path}`, {
         method: 'POST',
         headers: { ...COOKIE, 'content-type': 'text/plain', origin: 'https://evil.example' },

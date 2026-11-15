@@ -159,7 +159,9 @@ export const SIDECAR_LOAD_TIMEOUT_MS = 45_000;
 
 /**
  * Waits until the sidecar's status file names `hash`. The file is written by the sidecar's wrapper after
- * each start. Returns false on timeout; a missing status file keeps waiting, since the sidecar may be starting.
+ * each start, once the started server answers on its port, and is cleared while a start is under way, so
+ * a match here means the new list is loaded on a server that is answering. Returns false on timeout; a
+ * missing status file keeps waiting, since the sidecar may be starting.
  */
 export async function waitForSidecarLoadedHash({
   statusPath,

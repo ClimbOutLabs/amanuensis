@@ -231,7 +231,8 @@ export const cancelSessionRoute = createRoute({
   path: '/{session_id}/cancel',
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'Cancel a running turn in a session',
-  description: 'Cancel the running last turn for a session. Only the session creator may cancel.',
+  description:
+    'Cancel the running last turn for a session, or only the turn named by `turn_id`. Only the session creator may cancel.',
   'x-fern-sdk-group-name': ['sessions'],
   'x-fern-sdk-method-name': 'cancel',
   request: {

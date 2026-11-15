@@ -54,11 +54,17 @@ const SCRUBBED_ENV_KEYS: readonly string[] = [
   'DYLD_LIBRARY_PATH',
 ];
 
-/** Home and config dirs that exist nowhere, so no per-user git, curl or netrc file is read. */
-const PINNED_HOME_ENV: Readonly<Record<string, string>> = {
+/**
+ * What every host-built git command pins about its own process: home and config dirs that exist nowhere, so
+ * no per-user git, curl or netrc file is read, a fixed PATH, and nothing that could stop to ask a question.
+ */
+export const GIT_PROCESS_PINS: Readonly<Record<string, string>> = {
   HOME: '/nonexistent',
   XDG_CONFIG_HOME: '/nonexistent',
   PATH: '/usr/bin:/bin',
+  GIT_ASKPASS: '',
+  GIT_EDITOR: 'true',
+  GIT_MERGE_AUTOEDIT: 'no',
 };
 
 /** True when an exec env carries the token, so callers can keep it out of the in-sandbox lock wrapper. */
@@ -315,11 +321,8 @@ const CREDENTIAL_HELPER = `!f() { test "$1" = get && printf 'username=x-access-t
 function gitConfigEnv(input: { entries: readonly GitConfigEntry[] }): Record<string, string> {
   return {
     ...gitConfigEntriesEnv(input.entries),
-    ...PINNED_HOME_ENV,
+    ...GIT_PROCESS_PINS,
     GIT_TERMINAL_PROMPT: '0',
-    GIT_ASKPASS: '',
-    GIT_EDITOR: 'true',
-    GIT_MERGE_AUTOEDIT: 'no',
   };
 }
 

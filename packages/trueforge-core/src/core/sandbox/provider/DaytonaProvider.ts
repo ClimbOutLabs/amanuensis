@@ -23,6 +23,7 @@ import {
   commandWithWorkspaceLock,
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
+  withArgvAsCommandLine,
   workspaceTerminationCommand,
   type ExecResult,
   type SandboxBuild,
@@ -152,6 +153,7 @@ export interface DaytonaSandboxProviderOptions {
 
 export class DaytonaSandboxProvider implements SandboxProvider {
   readonly type = 'daytona';
+  readonly supportsCodeMode = true;
   private readonly tenantName: string;
   /** Release-owned sandbox image reference; built into a Daytona snapshot and cloned per sandbox. */
   private readonly imageUri: string;
@@ -516,7 +518,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   }
 
   async exec(params: SandboxExecParams): Promise<ExecResult> {
-    const lockedParams = commandWithWorkspaceLock(params);
+    const lockedParams = commandWithWorkspaceLock(withArgvAsCommandLine(params));
     return context.with(suppressTracing(context.active()), async (): Promise<ExecResult> => {
       try {
         throwIfSignalAborted(params.signal);

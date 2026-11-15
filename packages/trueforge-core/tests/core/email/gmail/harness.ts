@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { GmailApi } from '../../../../src/core/email/gmail/gmailApi';
 import { GmailToolSet, type AttachmentStager } from '../../../../src/core/email/gmail/GmailToolSet';
 import type { GmailThread } from '../../../../src/core/email/gmail/gmailWire';
+import type { ApprovalDecision } from '../../../../src/core/events/schema';
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
 import { GOOGLE_TOKEN_URL } from '../../../../src/core/google/oauth';
 import type { ToolInvocationContext } from '../../../../src/core/mcp/IMCPServer';
@@ -205,6 +206,9 @@ export async function approvalProblem(input: {
     ctx: { ...input.sentinel, repository_id: null, agent_intent: null, offline: false },
   });
 }
+
+/** The person's yes to one call, as the host hands it to the tool that runs it. */
+export const APPROVED: ApprovalDecision = { status: 'allow', scope: 'once' };
 
 /** What the host hands a tool with an approved call: the params the approval was minted over. */
 export function approvedContext(info: Awaited<ReturnType<GmailToolSet['toolCallInfo']>>): ToolInvocationContext {

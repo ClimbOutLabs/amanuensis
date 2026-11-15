@@ -2,7 +2,7 @@ import type { CallToolResponse } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionRecord } from '@truefoundry/trueforge-core/core/google/connection';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
-import { GOOGLE_SETUP_INSTRUCTION, googleSetupCapability } from '../../../src/runtime/googleSetupCapability';
+import { GOOGLE_SETUP_STEPS, googleSetupCapability } from '../../../src/runtime/googleSetupCapability';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
 import { isRecord } from '../../fixtures/jsonGuards';
 
@@ -11,6 +11,7 @@ const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const CALENDAR_READ = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const CALENDAR_WRITE = 'https://www.googleapis.com/auth/calendar.events';
+const DRIVE = 'https://www.googleapis.com/auth/drive.file';
 
 function record(overrides: Partial<GoogleConnectionRecord> = {}): GoogleConnectionRecord {
   return {
@@ -116,30 +117,32 @@ describe('googleSetupCapability', () => {
   });
 
   it('mounts nothing once the login is connected with everything allowed', async () => {
+    await store.save(record({ granted_scopes: [READ, COMPOSE, CALENDAR_READ, CALENDAR_WRITE, DRIVE] }));
+    expect(await mount()).toBeUndefined();
+  });
+
+  it('mounts nothing once mail and calendar are allowed, even with Drive still off: Drive is optional', async () => {
     await store.save(record({ granted_scopes: [READ, COMPOSE, CALENDAR_READ, CALENDAR_WRITE] }));
     expect(await mount()).toBeUndefined();
   });
 
-  it('mounts the walkthrough with the read for a user who never connected', async () => {
-    const capability = await mount();
-    expect(capability?.systemToolSets).toHaveLength(1);
-    expect(capability?.instructionBuilders).toHaveLength(1);
-  });
-
-  it('mounts the read without the walkthrough once the login is connected with something still off', async () => {
-    // The Cloud steps are done by then; what is still off is turned on from the Settings page, which
-    // the read's next step names, so the walkthrough must not ride on every turn of a connected login.
-    await store.save(record({ granted_scopes: [READ] }));
+  it.each([
+    ['never connected', undefined],
+    ['connected with something still off', record({ granted_scopes: [READ] })],
+    ['expired', record({ status: 'needs_reconnect' })],
+  ])('adds no standing instructions to the chat when the login is %s', async (_state, saved) => {
+    // The Cloud steps come back from the read when the person asks for Google, so a chat about mail
+    // or a calendar never carries them.
+    if (saved !== undefined) {
+      await store.save(saved);
+    }
     const capability = await mount();
     expect(capability?.systemToolSets).toHaveLength(1);
     expect(capability?.instructionBuilders ?? []).toHaveLength(0);
   });
 
-  it('mounts the walkthrough with the read when the sign-in has expired', async () => {
-    await store.save(record({ status: 'needs_reconnect' }));
-    const capability = await mount();
-    expect(capability?.systemToolSets).toHaveLength(1);
-    expect(capability?.instructionBuilders).toHaveLength(1);
+  it('returns the Cloud steps from the read while there is no login', async () => {
+    expect((await statusResult(await mount()))['next_step']).toBe(GOOGLE_SETUP_STEPS);
   });
 
   it('never mounts one user the setup state of another', async () => {
@@ -153,19 +156,43 @@ describe('googleSetupCapability', () => {
   it('pins the words that keep a connection alive past a week', () => {
     // A personal app left in Testing has its sign-in ended by Google after 7 days; the guidance must say
     // so, and name the fix, before the person connects.
-    expect(GOOGLE_SETUP_INSTRUCTION).toContain('after 7 days');
-    expect(GOOGLE_SETUP_INSTRUCTION).toContain('Publish app');
-    expect(GOOGLE_SETUP_INSTRUCTION).toContain('has not verified this app');
+    expect(GOOGLE_SETUP_STEPS).toContain('after 7 days');
+    expect(GOOGLE_SETUP_STEPS).toContain('Publish app');
+    expect(GOOGLE_SETUP_STEPS).toContain('has not verified this app');
+  });
+
+  it('names the Drive, Docs and Sheets APIs, because reading a Doc or a Sheet needs its own API', () => {
+    expect(GOOGLE_SETUP_STEPS).toContain(
+      'the Drive API at https://console.cloud.google.com/apis/library/drive.googleapis.com',
+    );
+    expect(GOOGLE_SETUP_STEPS).toContain(
+      'the Docs API at https://console.cloud.google.com/apis/library/docs.googleapis.com',
+    );
+    expect(GOOGLE_SETUP_STEPS).toContain(
+      'the Sheets API at https://console.cloud.google.com/apis/library/sheets.googleapis.com',
+    );
+    expect(GOOGLE_SETUP_STEPS).toContain('which still asks before creating a Doc or adding rows to a Sheet');
+  });
+
+  it('sends mail or calendar alone to the Connectors page, and keeps the Google steps for the Google card', async () => {
+    // A person who only wants mail or a calendar picks the card for their account; the Cloud project
+    // walkthrough is for someone who asked for the Google card.
+    expect(GOOGLE_SETUP_STEPS).toContain(
+      'If the person only wants mail or a calendar, send them to Settings, then Connectors',
+    );
+    expect(GOOGLE_SETUP_STEPS).toContain('If they asked for the Google card or Google Drive, lead these steps');
+    const next = (await statusResult(await mount()))['next_step'];
+    expect(typeof next === 'string' && next.includes('If the person only wants mail or a calendar')).toBe(true);
   });
 
   it('pins that secrets live only in the Settings form, never in chat', () => {
-    expect(GOOGLE_SETUP_INSTRUCTION).toContain('go only into the form in Settings');
-    expect(GOOGLE_SETUP_INSTRUCTION).toContain('Never ask for the secret or the file in this chat');
-    expect(GOOGLE_SETUP_INSTRUCTION).toContain('until the check finds no problems');
+    expect(GOOGLE_SETUP_STEPS).toContain('go only into the form in Settings');
+    expect(GOOGLE_SETUP_STEPS).toContain('Never ask for the secret or the file in this chat');
+    expect(GOOGLE_SETUP_STEPS).toContain('until the check finds no problems');
   });
 
   it('writes no em dashes in the guidance or the next steps', async () => {
-    expect(GOOGLE_SETUP_INSTRUCTION).not.toContain('\u2014');
+    expect(GOOGLE_SETUP_STEPS).not.toContain('\u2014');
     const result = await statusResult(await mount());
     const next = result['next_step'];
     expect(typeof next === 'string' && !next.includes('\u2014')).toBe(true);

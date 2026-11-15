@@ -21,6 +21,7 @@ import {
   createSentinelHostContext,
   DEFAULT_PINNED_PATH,
   defaultSentinelServices,
+  forIncognitoChat,
   forUnattendedRun,
   withoutRelaxations,
   type SentinelHostContext,
@@ -443,12 +444,14 @@ export class SessionHandle<
     const custom = typeof input.custom === 'function' ? input.custom(previous?.custom ?? undefined) : input.custom;
     // A scheduled chat never gets the owner's relaxations, even on turns they type: its context still
     // holds what the run read. Only holding what would ask stays with the unattended turn itself.
+    // An incognito chat makes nothing that outlives it, on every turn and whoever is watching.
+    const sessionServices = this.session.is_incognito ? forIncognitoChat(this.sentinelServices) : this.sentinelServices;
     const sentinelServices =
       input.unattended === true
-        ? forUnattendedRun(this.sentinelServices)
+        ? forUnattendedRun(sessionServices)
         : this.session.source?.type === 'schedule'
-          ? withoutRelaxations(this.sentinelServices)
-          : this.sentinelServices;
+          ? withoutRelaxations(sessionServices)
+          : sessionServices;
 
     // Dispose-on-early-failure: any resource acquired below (sandbox handle,
     // MCP connections) is owned by createTurn() until the TurnHandle is returned; from then

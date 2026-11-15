@@ -28,7 +28,9 @@ function fixtureClone(): string {
   mkdirSync(join(dir, 'ops', 'aman-tts'), { recursive: true });
   mkdirSync(join(dir, 'ops', 'calendar-sidecar'), { recursive: true });
   mkdirSync(join(dir, 'ops', 'browser-sidecar'), { recursive: true });
-  writeFileSync(join(dir, 'Dockerfile.dev'), 'FROM node\n');
+  writeFileSync(join(dir, 'Dockerfile.dev'), 'FROM node\nCOPY package.json ./\n');
+  writeFileSync(join(dir, '.dockerignore'), 'node_modules\n');
+  writeFileSync(join(dir, 'package.json'), '{}\n');
   writeFileSync(join(dir, 'ops', 'aman-stt', 'Dockerfile'), 'FROM python\n');
   writeFileSync(join(dir, 'ops', 'aman-tts', 'Dockerfile'), 'FROM python:3.12\n');
   writeFileSync(join(dir, 'ops', 'calendar-sidecar', 'Dockerfile'), 'FROM node\n');
@@ -46,13 +48,16 @@ test('the manifest source ids equal the shell source_id of the same clone', asyn
     libDir: installerLibDir(repoRoot),
   });
   assert.ok(ids !== null);
-  const head = git(clone, ['rev-parse', 'HEAD']).slice(0, 12);
+  // The app's id hashes its build inputs; the shell's own listing is the oracle for it.
+  const shellIds = execFileSync('bash', [join(repoRoot, 'installer', 'image-ids.sh'), clone], { encoding: 'utf8' });
+  const app = /^aman-app (\S+)$/m.exec(shellIds)?.[1];
+  assert.ok(app !== undefined && /^[a-f0-9]{12}$/.test(app), 'the shell names a clean app id');
   const stt = git(clone, ['rev-parse', 'HEAD:ops/aman-stt']).slice(0, 12);
   const tts = git(clone, ['rev-parse', 'HEAD:ops/aman-tts']).slice(0, 12);
   const calendar = git(clone, ['rev-parse', 'HEAD:ops/calendar-sidecar']).slice(0, 12);
   const browser = git(clone, ['rev-parse', 'HEAD:ops/browser-sidecar']).slice(0, 12);
   assert.deepEqual(ids, {
-    'aman-app': `aman-app:${head}`,
+    'aman-app': `aman-app:${app}`,
     'aman-stt': `aman-stt:${stt}`,
     'aman-tts': `aman-tts:${tts}`,
     'aman-calendar-caldav': `aman-calendar-caldav:${calendar}`,

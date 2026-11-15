@@ -325,6 +325,59 @@ func TestExecMountsOnlyTheSessionTree(t *testing.T) {
 	}
 }
 
+func envEntry(env []string, name string) (string, int) {
+	value, count := "", 0
+	for _, kv := range env {
+		if strings.HasPrefix(kv, name+"=") {
+			value, count = strings.TrimPrefix(kv, name+"="), count+1
+		}
+	}
+	return value, count
+}
+
+// A shell command has no /scratch, so tools that keep files in the home folder (npm, pip, git) need
+// one they can write. npm's cache is larger than the temporary space, so it goes in the workspace.
+func TestExecGivesTheShellAHomeItCanWrite(t *testing.T) {
+	e := newEnv(t, true)
+	if rec := e.do("POST", "/v1/exec", execBody(nil)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	s := e.runner.spec
+	for name, want := range map[string]string{
+		"HOME":             "/tmp",
+		"npm_config_cache": "/workspace/.aman/npm-cache",
+		"PIP_NO_CACHE_DIR": "1",
+	} {
+		if got, count := envEntry(s.Env, name); got != want || count != 1 {
+			t.Errorf("%s = %q (set %d times), want %q once", name, got, count, want)
+		}
+	}
+	writable := false
+	for _, m := range s.Tmpfs {
+		writable = writable || m.Dest == "/tmp"
+	}
+	if !writable {
+		t.Fatal("the home folder must sit in a mount the guest can write")
+	}
+	ignore, err := os.ReadFile(filepath.Join(e.srv.TreeDir, sessionID, ".aman", "npm-cache", ".gitignore"))
+	if err != nil || string(ignore) != "*\n" {
+		t.Fatalf("the npm cache must be hidden from git: %q %v", ignore, err)
+	}
+}
+
+func TestRunCodeKeepsItsScratchHome(t *testing.T) {
+	e := newEnv(t, true)
+	if rec := e.do("POST", "/v1/run_code", runReq(nil)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if got, count := envEntry(e.runner.spec.Env, "HOME"); got != "/scratch" || count != 1 {
+		t.Fatalf("HOME = %q (set %d times)", got, count)
+	}
+	if _, count := envEntry(e.runner.spec.Env, "npm_config_cache"); count != 0 {
+		t.Fatal("run_code has no workspace, so it gets no npm cache there")
+	}
+}
+
 func TestExecRejectsUnsafeInput(t *testing.T) {
 	cases := map[string]func(map[string]any){
 		"cwd outside workspace": func(m map[string]any) { m["cwd"] = "/etc" },
@@ -927,5 +980,63 @@ func TestSessionsServesTheCachedWalkUntilItAges(t *testing.T) {
 	third := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
 	if len(third.Sessions) != 1 || third.Sessions[0].Bytes <= first.Sessions[0].Bytes {
 		t.Fatalf("aged listing did not walk again: first %+v, third %+v", first.Sessions, third.Sessions)
+	}
+}
+
+// Python 3.12 does not hide a new environment from git by itself, so `git status` listed thousands of files.
+func TestExecHidesANewPythonEnvironmentFromGit(t *testing.T) {
+	e := newEnv(t, true)
+	sub := filepath.Join(e.srv.TreeDir, sessionID, "sub")
+	e.runner.play = func(guest.Spec) {
+		if err := os.MkdirAll(filepath.Join(sub, ".venv"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, ".venv", "pyvenv.cfg"), []byte("home = /usr/bin\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rec := e.do("POST", "/v1/exec", execBody(nil)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	ignore, err := os.ReadFile(filepath.Join(sub, ".venv", ".gitignore"))
+	if err != nil || string(ignore) != "*\n" {
+		t.Fatalf("the environment must be hidden from git: %q %v", ignore, err)
+	}
+}
+
+func TestExecLeavesAFolderThatIsNotAnEnvironmentAlone(t *testing.T) {
+	e := newEnv(t, true)
+	sub := filepath.Join(e.srv.TreeDir, sessionID, "sub")
+	e.runner.play = func(guest.Spec) {
+		if err := os.MkdirAll(filepath.Join(sub, ".venv"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rec := e.do("POST", "/v1/exec", execBody(nil)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(sub, ".venv", ".gitignore")); !os.IsNotExist(err) {
+		t.Fatalf("a folder without pyvenv.cfg must not get an ignore file: %v", err)
+	}
+}
+
+func TestExecKeepsAnIgnoreFileTheEnvironmentAlreadyHas(t *testing.T) {
+	e := newEnv(t, true)
+	env := filepath.Join(e.srv.TreeDir, sessionID, "sub", ".venv")
+	e.runner.play = func(guest.Spec) {
+		if err := os.MkdirAll(env, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, content := range map[string]string{"pyvenv.cfg": "home = /usr/bin\n", ".gitignore": "lib/\n"} {
+			if err := os.WriteFile(filepath.Join(env, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if rec := e.do("POST", "/v1/exec", execBody(nil)); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if kept, _ := os.ReadFile(filepath.Join(env, ".gitignore")); string(kept) != "lib/\n" {
+		t.Fatalf("an existing ignore file must stay as it is: %q", kept)
 	}
 }

@@ -4,7 +4,7 @@ import { useState, type FC } from 'react';
 
 import { Switch } from '../atoms/primitives/Switch.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
-import type { Tier2ActionKind } from './types.js';
+import { TIER2_ACTION_LABELS, type Tier2ActionKind } from './types.js';
 
 export type Tier2RelaxationToggleProps = {
   /** Exact Tier 2 action kind this toggle controls. */
@@ -16,7 +16,7 @@ export type Tier2RelaxationToggleProps = {
 };
 
 /**
- * "Always allow" switch for one Tier 2 action kind. Off by default, so Tier 2
+ * "Always allow everywhere" switch for one Tier 2 action kind. Off by default, so Tier 2
  * asks; the checked state always reflects the server settings, and flipping it writes
  * through the user settings API. Lives in Settings > Permissions next to the kind it controls.
  */
@@ -49,7 +49,7 @@ export const Tier2RelaxationToggle: FC<Tier2RelaxationToggleProps> = ({
           checked={relaxed}
           disabled={disabled || busy}
           onCheckedChange={handleChange}
-          aria-label={`${APPROVAL_CHOICES.alwaysAllow.label}: ${actionType}`}
+          aria-label={`${APPROVAL_CHOICES.alwaysAllow.label}: ${TIER2_ACTION_LABELS[actionType]}`}
         />
         <span className="text-[0.6875rem] text-text-secondary">{APPROVAL_CHOICES.alwaysAllow.label}</span>
       </span>

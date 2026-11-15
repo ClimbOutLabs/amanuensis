@@ -4,7 +4,9 @@ import {
   GITHUB_CONNECTOR_MISSING_HINT,
   GITHUB_CONNECTOR_REJECTED_HINT,
   GITHUB_CONNECTOR_UNRESOLVED_HINT,
+  OFFLINE_GIT_FORM_HINT,
   getGithubConnectorHint,
+  getOfflineGitFormHint,
   isGithubAuthFailure,
 } from '../../../src/core/sandbox/githubConnectorHint';
 
@@ -119,5 +121,23 @@ describe('getGithubConnectorHint', () => {
         connectorState: 'not-attached',
       }),
     ).toBeUndefined();
+  });
+});
+
+describe('getOfflineGitFormHint', () => {
+  const output = "fatal: unable to access 'https://gitlab.com/a/b/': Could not resolve host: gitlab.com";
+
+  it('answers only for a git network command that ran in an offline sandbox and found no network', () => {
+    expect(getOfflineGitFormHint({ output, offline: true, ranInSandbox: true })).toBe(OFFLINE_GIT_FORM_HINT);
+    expect(getOfflineGitFormHint({ output, offline: false, ranInSandbox: true })).toBeUndefined();
+    expect(getOfflineGitFormHint({ output, offline: true, ranInSandbox: false })).toBeUndefined();
+    expect(
+      getOfflineGitFormHint({ output: 'fatal: not a git repository', offline: true, ranInSandbox: true }),
+    ).toBeUndefined();
+  });
+
+  it('gives the one thing to do next', () => {
+    expect(OFFLINE_GIT_FORM_HINT).toContain('Run it again on its own');
+    expect(OFFLINE_GIT_FORM_HINT).toContain('github.com');
   });
 });

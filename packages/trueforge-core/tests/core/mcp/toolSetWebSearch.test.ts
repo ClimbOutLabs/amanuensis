@@ -19,7 +19,11 @@ import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { forUnattendedRun, type SentinelServices } from '../../../src/core/permissions/context';
 import { recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
-import { recordToolResultProvenance, SILENT_SEARCH_LIMIT } from '../../../src/core/permissions/webSearch';
+import {
+  hostToolStamp,
+  recordToolResultProvenance,
+  SILENT_SEARCH_LIMIT,
+} from '../../../src/core/permissions/webSearch';
 import { toToolCallInfo } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -398,6 +402,11 @@ describe('provider plumbing fields on the designated provider', () => {
     expect(result.tier3_card?.plain_what).toBe(
       `Search the web for ${objective}? Searches are set to ask, so Aman is checking with you first.`,
     );
+    expect(result.tier3_card?.copy).toEqual({
+      headline: `Search the web for ${objective}?`,
+      consequence: null,
+      reason: 'Searches are set to ask, so Aman is checking with you first.',
+    });
     expect(result.tier3_card?.outbound_text).toContain(uuid);
     expect(result.tier3_card?.outbound_text).toContain('invented-model-7');
   });
@@ -586,6 +595,7 @@ describe('links and where they came from', () => {
     recordToolResultProvenance({
       state: h.host.web_search,
       tool_name: input.tool_name,
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: input.args,
       texts: [input.text],
     });
@@ -687,6 +697,11 @@ describe('links and where they came from', () => {
     expect(info.tier3_card?.plain_what).toBe(
       `Open ${page}? Searches are set to ask, so Aman is checking with you first.`,
     );
+    expect(info.tier3_card?.copy).toEqual({
+      headline: `Open ${page}?`,
+      consequence: null,
+      reason: 'Searches are set to ask, so Aman is checking with you first.',
+    });
   });
 });
 

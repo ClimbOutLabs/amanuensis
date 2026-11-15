@@ -402,14 +402,19 @@ export function AgentsLibrary({ onSelectAgent }: AgentsLibraryProps) {
     resourceIds: permissionAgentIds,
   });
 
+  // The schedules are read for these agents. A reload that returns the same agents in a new array must not
+  // restart the read, or the counts blink back to unavailable and the earlier answer is thrown away.
+  const agentIdsKey = agents.map(libraryAgentId).join('\n');
+  const hasAgents = agents.length > 0;
+
   useEffect(() => {
-    if (!open || scheduleServer == null || agents.length === 0) {
+    if (!open || scheduleServer == null || !hasAgents) {
       setScheduleByAgent(null);
       return;
     }
     let cancelled = false;
     setScheduleByAgent(null);
-    const agentIds = agents.map(libraryAgentId);
+    const agentIds = agentIdsKey.split('\n');
     void listAllSchedulesForAgents({ listSchedules: scheduleServer.listSchedules, agentIds })
       .then(rows => {
         if (!cancelled) setScheduleByAgent(summarizeSchedulesByAgent(rows));
@@ -420,7 +425,7 @@ export function AgentsLibrary({ onSelectAgent }: AgentsLibraryProps) {
     return () => {
       cancelled = true;
     };
-  }, [agents, open, scheduleServer, agentsListEpoch]);
+  }, [agentIdsKey, hasAgents, open, scheduleServer, agentsListEpoch]);
 
   const openSchedulesForAgent = ({ agentId, isNew }: { agentId: string; isNew?: boolean }) => {
     replaceScheduleShareSearch({

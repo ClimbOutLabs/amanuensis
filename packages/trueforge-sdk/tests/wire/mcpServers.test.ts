@@ -269,7 +269,6 @@ describe("McpServersClient", () => {
                 manifest: {
                     auth: { type: "dcr" },
                     description: "description",
-                    memory_provider: true,
                     name: "name",
                     search_provider: true,
                     search_tools: ["search_tools"],
@@ -300,7 +299,6 @@ describe("McpServersClient", () => {
                         type: "dcr",
                     },
                     description: "description",
-                    memoryProvider: true,
                     name: "name",
                     searchProvider: true,
                     searchTools: ["search_tools"],
@@ -331,29 +329,31 @@ describe("McpServersClient", () => {
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
 
-    test("memory_check (1)", async () => {
+    test("home_assistant_check (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        const rawResponseBody = { data: { status: "ok" } };
+        const rawResponseBody = { data: { entity_count: 1, status: "ok", tool_count: 1 } };
 
         server
             .mockEndpoint()
-            .post("/api/v1/mcp-servers/name/memory-check")
+            .post("/api/v1/mcp-servers/name/home-assistant-check")
             .respondWith()
             .statusCode(200)
             .jsonBody(rawResponseBody)
             .build();
 
-        const response = await client.mcpServers.memoryCheck("name");
+        const response = await client.mcpServers.homeAssistantCheck("name");
         expect(response).toEqual({
             data: {
+                entityCount: 1,
                 status: "ok",
+                toolCount: 1,
             },
         });
     });
 
-    test("memory_check (2)", async () => {
+    test("home_assistant_check (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
@@ -361,14 +361,14 @@ describe("McpServersClient", () => {
 
         server
             .mockEndpoint()
-            .post("/api/v1/mcp-servers/name/memory-check")
+            .post("/api/v1/mcp-servers/name/home-assistant-check")
             .respondWith()
             .statusCode(404)
             .jsonBody(rawResponseBody)
             .build();
 
         await expect(async () => {
-            return await client.mcpServers.memoryCheck("name");
+            return await client.mcpServers.homeAssistantCheck("name");
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
 

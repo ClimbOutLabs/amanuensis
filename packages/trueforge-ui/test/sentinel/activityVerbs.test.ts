@@ -71,8 +71,15 @@ describe('receiptRowsOf', () => {
     const rows = receiptRowsOf([
       entry({ id: '1', action_type: 'list_schedules', outcome: 'ran', created_at: '2026-10-21T08:00:00.000Z' }),
       entry({ id: '2', action_type: 'create_schedule', outcome: 'ran', created_at: '2026-10-21T09:00:00.000Z' }),
+      entry({ id: '3', action_type: 'pause_schedule', outcome: 'ran', created_at: '2026-10-21T10:00:00.000Z' }),
+      entry({ id: '4', action_type: 'delete_schedule', outcome: 'ran', created_at: '2026-10-21T11:00:00.000Z' }),
     ]);
-    expect(rows.map(row => row.verb)).toEqual(['Changed a schedule', 'Checked a schedule']);
+    expect(rows.map(row => row.verb)).toEqual([
+      'Deleted a schedule',
+      'Changed a schedule',
+      'Created a schedule',
+      'Checked a schedule',
+    ]);
   });
 
   it('lists the newest row first', () => {

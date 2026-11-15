@@ -82,6 +82,22 @@ test('passes an allowed fetch and an allowed docs link', () => {
   );
 });
 
+test('scans the connector servers kept under mcp/', () => {
+  withFixtureRepo(
+    {
+      'mcp/gmail/src/client.ts': "const res = await fetch('https://unlisted.example-mail.org/v1/messages');\n",
+      'mcp/gmail/src/client.test.ts': "await fetch('https://only-in-a-test.example-mail.org/');\n",
+    },
+    root => {
+      const { findings } = scanExternalHosts({ rootDirectory: root });
+      assert.deepEqual(
+        findings.map(({ file, line, host }) => `${file}:${String(line)} ${host}`),
+        ['mcp/gmail/src/client.ts:1 unlisted.example-mail.org'],
+      );
+    },
+  );
+});
+
 test('fails a docs-link host that is fetched', () => {
   withFixtureRepo(
     {

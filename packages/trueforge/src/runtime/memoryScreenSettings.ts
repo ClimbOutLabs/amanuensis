@@ -3,7 +3,6 @@ import type { Logger } from 'winston';
 
 import configuration from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { MemoryProviderSettings } from '../schemas/mcpServer';
 
 /**
  * Global-settings key for the persisted recall screen override.
@@ -80,19 +79,4 @@ export async function readMemoryScreenSetting(deps: ReadMemoryScreenSettingDeps)
 export async function resolveMemoryScreenEnabled(deps: ReadMemoryScreenSettingDeps): Promise<boolean> {
   const setting = await readMemoryScreenSetting(deps);
   return setting.enabled && configuration.MEMORY_SCREEN_URL !== '';
-}
-
-/**
- * Applies the Settings toggle's persisted recall-screen override to the per-bank memory
- * settings. The override wins when stored; otherwise the settings pass through unchanged.
- * Both turn-creation paths use this so the toggle and the capability resolve identically.
- */
-export function applyMemoryScreenOverride(
-  settings: MemoryProviderSettings | undefined,
-  override: boolean | undefined,
-): MemoryProviderSettings | undefined {
-  if (override === undefined) {
-    return settings;
-  }
-  return { ...settings, screen_enabled: override };
 }

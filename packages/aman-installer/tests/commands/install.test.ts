@@ -17,7 +17,6 @@ import {
   INSTALL_DOCKER_UNTRUSTED,
   INSTALL_DONE_LINE,
   INSTALL_DRY_RUN_LINES,
-  INSTALL_KEY_EMPTY_LINE,
   INSTALL_NOT_WINDOWS,
   INSTALL_NO_ANSWER,
   INSTALL_PASSWORD_MISMATCH_LINE,
@@ -64,7 +63,6 @@ const PROGRAM = new TextEncoder().encode('the aman program');
 const ARCHIVE = new TextEncoder().encode('the source archive bytes');
 const DOCKER_INSTALLER = new TextEncoder().encode('the docker desktop installer');
 const PASSWORD = 'Password1!';
-const KEY = 'tf-key-1234567890';
 const IDS: SourceIds = {
   'aman-app': 'aman-app:0123456789ab',
   'aman-stt': 'aman-stt:0123456789cd',
@@ -323,7 +321,7 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
   const printed: string[] = [];
   const asked: World['asked'] = [];
   const askQueue = [...(options.askAnswers ?? ['friend@example.com', 'yes'])];
-  const secretQueue = [...(options.secretAnswers ?? [PASSWORD, PASSWORD, KEY])];
+  const secretQueue = [...(options.secretAnswers ?? [PASSWORD, PASSWORD])];
   let nowValue = NOW;
   const personHome = await mkdtemp(join(tmpdir(), 'aman-install-person-'));
   const deps: InstallDeps = {
@@ -377,7 +375,7 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
 
 const PAGE_URL = 'file:///C:/Users/Friend/AppData/Local/Amanuensis/Getting started.html';
 
-test('the first install asks the four questions, installs, and opens the getting started page once', async () => {
+test('the first install asks the three questions, installs, and opens the getting started page once', async () => {
   const world = await makeWorld();
   const code = await runInstall(world.deps, { dryRun: false });
   assert.equal(code, 0);
@@ -385,9 +383,8 @@ test('the first install asks the four questions, installs, and opens the getting
     world.asked.map(entry => `${entry.kind}:${entry.question}`),
     [
       'ask:Your email, used to sign in:',
-      'secret:Choose a password (at least 8 characters, not shown):',
+      'secret:Choose a password with at least 8 characters, a number and a symbol, like @ # $ % (not shown):',
       'secret:Type it again:',
-      'secret:Paste your model key (not shown):',
       'ask:Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):',
     ],
   );
@@ -402,7 +399,6 @@ test('the first install asks the four questions, installs, and opens the getting
     '--email',
     'friend@example.com',
     '--password-stdin',
-    '--token-factory-key-stdin',
     '--tls',
     'local',
     '--address',
@@ -410,11 +406,10 @@ test('the first install asks the four questions, installs, and opens the getting
     '--backups',
     'daily',
   ]);
-  assert.equal(new TextDecoder().decode(run.stdin), `${PASSWORD}\n${KEY}\n`);
-  // The secrets ride on the input only: no command line holds them.
+  assert.equal(new TextDecoder().decode(run.stdin), `${PASSWORD}\n`);
+  // The password rides on the input only: no command line holds it.
   for (const line of world.recording.lines()) {
     assert.ok(!line.includes(PASSWORD), line);
-    assert.ok(!line.includes(KEY), line);
   }
   assert.deepEqual(world.store.modes, ['daily']);
   assert.equal(world.jobs.firewallOpen, true);
@@ -592,9 +587,8 @@ test('a first install on a fresh volume asks the questions, installs, and finish
     world.asked.map(entry => `${entry.kind}:${entry.question}`),
     [
       'ask:Your email, used to sign in:',
-      'secret:Choose a password (at least 8 characters, not shown):',
+      'secret:Choose a password with at least 8 characters, a number and a symbol, like @ # $ % (not shown):',
       'secret:Type it again:',
-      'secret:Paste your model key (not shown):',
       'ask:Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):',
     ],
   );
@@ -768,28 +762,35 @@ test('when the resume entry cannot be set but Docker answers, the install carrie
   assert.ok(!world.printed.includes(problemText(INSTALL_RESTART_NEEDED)));
 });
 
-test('an empty key is allowed: the install asks for no key on the input and says what that means', async () => {
-  const world = await makeWorld({ secretAnswers: [PASSWORD, PASSWORD, ''] });
+test('no model key is asked for or handed to the installer: the model is added in Aman', async () => {
+  const world = await makeWorld();
   const code = await runInstall(world.deps, { dryRun: false });
   assert.equal(code, 0);
-  assert.ok(world.printed.includes(INSTALL_KEY_EMPTY_LINE));
+  assert.ok(!world.asked.some(entry => /key/i.test(entry.question)));
   const run = world.runner.installRuns[0];
   assert.ok(run !== undefined);
   assert.ok(!run.args.includes('--token-factory-key-stdin'));
-  assert.equal(new TextDecoder().decode(run.stdin), `${PASSWORD}\n`);
 });
 
-test('a password that falls short of the rule is asked again at the question', async () => {
-  const world = await makeWorld({ secretAnswers: ['short', 'short', PASSWORD, PASSWORD, KEY] });
+test('a password that falls short of the rule is asked again before it is typed a second time', async () => {
+  const world = await makeWorld({ secretAnswers: ['short', PASSWORD, PASSWORD] });
   const code = await runInstall(world.deps, { dryRun: false });
   assert.equal(code, 0);
   assert.ok(
     world.printed.includes('That password still needs at least 8 characters, a number and a symbol, like @ # $ %.'),
   );
+  assert.deepEqual(
+    world.asked.filter(entry => entry.kind === 'secret').map(entry => entry.question),
+    [
+      'Choose a password with at least 8 characters, a number and a symbol, like @ # $ % (not shown):',
+      'Choose a password with at least 8 characters, a number and a symbol, like @ # $ % (not shown):',
+      'Type it again:',
+    ],
+  );
 });
 
 test('two different passwords are asked again at the question', async () => {
-  const world = await makeWorld({ secretAnswers: [PASSWORD, 'Password2!', PASSWORD, PASSWORD, KEY] });
+  const world = await makeWorld({ secretAnswers: [PASSWORD, 'Password2!', PASSWORD, PASSWORD] });
   const code = await runInstall(world.deps, { dryRun: false });
   assert.equal(code, 0);
   assert.ok(world.printed.includes(INSTALL_PASSWORD_MISMATCH_LINE));
@@ -805,12 +806,12 @@ test('the password rule counts accented letters in bytes, as the shell counts th
 
 test('an accented password at the byte boundary is accepted at the question', async () => {
   const accented = 'ééé1!a';
-  const world = await makeWorld({ secretAnswers: [accented, accented, KEY] });
+  const world = await makeWorld({ secretAnswers: [accented, accented] });
   const code = await runInstall(world.deps, { dryRun: false });
   assert.equal(code, 0);
   const run = world.runner.installRuns[0];
   assert.ok(run !== undefined);
-  assert.equal(new TextDecoder().decode(run.stdin), `${accented}\n${KEY}\n`);
+  assert.equal(new TextDecoder().decode(run.stdin), `${accented}\n`);
 });
 
 test('a no to the phone question leaves the home network closed and still opens the page', async () => {
@@ -855,7 +856,7 @@ test('a release page that answers without the record names the page, not the con
   world.deps.fetchBytes = () => Promise.resolve({ missing: true });
   const code = await runInstall(world.deps, { dryRun: false });
   assert.equal(code, 1);
-  assert.equal(world.asked.length, 5);
+  assert.equal(world.asked.length, 4);
   assert.ok(world.printed.includes(problemText(INSTALL_RELEASE_NOT_THERE)));
   assert.equal(world.runner.installRuns.length, 0);
 });

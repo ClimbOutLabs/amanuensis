@@ -1,5 +1,5 @@
 import type { ExpressionBuilder, Kysely, Transaction } from 'kysely';
-import type { AvailableModel, ModelProviderManifest } from '../../../schemas/modelProvider';
+import type { AvailableModel, ModelProviderCheck, ModelProviderManifest } from '../../../schemas/modelProvider';
 import {
   flattenProviderModels,
   ModelProviderNameConflictError,
@@ -9,24 +9,28 @@ import {
   type IModelProviderStore,
   type ListModelProvidersInput,
   type ModelProviderRecord,
+  type RecordModelProviderCheckInput,
   type UpsertModelProviderInput,
 } from '../../modelProviderStore';
 import { isUniqueViolation } from '../client';
 import { jsonbBind, jsonText, nowIso } from '../sqlExpressions';
 import type { Database } from '../types';
 
-/** Column list projecting the JSONB manifest as parsed JSON (see JSON_RESULT_COLUMNS). */
+/** Column list projecting the JSONB columns as parsed JSON (see JSON_RESULT_COLUMNS). */
 function recordColumns(eb: ExpressionBuilder<Database, 'model_provider'>) {
   return [
     'tenant_id' as const,
     'name' as const,
     jsonText<ModelProviderManifest>(eb.ref('manifest')).as('manifest'),
+    jsonText<ModelProviderCheck>(eb.ref('last_check')).as('last_check'),
     'created_at' as const,
     'updated_at' as const,
   ];
 }
 
 export class SqliteModelProviderStore implements IModelProviderStore<Transaction<Database>> {
+  readonly managedElsewhere = false;
+
   readonly #db: Kysely<Database>;
 
   constructor(db: Kysely<Database>) {
@@ -89,6 +93,7 @@ export class SqliteModelProviderStore implements IModelProviderStore<Transaction
           tenant_id: input.tenant_id,
           name: input.name,
           manifest: jsonbBind(input.manifest),
+          last_check: null,
           created_at: timestamp,
           updated_at: timestamp,
         })
@@ -114,6 +119,7 @@ export class SqliteModelProviderStore implements IModelProviderStore<Transaction
         tenant_id: input.tenant_id,
         name: input.name,
         manifest: jsonbBind(input.manifest),
+        last_check: null,
         created_at: timestamp,
         updated_at: timestamp,
       })
@@ -125,6 +131,20 @@ export class SqliteModelProviderStore implements IModelProviderStore<Transaction
       )
       .returning(recordColumns)
       .executeTakeFirstOrThrow();
+  }
+
+  async recordProviderCheck(
+    input: RecordModelProviderCheckInput,
+    transaction?: Transaction<Database>,
+  ): Promise<ModelProviderRecord | undefined> {
+    const db = transaction ?? this.#db;
+    return await db
+      .updateTable('model_provider')
+      .set({ last_check: jsonbBind(input.check) })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .returning(recordColumns)
+      .executeTakeFirst();
   }
 
   async listModels(input: ListModelProvidersInput, transaction?: Transaction<Database>): Promise<AvailableModel[]> {

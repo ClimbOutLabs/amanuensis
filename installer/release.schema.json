@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Amanuensis installer release manifest",
-  "description": "installer/release.json carries the pinned third-party images and the pinned Node.js runtime. The copy under release/ in the state directory also records the local builds. Values are flat strings so the installer can read them without a JSON tool.",
+  "description": "installer/release.json carries the pinned third-party images, the Aman images a release published, and the pinned Node.js runtime. The copy under release/ in the state directory also records the local builds. Values are flat strings so the installer can read them without a JSON tool.",
   "type": "object",
   "required": ["schema", "dex_image", "mail_email_image"],
   "additionalProperties": false,
@@ -95,6 +95,36 @@
       "description": "SHA-256 of node-v<node_version>-darwin-arm64.tar.gz, copied from the SHASUMS256.txt that nodejs.org publishes for that release.",
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "published_app_image": {
+      "description": "The Aman app as a release published it: ghcr.io/climboutlabs/aman-app:<source id>@sha256:<index digest>, or empty when no release published it. Used only when the source id equals this checkout's.",
+      "type": "string",
+      "pattern": "^(|ghcr\\.io/climboutlabs/aman-app:[a-f0-9]{12}@sha256:[a-f0-9]{64})$"
+    },
+    "published_stt_image": {
+      "description": "The speech-to-text service as a release published it: ghcr.io/climboutlabs/aman-stt:<source id>@sha256:<index digest>, or empty when no release published it. Used only when the source id equals this checkout's.",
+      "type": "string",
+      "pattern": "^(|ghcr\\.io/climboutlabs/aman-stt:[a-f0-9]{12}@sha256:[a-f0-9]{64})$"
+    },
+    "published_tts_image": {
+      "description": "The voice that reads replies aloud as a release published it: ghcr.io/climboutlabs/aman-tts:<source id>@sha256:<index digest>, or empty when no release published it. Used only when the source id equals this checkout's.",
+      "type": "string",
+      "pattern": "^(|ghcr\\.io/climboutlabs/aman-tts:[a-f0-9]{12}@sha256:[a-f0-9]{64})$"
+    },
+    "published_calendar_image": {
+      "description": "The calendar connector as a release published it: ghcr.io/climboutlabs/aman-calendar-caldav:<source id>@sha256:<index digest>, or empty when no release published it. Used only when the source id equals this checkout's.",
+      "type": "string",
+      "pattern": "^(|ghcr\\.io/climboutlabs/aman-calendar-caldav:[a-f0-9]{12}@sha256:[a-f0-9]{64})$"
+    },
+    "published_browser_image": {
+      "description": "Aman's browser as a release published it: ghcr.io/climboutlabs/aman-browser:<source id>@sha256:<index digest>, or empty when no release published it. Used only when the source id equals this checkout's.",
+      "type": "string",
+      "pattern": "^(|ghcr\\.io/climboutlabs/aman-browser:[a-f0-9]{12}@sha256:[a-f0-9]{64})$"
+    },
+    "published_browser_gateway_image": {
+      "description": "The browser's gateway as a release published it: ghcr.io/climboutlabs/aman-browser-gateway:<source id>@sha256:<index digest>, or empty when no release published it. Used only when the source id equals this checkout's.",
+      "type": "string",
+      "pattern": "^(|ghcr\\.io/climboutlabs/aman-browser-gateway:[a-f0-9]{12}@sha256:[a-f0-9]{64})$"
     }
   }
 }

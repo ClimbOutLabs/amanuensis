@@ -238,7 +238,14 @@ describe('skillCatalog network approval', () => {
   }
 
   const stateBody = {
-    data: { declared_hosts: ['github.com', 'api.github.com'], approved_hosts: null, send_capable: false },
+    data: {
+      declared_hosts: ['github.com', 'api.github.com'],
+      approved_hosts: null,
+      allowed_hosts: [],
+      denied_hosts: [],
+      session_hosts: [],
+      send_capable: false,
+    },
   };
 
   it('reads the approval state from the settings route and projects it', async () => {
@@ -259,6 +266,9 @@ describe('skillCatalog network approval', () => {
     assert.deepEqual(state, {
       declaredHosts: ['github.com', 'api.github.com'],
       approvedHosts: null,
+      allowedHosts: [],
+      deniedHosts: [],
+      sessionHosts: [],
       sendCapable: false,
     });
   });
@@ -276,6 +286,9 @@ describe('skillCatalog network approval', () => {
           data: {
             declared_hosts: ['github.com', 'api.github.com'],
             approved_hosts: ['github.com', 'api.github.com'],
+            allowed_hosts: [],
+            denied_hosts: [],
+            session_hosts: [],
             send_capable: false,
           },
         }),
@@ -301,6 +314,49 @@ describe('skillCatalog network approval', () => {
     ]);
   });
 
+  it('allows or turns down one site with a PUT, and clears each with a DELETE naming the site', async () => {
+    const calls: { url: string; method: string | undefined; body: string | undefined }[] = [];
+    const catalog = catalogWithFetch(async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
+      return new Response(JSON.stringify(stateBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    await catalog.allowSkillNetworkHost({ id: 'ten-x', host: 'uploads.github.com' });
+    await catalog.denySkillNetworkHost({ id: 'ten-x', host: 'trackers.example.com' });
+    await catalog.clearSkillNetworkAllowedHost({ id: 'ten-x', host: 'uploads.github.com' });
+    await catalog.clearSkillNetworkDeniedHost({ id: 'ten-x', host: 'trackers.example.com' });
+
+    assert.deepEqual(calls, [
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval/allowed-host',
+        method: 'PUT',
+        body: JSON.stringify({ host: 'uploads.github.com' }),
+      },
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval/denied-host',
+        method: 'PUT',
+        body: JSON.stringify({ host: 'trackers.example.com' }),
+      },
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval/allowed-host?host=uploads.github.com',
+        method: 'DELETE',
+        body: undefined,
+      },
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval/denied-host?host=trackers.example.com',
+        method: 'DELETE',
+        body: undefined,
+      },
+    ]);
+  });
+
   it('surfaces the server plain-words error when the list no longer matches', async () => {
     const catalog = catalogWithFetch(
       async () =>
@@ -312,5 +368,94 @@ describe('skillCatalog network approval', () => {
         ),
     );
     await assert.rejects(catalog.approveSkillNetwork({ id: 'ten-x', hosts: ['github.com'] }), /list of sites changed/);
+  });
+});
+
+describe('skillCatalog websites check', () => {
+  function recordingCatalog(responseBody: unknown) {
+    const calls: { url: string; method: string | undefined; body: unknown }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+      });
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    const client = new TrueForge({ baseUrl: 'http://harness.test', maxRetries: 0, fetch: fetchImpl });
+    return { catalog: createSkillCatalog(client, { baseUrl: 'http://harness.test', fetch: fetchImpl }), calls };
+  }
+
+  it('checks a skill by url, path and ref, and maps the websites found', async () => {
+    const { catalog, calls } = recordingCatalog({
+      data: {
+        commit: 'a'.repeat(40),
+        websites: ['api.example-weather.test'],
+        makes_up_addresses: true,
+        can_send: false,
+      },
+    });
+
+    const check = await catalog.checkSkillWebsites({
+      repoURL: 'https://github.com/example/skills',
+      path: '  ',
+      ref: 'a'.repeat(40),
+    });
+
+    assert.deepEqual(calls, [
+      {
+        url: 'http://harness.test/api/v1/settings/skills/check-websites',
+        method: 'POST',
+        body: { url: 'https://github.com/example/skills', ref: 'a'.repeat(40) },
+      },
+    ]);
+    assert.deepEqual(check, {
+      commit: 'a'.repeat(40),
+      websites: ['api.example-weather.test'],
+      makesUpAddresses: true,
+      canSend: false,
+    });
+  });
+
+  it('adds a skill together with the websites the person approved', async () => {
+    const { catalog, calls } = recordingCatalog({
+      data: {
+        name: 'weather',
+        manifest: {
+          type: 'git',
+          name: 'weather',
+          url: 'https://github.com/example/skills',
+          path: 'weather',
+          ref: 'main',
+          description: 'Weather',
+        },
+      },
+    });
+
+    await catalog.addSkillWithWebsites({
+      name: 'weather',
+      description: 'Weather',
+      repoURL: 'https://github.com/example/skills',
+      path: 'weather',
+      ref: 'main',
+      approvedWebsites: ['api.example-weather.test'],
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.method, 'POST');
+    assert.deepEqual(calls[0]?.body, {
+      manifest: {
+        type: 'git',
+        name: 'weather',
+        url: 'https://github.com/example/skills',
+        path: 'weather',
+        ref: 'main',
+        description: 'Weather',
+      },
+      approved_websites: ['api.example-weather.test'],
+    });
   });
 });

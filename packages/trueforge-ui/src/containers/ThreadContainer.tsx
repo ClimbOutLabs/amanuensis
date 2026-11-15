@@ -19,6 +19,7 @@ import { ConnectionStatusContainer } from './ConnectionStatusContainer.js';
 import { DocumentIngestionStatusProvider } from './DocumentIngestionStatusProvider.js';
 import { HistoryLoaderContainer } from './HistoryLoaderContainer.js';
 import { ThreadImplementationPlanGrantControls } from './ImplementationPlanGrantControls.js';
+import { LiveVoiceBridge } from './LiveVoiceBridge.js';
 import { MemoryTurnContextProvider } from './MemoryTurnContextProvider.js';
 import { ModelUsageTurnProvider } from './ModelUsageTurnProvider.js';
 import { PendingApprovalsBanner } from './PendingApprovalsBanner.js';
@@ -59,6 +60,9 @@ function ThreadMessage({ isEditing }: { isEditing: boolean }) {
   }
   return <AssistantMessageContainer />;
 }
+
+const AGENT_BUILDER_TEST_CHAT_HINT =
+  'Send it a message to see how it does the job with the setup you chose. Save it when you like how it works.';
 
 export type ThreadContainerProps = {
   /** Composer for the empty-welcome and docked bottom areas. `<Thread />` passes `<ComposerContainer />`. */
@@ -102,14 +106,21 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
     });
     return () => cancelAnimationFrame(frame);
   }, [threadKey]);
+  const isUnnamedAgentBuilder =
+    shell?.mode.status === 'active' &&
+    (shell.mode.agentName == null || shell.mode.agentName.length === 0) &&
+    shell.mode.isMutable &&
+    shell.mode.isCreateAgent;
   const welcomeHeading =
     shell?.mode.status === 'active'
       ? shell.mode.agentName != null && shell.mode.agentName.length > 0
         ? shell.mode.agentName
-        : shell.mode.isMutable && shell.mode.isCreateAgent
-          ? 'Start building a new Agent'
+        : isUnnamedAgentBuilder
+          ? 'Test your agent here'
           : undefined
       : undefined;
+  // The builder's chat looks like any other chat, so it says what it is for.
+  const welcomeSubheading = isUnnamedAgentBuilder ? AGENT_BUILDER_TEST_CHAT_HINT : undefined;
 
   return (
     <MemoryTurnContextProvider>
@@ -118,6 +129,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
           <SentinelStateProvider>
             <ComposerBusyProvider>
               <AvatarActivityBridge />
+              <LiveVoiceBridge />
               <SpokenReplyContainer />
               <ApprovalFocusProvider>
                 <WorkOnRepoPanelProvider>
@@ -127,7 +139,9 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                       <ThreadPrimitive.Viewport asChild autoScroll={!isEmpty}>
                         <ThreadViewportShell isEmpty={isEmpty}>
                           {helpHere ? <HelpChatPanel /> : null}
-                          {isEmpty && !helpHere && <WelcomeScreen heading={welcomeHeading} />}
+                          {isEmpty && !helpHere && (
+                            <WelcomeScreen heading={welcomeHeading} subheading={welcomeSubheading} />
+                          )}
                           {isEmpty && !isLoading && (
                             <>
                               {helpHere ? null : <ThreadWorkOnRepoControls />}

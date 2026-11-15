@@ -1,7 +1,7 @@
 /**
  * The Email connector over the real route: registered at boot as a terminal install does, loaded by the server's own
  * connection lookup, and mounted by the real turn resolver. The sidecar publishes no tool annotations, so its reads
- * must run on the host's own word that they are reads, while its sends still ask.
+ * must run on the host's own word that they are reads, while a draft still asks and a send needs an approved draft.
  */
 import { AgentSpecSchema, TurnResourceResolver } from '@truefoundry/trueforge-core/agent-session';
 import { allowsChatApproval, allowsToolGrant } from '@truefoundry/trueforge-core/core/mcp/approvalGrant';
@@ -88,7 +88,7 @@ describe('the Email connector on the real tool route', () => {
     return email;
   }
 
-  async function expectReadsRunAndSendsAsk(): Promise<void> {
+  async function expectReadsRunAndMailAsks(): Promise<void> {
     // The sidecar's tools carry no annotations, as the shipped image's do not.
     const email = await emailToolSet();
     for (const call of [
@@ -104,24 +104,26 @@ describe('the Email connector on the real tool route', () => {
         asks: false,
       });
     }
-    const send = await email.toolCallInfo(
-      { name: 'send_email', arguments: { to: ['dana@example.org'], subject: 'Friday', body: 'See you then.' } },
-      true,
-    );
-    expect(send.is_approval_required).toBe(true);
-    // A send asks every time: its card never offers "Always allow this here".
-    expect(allowsChatApproval(send)).toBe(false);
-    expect(allowsToolGrant(send)).toBe(false);
+    const message = { recipients: ['dana@example.org'], subject: 'Friday', body: 'See you then.' };
+    // A draft asks every time: its card never offers "Always allow in this chat".
+    const draft = await email.toolCallInfo({ name: 'save_draft', arguments: message }, true);
+    expect(draft.is_approval_required).toBe(true);
+    expect(allowsChatApproval(draft)).toBe(false);
+    expect(allowsToolGrant(draft)).toBe(false);
+    // A send with no approved draft shows no card at all: it is refused, and told to save a draft first.
+    const send = await email.toolCallInfo({ name: 'send_email', arguments: message }, true);
+    expect(send.is_approval_required).toBe(false);
+    expect(send.pre_dispatch_failure?.message).toContain('save_draft');
   }
 
-  it('reads, lists and searches mail with no card right after boot, and sending still asks', async () => {
+  it('reads, lists and searches mail with no card right after boot, a draft asks, and a send with no draft is refused', async () => {
     await registerMailConnector({
       url: sidecar.url,
       mcpServerStore: new SqliteMcpServerStore(server.db()),
       tenant_id: TENANT,
     });
 
-    await expectReadsRunAndSendsAsk();
+    await expectReadsRunAndMailAsks();
   });
 
   it('reads with no card from an Email record an import or an edit left without its mark', async () => {
@@ -133,7 +135,7 @@ describe('the Email connector on the real tool route', () => {
       first_party: false,
     });
 
-    await expectReadsRunAndSendsAsk();
+    await expectReadsRunAndMailAsks();
   });
 
   it('does not follow a redirect from an unmarked Email record trusted by name and address', async () => {

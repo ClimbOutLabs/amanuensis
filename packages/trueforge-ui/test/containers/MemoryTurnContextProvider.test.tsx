@@ -76,7 +76,6 @@ function recallContext(turnId: string, { id = `evt_recall_${turnId}` }: { id?: s
       injectedBlock: '<aman-memory>fact</aman-memory>',
       stats: {
         items: 1,
-        entities: 0,
         droppedOverBudget: 0,
         droppedBelowThreshold: 0,
         estimatedTokens: 4,

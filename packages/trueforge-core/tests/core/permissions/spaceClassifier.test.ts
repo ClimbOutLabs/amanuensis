@@ -169,6 +169,13 @@ describe('Space tool classification', () => {
     expect(card.plain_what).toBe('Created the space Dog breeds.');
   });
 
+  it('carries the line for the activity log on a write, and none on a read', async () => {
+    const write = await classifyTier(spaceAction('create_space', { name: 'Home renovation' }), makeCtx());
+    expect(write.audit_description).toBe('Created the space Home renovation.');
+    const read = await classifyTier(spaceAction('get_space', { space_name: 'Home renovation' }), makeCtx());
+    expect(read.audit_description).toBeNull();
+  });
+
   it('runs revert_space without asking', async () => {
     const decision = await classifyTier(spaceAction('revert_space', { space_id: 'sp1', revision: 2 }), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });

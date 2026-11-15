@@ -7,6 +7,7 @@ import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -51,6 +52,9 @@ test(
           );
           const panel = page.locator('[data-aui-compact-layout]');
           await panel.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+          await page.screenshot({
+            path: await featureShotPath({ surface: 'screen:chat-layout', step: `side-panel-edge-${preset}-${mode}` }),
+          });
 
           const edge = await panel.evaluate(element => {
             const style = getComputedStyle(element);
@@ -80,6 +84,9 @@ test(
           }
         }
       }
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:chat-layout' });
+      throw error;
     } finally {
       await browser?.close();
       await server.close();

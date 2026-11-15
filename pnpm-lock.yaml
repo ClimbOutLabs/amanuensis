@@ -17,7 +17,7 @@ overrides:
 
 patchedDependencies:
   '@openuidev/react-lang@0.2.15': bae446f8a8ee896e9071360fef5b684031680dc68358483a93ce1723ea19a7da
-  '@truefoundry/assistant-ui-runtime@0.1.37': 419b386cc819f10152837fd3479b8a3b81f55b0fbbdb1139a261fe380f436dae
+  '@truefoundry/assistant-ui-runtime@0.1.37': 3ac31eefcad241b804d3c367201e0fcede50129a22c2f80407d447747216212a
 
 importers:
 
@@ -66,6 +66,12 @@ importers:
       railway:
         specifier: ^3.11.0
         version: 3.11.0
+      spdx-exceptions:
+        specifier: 2.5.0
+        version: 2.5.0
+      spdx-license-ids:
+        specifier: 3.0.22
+        version: 3.0.22
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -326,7 +332,7 @@ importers:
         specifier: ^3.19.0
         version: 3.19.0
       ws:
-        specifier: ^8.21.3
+        specifier: 8.21.3
         version: 8.21.3
       yaml:
         specifier: ^2.9.1
@@ -364,7 +370,7 @@ importers:
         version: 0.2.21(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(react@19.3.0)
       '@truefoundry/assistant-ui-runtime':
         specifier: 0.1.37
-        version: 0.1.37(patch_hash=419b386cc819f10152837fd3479b8a3b81f55b0fbbdb1139a261fe380f436dae)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
+        version: 0.1.37(patch_hash=3ac31eefcad241b804d3c367201e0fcede50129a22c2f80407d447747216212a)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/trueforge-core':
         specifier: workspace:*
         version: link:../trueforge-core
@@ -531,6 +537,9 @@ importers:
       winston:
         specifier: ^3.19.0
         version: 3.19.0
+      ws:
+        specifier: 8.21.3
+        version: 8.21.3
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -559,12 +568,21 @@ importers:
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
       cross-env:
         specifier: ^10.1.0
         version: 10.1.0
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
       jest:
         specifier: ^29.7.0
         version: 29.7.0(@types/node@24.13.3)(babel-plugin-macros@3.1.0)(supports-color@8.1.1)
+      jest-environment-node:
+        specifier: 29.7.0
+        version: 29.7.0
       playwright-core:
         specifier: 1.62.1
         version: 1.62.1
@@ -742,7 +760,7 @@ importers:
         version: 0.13.10(@openuidev/react-headless@0.9.13(ai@7.0.99(zod@4.6.4))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0))))(@openuidev/react-lang@0.2.15(patch_hash=bae446f8a8ee896e9071360fef5b684031680dc68358483a93ce1723ea19a7da)(@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@4.6.4))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.4))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(zod@4.6.4)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/assistant-ui-runtime':
         specifier: 0.1.37
-        version: 0.1.37(patch_hash=419b386cc819f10152837fd3479b8a3b81f55b0fbbdb1139a261fe380f436dae)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
+        version: 0.1.37(patch_hash=3ac31eefcad241b804d3c367201e0fcede50129a22c2f80407d447747216212a)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/trueforge-core':
         specifier: workspace:*
         version: link:../trueforge-core
@@ -6105,6 +6123,10 @@ packages:
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
 
+  fast-check@4.10.2:
+    resolution: {integrity: sha512-iK2f+YrcmoeGqk6fA0ea2bptcu/itMIm4NfEozq6N25+aG6h7s5HZbB/k1aV7b5w5sFLMCbbtRUsTVR+BgC3xw==}
+    engines: {node: '>=12.17.0'}
+
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
 
@@ -7970,6 +7992,9 @@ packages:
   pure-rand@6.1.0:
     resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
 
+  pure-rand@8.4.2:
+    resolution: {integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==}
+
   qified@0.10.1:
     resolution: {integrity: sha512-+Owyggi9IxT1ePKGafcI87ubSmxol6smwJ+RAHDQlx9+9cPwFWDiKFFCPuWhr9ignlGpZ9vDQLw67N4dcTVFEA==}
     engines: {node: '>=20'}
@@ -8448,6 +8473,12 @@ packages:
 
   space-separated-tokens@2.0.2:
     resolution: {integrity: sha512-PEGlAwrG8yXGXRjW32fGbg66JAlOAwbObuqVoJpv/mRgoWDQfgH1wDPvtzWyUSNAXBGSk8h755YDbbcEy3SH2Q==}
+
+  spdx-exceptions@2.5.0:
+    resolution: {integrity: sha512-PiU42r+xO4UbUS1buo3LPJkjlO7430Xn5SVAhdpzzsPHsjbYVflnnFdATgabnLude+Cqu25p6N+g2lw/PFsa4w==}
+
+  spdx-license-ids@3.0.22:
+    resolution: {integrity: sha512-4PRT4nh1EImPbt2jASOKHX7PB7I+e4IWNLvkKFDxNhJlfjbYlleYQh285Z/3mPTHSAK/AvdMmw5BNNuYH8ShgQ==}
 
   split2@4.2.0:
     resolution: {integrity: sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==}
@@ -12956,7 +12987,7 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  '@truefoundry/assistant-ui-runtime@0.1.37(patch_hash=419b386cc819f10152837fd3479b8a3b81f55b0fbbdb1139a261fe380f436dae)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
+  '@truefoundry/assistant-ui-runtime@0.1.37(patch_hash=3ac31eefcad241b804d3c367201e0fcede50129a22c2f80407d447747216212a)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
     dependencies:
       '@assistant-ui/core': 0.2.22(@assistant-ui/store@0.2.21(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(react@19.3.0))(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@assistant-ui/store': 0.2.21(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(react@19.3.0)
@@ -14856,6 +14887,10 @@ snapshots:
       - supports-color
 
   extend@3.0.2: {}
+
+  fast-check@4.10.2:
+    dependencies:
+      pure-rand: 8.4.2
 
   fast-deep-equal@3.1.3: {}
 
@@ -17165,6 +17200,8 @@ snapshots:
 
   pure-rand@6.1.0: {}
 
+  pure-rand@8.4.2: {}
+
   qified@0.10.1:
     dependencies:
       hookified: 2.2.0
@@ -17866,6 +17903,10 @@ snapshots:
   source-map@0.7.6: {}
 
   space-separated-tokens@2.0.2: {}
+
+  spdx-exceptions@2.5.0: {}
+
+  spdx-license-ids@3.0.22: {}
 
   split2@4.2.0: {}
 

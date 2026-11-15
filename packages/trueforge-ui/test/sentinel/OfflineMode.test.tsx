@@ -203,7 +203,9 @@ describe('SentinelSettings', () => {
     );
     const toggle = await screen.findByRole('switch', { name: 'Show maps without asking' });
     expect(toggle).not.toBeChecked();
-    expect(screen.getByText('Maps ask before each one.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Maps ask before each one. A scheduled run, such as a daily briefing, skips its maps.'),
+    ).toBeInTheDocument();
     fireEvent.click(toggle);
     await waitFor(() => {
       expect(updateUserSettings).toHaveBeenCalledWith({ maps_without_asking: true });
@@ -255,7 +257,7 @@ describe('SentinelSettings', () => {
     expect(toggle).toBeChecked();
     expect(
       screen.getByText(
-        'Aman can make new files and run the scripts it wrote in this chat without asking. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks.',
+        'Aman can make new files and run the scripts it wrote in this chat without asking. This only applies where the sandbox has no network, which is the sandbox the installer sets up. Where you allowed package downloads, or a skill may reach its own sites, running code and making a file still ask. Installing a package still asks. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks. A scheduled run always asks, and so does its chat when you type there.',
       ),
     ).toBeInTheDocument();
     fireEvent.click(toggle);

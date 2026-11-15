@@ -33,6 +33,7 @@ The file `.env.eval-tokens` is ignored by git. Keep it that way.
 In eval mode the instance is safe to test with, because:
 
 - Gmail and Google Calendar answer from the invented files in `packages/trueforge/evals/fixtures/`. No call goes to Google, and nothing is sent.
+- The invented inbox also holds five emails with planted instructions. The [model eval](model-eval.md) uses them to check that a model does not obey them.
 - The page reader answers links on the reserved host `fixtures.aman.invalid` from the invented pages in `packages/trueforge/evals/fixtures/pages/`. That host is not a real domain, so such a link never reaches the web. Outside eval mode the same link is read like any other unreachable address.
 - A mail draft or a calendar event lives only in that instance's memory. It is never written to a real account.
 - Only these approvals go through: mail reads and drafts, calendar reads and writes, maps, and web search. Any other approval is declined by the server, whatever the runner sends. Sending mail is never approved.

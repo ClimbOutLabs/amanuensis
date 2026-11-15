@@ -9,6 +9,7 @@ import {
   DraftSchema,
   GmailMessageSchema,
   GmailThreadSchema,
+  MessageListSchema,
   ThreadListSchema,
   type GmailDraft,
   type GmailMessage,
@@ -36,6 +37,11 @@ interface ThreadList {
   threadIds: string[];
   nextPageToken: string | undefined;
   resultSizeEstimate: number;
+}
+
+interface MessageList {
+  messageIds: string[];
+  nextPageToken: string | undefined;
 }
 
 interface DraftList {
@@ -75,6 +81,31 @@ export class GmailApi {
       nextPageToken: list.nextPageToken,
       resultSizeEstimate: list.resultSizeEstimate ?? (list.threads ?? []).length,
     };
+  }
+
+  /** Message ids, newest first. Unlike threads, each message is listed by its own arrival time. */
+  async listMessages(input: {
+    query: string;
+    maxResults: number;
+    pageToken: string | undefined;
+  }): Promise<MessageList> {
+    const list = await this.#rest.parsed(MessageListSchema, {
+      body: undefined,
+      method: 'GET',
+      path: '/messages',
+      query: { q: input.query, maxResults: input.maxResults, pageToken: input.pageToken },
+    });
+    return { messageIds: (list.messages ?? []).map(message => message.id), nextPageToken: list.nextPageToken };
+  }
+
+  /** One message's labels, snippet and the headers a sender check needs, with no message text. */
+  async getMessageHeaders(messageId: string): Promise<GmailMessage> {
+    return await this.#rest.parsed(GmailMessageSchema, {
+      body: undefined,
+      method: 'GET',
+      path: `/messages/${encodeURIComponent(messageId)}`,
+      query: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Authentication-Results'] },
+    });
   }
 
   /** Headers only, enough for a list row: sender, subject, date, labels. */

@@ -18,7 +18,10 @@ import { PostgresSpaceStore } from '../../db/postgres/space-store/PostgresSpaceS
 import { PostgresOAuthTokenStore } from '../../db/postgres/token-store/PostgresOAuthTokenStore';
 import { PostgresTurnArtifactStore } from '../../db/postgres/turn-artifact-store/PostgresTurnArtifactStore';
 import type { Database as PostgresDatabase } from '../../db/postgres/types';
+import { ReachSettingsStore } from '../../db/reachSettingsStore';
 import { SentinelAuditStore } from '../../db/sentinelAuditStore';
+import { TelegramStore } from '../../db/telegramStore';
+import { TextContactStore } from '../../db/textContactStore';
 import type { ExportStores } from './stores';
 
 export async function openPostgresStores(options: {
@@ -65,6 +68,9 @@ export async function openPostgresStores(options: {
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
+    telegramStore: new TelegramStore(db),
     close: () => db.destroy(),
   };
 }

@@ -1,5 +1,5 @@
 /**
- * Local SRT SandboxProvider. Code Mode UDS is handle-scoped via {@link CodeModeUdsTransport}.
+ * Local SRT SandboxProvider.
  */
 import type {
   CodeModeTransport,
@@ -25,6 +25,7 @@ import {
   SandboxPathIsDirectoryError,
   shellEscape,
   validateNoPathTraversal,
+  withArgvAsCommandLine,
   withTrustedPath,
   workspaceTerminationCommand,
 } from '@truefoundry/trueforge-core/core';
@@ -35,11 +36,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Logger } from 'winston';
 import { newId } from '../../../utils/id';
-import {
-  assertCodeModeSocketParentPath,
-  CodeModeUdsTransport,
-  probeCodeModeUnixSocket,
-} from '../core/CodeModeUdsTransport.js';
+import { assertCodeModeSocketParentPath, probeCodeModeUnixSocket } from '../core/CodeModeUdsTransport.js';
 import {
   checkSrtHostDependencies,
   createSandbox,
@@ -259,6 +256,8 @@ export function localSandboxUploadCommand(remotePath: string): string {
 
 export class LocalSandboxProvider implements SandboxProvider {
   readonly type = 'local';
+  /** Off for this sandbox: its code can reach the network, so it gets no bridge to connector tools. */
+  readonly supportsCodeMode = false;
   private readonly sandboxRootPathParent: string;
   private readonly codeModeSocketParentPath: string;
   private readonly support: LocalSandboxSupported;
@@ -636,6 +635,8 @@ export class LocalSandboxProvider implements SandboxProvider {
     const signal = params?.signal;
     throwIfSignalAborted(signal);
     await this.ensureSrt(signal);
+    // Making the sandbox root creates only its last folder, so a new chat's own folder must exist first.
+    await mkdir(this.sandboxRootPathParent, { recursive: true, mode: 0o700 });
     const sandboxRootPath = join(this.sandboxRootPathParent, newId());
     let sandboxId: string | undefined;
     try {
@@ -672,7 +673,7 @@ export class LocalSandboxProvider implements SandboxProvider {
     // Match remote providers: an already-cancelled call must not initialize a
     // sandbox, create its virtualenv, or spawn a host process.
     throwIfSignalAborted(params.signal);
-    const lockedParams = commandWithWorkspaceLock(params);
+    const lockedParams = commandWithWorkspaceLock(withArgvAsCommandLine(params));
     this.ensureSandboxRoot(lockedParams.sandboxId);
     try {
       await this.ensureSrt(lockedParams.signal);
@@ -831,10 +832,7 @@ export class LocalSandboxProvider implements SandboxProvider {
   }
 
   createCodeModeTransport(): CodeModeTransport {
-    return new CodeModeUdsTransport({
-      codeModeSocketParentPath: this.codeModeSocketParentPath,
-      clientRemotePath: () => join('mcp-client', 'mcp_client.py'),
-    });
+    throw new Error('Code Mode is not available in the sandbox used without Docker.');
   }
 
   /** Reset process-scoped SRT for this provider. */

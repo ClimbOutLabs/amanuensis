@@ -1,6 +1,7 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import {
+  estimateTokensForContextMessages,
   hasCalledRetrievalTool,
   hasRetrievalTool,
   hostPictureMessage,
@@ -14,6 +15,7 @@ import {
   personMessageIndex,
   untrustedDocumentTag,
   userAuthoredText,
+  withoutEarlierThinking,
 } from '../../../src/core/runtime/contextUtils';
 
 describe('isFreshnessQuestion', () => {
@@ -267,5 +269,52 @@ describe('personMessageIndex', () => {
 
   it('is -1 when only the host wrote user messages', () => {
     expect(personMessageIndex([{ role: 'user', content: internalSystemTag('note') }])).toBe(-1);
+  });
+});
+
+describe('estimateTokensForContextMessages', () => {
+  it('counts the thinking that is sent back with every request', () => {
+    const withThinking: ContextMessage = {
+      role: 'assistant',
+      content: 'a'.repeat(400),
+      thinking_blocks: [{ type: 'thinking', thinking: 't'.repeat(8_000) }],
+    };
+    expect(estimateTokensForContextMessages([withThinking]).prompt_tokens).toBe(2_100);
+  });
+
+  it('does not count redacted thinking, which is never sent back as text', () => {
+    const redacted: ContextMessage = {
+      role: 'assistant',
+      content: 'a'.repeat(400),
+      thinking_blocks: [{ type: 'redacted_thinking', data: 'x'.repeat(8_000) }],
+    };
+    expect(estimateTokensForContextMessages([redacted]).prompt_tokens).toBe(100);
+  });
+});
+
+describe('withoutEarlierThinking', () => {
+  const thinking = [{ type: 'thinking' as const, thinking: 'working it out' }];
+
+  it("drops thinking before the person's latest message and keeps it after", () => {
+    const earlier: ContextMessage = { role: 'assistant', content: 'Earlier answer.', thinking_blocks: thinking };
+    const current: ContextMessage = { role: 'assistant', content: 'Working on it.', thinking_blocks: thinking };
+    const sent = withoutEarlierThinking([
+      { role: 'user', content: 'First question.' },
+      earlier,
+      { role: 'user', content: 'Second question.' },
+      current,
+    ]);
+    expect(sent[1]).toEqual({ role: 'assistant', content: 'Earlier answer.' });
+    expect(sent[3]).toBe(current);
+  });
+
+  it('treats a host note as part of the current reply, not a new person message', () => {
+    const current: ContextMessage = { role: 'assistant', content: 'Working on it.', thinking_blocks: thinking };
+    const sent = withoutEarlierThinking([
+      { role: 'user', content: 'A question.' },
+      current,
+      internalSystemMessage('Write the final answer now.'),
+    ]);
+    expect(sent[1]).toBe(current);
   });
 });

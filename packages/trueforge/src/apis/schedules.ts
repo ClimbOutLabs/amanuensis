@@ -76,6 +76,7 @@ import {
   putScheduleToolsRoute,
 } from '../routes/scheduleRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import { deliverBriefReady, isBriefRun } from '../runtime/briefDelivery';
 import {
   chatAssistantAgentName,
   ChatAssistantUnavailableError,
@@ -87,7 +88,7 @@ import { validateManifest } from '../runtime/cron';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
-import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
+import type { ReminderReach } from '../runtime/noticing/reminderReach';
 import { deliverReminder } from '../runtime/reminderDelivery';
 import { scheduleToolsOf, specWithTools } from '../runtime/scheduleTools';
 import { resolveSandboxProvider, validateAgentSpec } from '../runtime/sessionResources';
@@ -106,6 +107,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   briefItemStore: IBriefItemCompletionStore;
   /** A due reminder is also put in the person's feed, and pushed to their devices, through this. */
   deliveryService: DeliveryService;
+  /** Settles how loud a due reminder is, by the person's Reach me rules. */
+  reminderReach: ReminderReach;
   sessions: Sessions<SessionCustom, TurnCustom>;
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
@@ -212,6 +215,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sessionStore: deps.sessionStore,
       now: new Date(),
       deliveries: deps.deliveryService,
+      reach: deps.reminderReach,
       logger: deps.logger,
       // A reminder line is a finished turn like any other, so it joins the past-chat search once it is written.
       onLineWritten: async line => {
@@ -257,30 +261,13 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   });
   // Memory wiring mirrors the chat route: without a client the turn retains nothing, so
   // a scheduled agent's turns are never summarized and never reach the Memories page.
-  // The markdown backend needs no provider lookup; hindsight resolves one like chat does.
-  const memoryProvider =
-    configuration.MEMORY_BACKEND === 'hindsight'
-      ? await resolveMemoryProvider({
-          mcpServerStore: deps.resolveMcpServerStore(c, prepared.agent),
-          tokenStore: deps.tokenStore,
-          tenantId: item.schedule.tenant_id,
-          clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-          userRef: prepared.userRef,
-          logger: deps.logger,
-        })
-      : undefined;
   const memoryClient = createMemoryClient({
-    backend: configuration.MEMORY_BACKEND,
     markdownDir: configuration.MEMORY_MARKDOWN_DIR,
     namespace: item.schedule.tenant_id,
     vaultScope:
       prepared.persona === undefined
         ? undefined
         : { personaName: prepared.persona.display_name, personaId: prepared.persona.id },
-    hindsight:
-      memoryProvider === undefined
-        ? undefined
-        : { apiBase: memoryProvider.apiBase, bank: memoryProvider.bank, headers: memoryProvider.headers },
     // Same meaning-based recall wiring as the chat route: one subsystem singleton per
     // vault, degrading to keyword-only until the model is ready.
     embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
@@ -296,9 +283,21 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     input: prepared.input,
     previous_turn_id: prepared.previous_turn_id,
     userRef: prepared.userRef,
+    // The run names its own chat for the schedule, so the task text never becomes its title.
+    session_title: prepared.session_title,
     // Nobody watches a scheduled run, so it holds what would ask instead of stopping at a card.
     unattended: true,
     withheldTools: scheduleWithheldTools({ name: item.schedule.name, task: item.schedule.manifest.task }),
+    onFinishedAnswer: isBriefRun(item)
+      ? answer =>
+          deliverBriefReady({
+            item,
+            session_id: prepared.session.session_id,
+            answer,
+            deliveries: deps.deliveryService,
+            logger: deps.logger,
+          })
+      : undefined,
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,
@@ -324,8 +323,6 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       personalizationProfile,
       personaContext: prepared.persona === undefined ? undefined : buildPersonaContext(prepared.persona),
       memoryClient,
-      memoryProviderServerName: memoryProvider?.serverName,
-      memorySettings: memoryProvider?.settings,
       logger: deps.logger,
       // A scheduled run has no browser, so its day and times follow the schedule's own time zone.
       clientTimezone: item.schedule.manifest.timezone,

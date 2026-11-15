@@ -17,6 +17,15 @@ jest.mock('../../src/core/mcp/remoteMcpClient', () => {
   return { __esModule: true as const, ...actual, connectRemoteMcp: jest.fn() };
 });
 
+import { defaultSentinelServices, type SentinelServices } from '../../src/core/permissions';
+import { everyMailDraftApproved } from '../core/fixtures/approvedMailDrafts';
+
+/** These tests are about which account a send goes from, so every draft counts as approved. */
+const SERVICES = {
+  ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+  mail_approved_drafts: everyMailDraftApproved,
+};
+
 const mockConnect = jest.mocked(connectRemoteMcp);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -29,6 +38,17 @@ const MAILBOX = [1, 2, 9, 12, 20, 45, 90].map(daysAgo => ({
   sender: 'sender@example.com',
   date: new Date(NOW - daysAgo * DAY_MS).toISOString(),
 }));
+
+/** The account's folders as the real sidecar lists them: one JSON text block per folder, with special-use marks. */
+const FOLDERS = [
+  { name: 'INBOX', delimiter: '/', flags: ['\\HasNoChildren'] },
+  { name: '[Gmail]/Sent Mail', delimiter: '/', flags: ['\\HasNoChildren', '\\Sent'] },
+  { name: '[Gmail]/Drafts', delimiter: '/', flags: ['\\Drafts', '\\HasNoChildren'] },
+];
+
+/** The real sidecar's words when the mail server rejects a request, such as a folder it does not have. */
+const PROVIDER_FAILURE =
+  'Error executing tool list_emails_metadata: provider_failure: metadata provider request failed';
 
 const readAnnotations = { readOnlyHint: true, openWorldHint: false };
 const accountProperty = { type: 'string', description: 'The name of the email account.' };
@@ -56,9 +76,26 @@ const SIDECAR_TOOLS = [
   },
   {
     name: 'get_emails_content',
-    description: 'Read email bodies.',
-    inputSchema: { type: 'object' as const, properties: { account_name: accountProperty }, required: ['account_name'] },
+    description: 'Read email bodies. This tool is non-read-only because mark_as_read=true changes remote flags.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_name: accountProperty,
+        mailbox: { type: 'string', description: 'The mailbox.' },
+        mark_as_read: { type: 'boolean', default: false, description: 'If True, mark each retrieved email as read.' },
+      },
+      required: ['account_name'],
+    },
     annotations: readAnnotations,
+  },
+  {
+    name: 'mark_emails_as_read',
+    description: 'Mark emails as read.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { account_name: accountProperty, email_ids: { type: 'array' } },
+      required: ['account_name', 'email_ids'],
+    },
   },
   {
     name: 'get_attachment_content',
@@ -77,7 +114,12 @@ const SIDECAR_TOOLS = [
     description: 'Send an email.',
     inputSchema: {
       type: 'object' as const,
-      properties: { account_name: accountProperty, recipients: { type: 'array' }, subject: { type: 'string' } },
+      properties: {
+        account_name: accountProperty,
+        recipients: { type: 'array' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+      },
       required: ['account_name', 'recipients', 'subject'],
     },
   },
@@ -115,8 +157,10 @@ function scriptedSidecar({
   accountList,
   known = () => ['default'],
   draftResult = () => text({ ok: true, draft_id: 'draft-1' }),
+  mailboxListFails = false,
 }: {
   accountList: () => CallToolResult;
+  mailboxListFails?: boolean;
   known?: () => readonly string[];
   draftResult?: () => CallToolResult;
 }) {
@@ -131,10 +175,24 @@ function scriptedSidecar({
       return Promise.resolve(text(`Account ${String(args['account_name'])} was not found`, true));
     }
     if (params.name === 'list_mailboxes') {
-      return Promise.resolve(text({ mailboxes: ['INBOX', 'Sent'] }));
+      return Promise.resolve(
+        mailboxListFails
+          ? text('provider_failure: mailbox list failed', true)
+          : { content: FOLDERS.map(folder => ({ type: 'text' as const, text: JSON.stringify(folder) })) },
+      );
+    }
+    const mailbox = args['mailbox'];
+    if (typeof mailbox === 'string' && mailbox.toUpperCase() !== 'INBOX' && !FOLDERS.some(f => f.name === mailbox)) {
+      return Promise.resolve(text(PROVIDER_FAILURE, true));
+    }
+    if (params.name === 'get_emails_content') {
+      return Promise.resolve(text({ emails: [] }));
+    }
+    if (params.name === 'mark_emails_as_read') {
+      return Promise.resolve({ content: [{ type: 'text', text: 'Successfully marked 1 email(s) as read' }] });
     }
     if (params.name === 'send_email') {
-      return Promise.resolve(text({ sent: true }));
+      return Promise.resolve({ content: [{ type: 'text', text: 'Email sent successfully to the recipients' }] });
     }
     if (params.name === 'save_draft') {
       return Promise.resolve(draftResult());
@@ -163,7 +221,11 @@ function scriptedSidecar({
   return { calls };
 }
 
-function makeResolver(mailAccounts: MailAccountDirectory, clientTimezone?: string) {
+function makeResolver(
+  mailAccounts: MailAccountDirectory,
+  clientTimezone?: string,
+  mailRouting?: () => Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined>,
+) {
   return new TurnResourceResolver({
     clientTimezone,
     llm: () =>
@@ -178,8 +240,11 @@ function makeResolver(mailAccounts: MailAccountDirectory, clientTimezone?: strin
     mcpConnectTimeoutMs: 1_000,
     logger: makeSilentLogger(),
     mailAccounts,
+    ...(mailRouting === undefined ? {} : { mailRouting }),
   });
 }
+
+const twoAccounts = () => text([{ account_name: 'work' }, { account_name: 'home' }]);
 
 function makeSpec(): AgentSpec {
   return AgentSpecSchema.parse({
@@ -195,6 +260,7 @@ function makeSpec(): AgentSpec {
           'list_mailboxes',
           'send_email',
           'save_draft',
+          'mark_emails_as_read',
         ],
       },
     ],
@@ -207,7 +273,11 @@ function makeSpec(): AgentSpec {
   });
 }
 
-async function emailToolSet(resolver: TurnResourceResolver, session_id = 'chat-1'): Promise<IToolSet> {
+async function emailToolSet(
+  resolver: TurnResourceResolver,
+  session_id = 'chat-1',
+  services: SentinelServices = SERVICES,
+): Promise<IToolSet> {
   const { definition } = await resolver.resolveAgentDefinition({
     spec: makeSpec(),
     signal: new AbortController().signal,
@@ -215,6 +285,7 @@ async function emailToolSet(resolver: TurnResourceResolver, session_id = 'chat-1
     tenant_id: 'tenant-1',
     created_by: 'user-1',
     session_id,
+    sentinel_services: services,
   });
   const [toolSet] = definition.toolSets ?? [];
   if (toolSet === undefined) {
@@ -298,7 +369,7 @@ describe('Email connector account name', () => {
 
     expect(JSON.parse(said)).toEqual({
       error:
-        "There is no Email account named 'main'. The accounts are 'work', 'home'; use one of these names, or leave the name out when there is one account.",
+        "There is no Email account named 'main'. The accounts are 'work', 'home'; use one of these names, or leave the name out to use the default account.",
     });
   });
 
@@ -334,6 +405,77 @@ describe('Email connector account name', () => {
     expect(sends.map(call => call['account_name'])).toEqual(['default']);
   });
 
+  it('fills the default account into a send that leaves the name out, with several accounts', async () => {
+    const sidecar = scriptedSidecar({ accountList: twoAccounts, known: () => ['work', 'home'] });
+    const routing = () => Promise.resolve({ default_name: 'home', allowed: null });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), undefined, routing));
+
+    const { isError } = resultText(
+      await toolSet.callTool(
+        { name: 'send_email', arguments: { recipients: ['friend@example.com'], subject: 'Hi' } },
+        APPROVED,
+      ),
+    );
+
+    expect(isError).toBe(false);
+    const sends = sidecar.calls.filter(call => call['tool'] === 'send_email');
+    expect(sends.map(call => call['account_name'])).toEqual(['home']);
+  });
+
+  it('sends from the account the person picked on the card, not the default', async () => {
+    const sidecar = scriptedSidecar({ accountList: twoAccounts, known: () => ['work', 'home'] });
+    const routing = () => Promise.resolve({ default_name: 'home', allowed: null });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), undefined, routing));
+
+    const { isError } = resultText(
+      await toolSet.callTool(
+        { name: 'send_email', arguments: { recipients: ['friend@example.com'], subject: 'Hi' } },
+        { status: 'allow', from_account: 'work' },
+      ),
+    );
+
+    expect(isError).toBe(false);
+    const sends = sidecar.calls.filter(call => call['tool'] === 'send_email');
+    expect(sends.map(call => call['account_name'])).toEqual(['work']);
+  });
+
+  it('refuses a send naming an account outside the persona limit, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: twoAccounts, known: () => ['work', 'home'] });
+    const routing = () => Promise.resolve({ default_name: 'home', allowed: ['home'] });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), undefined, routing));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool(
+        {
+          name: 'send_email',
+          arguments: { account_name: 'work', recipients: ['friend@example.com'], subject: 'Hi' },
+        },
+        APPROVED,
+      ),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).toContain("This persona cannot use the Email account 'work'.");
+    expect(sidecar.calls.filter(call => call['tool'] === 'send_email')).toEqual([]);
+  });
+
+  it('refuses a card pick outside the persona limit, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: twoAccounts, known: () => ['work', 'home'] });
+    const routing = () => Promise.resolve({ default_name: 'home', allowed: ['home'] });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), undefined, routing));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool(
+        { name: 'send_email', arguments: { recipients: ['friend@example.com'], subject: 'Hi' } },
+        { status: 'allow', from_account: 'work' },
+      ),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).toContain('The account on the approval card cannot be used for this send');
+    expect(sidecar.calls.filter(call => call['tool'] === 'send_email')).toEqual([]);
+  });
+
   it('reads the account list again for a send, so an account added since the last read is used', async () => {
     const accounts = ['default'];
     const sidecar = scriptedSidecar({
@@ -362,7 +504,7 @@ describe('Email connector account name', () => {
 
   it('keeps each connector address apart in the same chat', async () => {
     const directory = new MailAccountDirectory();
-    const read = jest.fn(() => Promise.resolve(['default']));
+    const read = jest.fn(() => Promise.resolve({ names: ['default'], default_name: 'default', allowed: null }));
 
     await directory.accounts({ chat_id: 'chat-1', connector_url: 'https://a.example.com/mcp', fresh: false, read });
     await directory.accounts({ chat_id: 'chat-1', connector_url: 'https://b.example.com/mcp', fresh: false, read });
@@ -577,5 +719,233 @@ describe('Email connector attachments', () => {
       expect(tool?.description).toContain('call extract_document_text with that path');
       expect(tool?.description).toContain("Never pass an attachment's file name as the path");
     }
+  });
+});
+
+describe('Email connector mark as read', () => {
+  beforeEach(() => {
+    mockConnect.mockReset();
+  });
+
+  it('never shows the model a way to mark mail read while reading it', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    const content = listed.result.tools.find(entry => entry.name === 'get_emails_content');
+    expect(content?.inputSchema.properties).not.toHaveProperty('mark_as_read');
+    expect(content?.description).not.toContain('mark_as_read');
+    expect(content?.description).toContain('Reading never marks an email as read.');
+  });
+
+  it.each([true, 'true', 1])('reads with marking off even when the call sets it to %p', async value => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    await toolSet.callTool({ name: 'get_emails_content', arguments: { email_ids: ['1'], mark_as_read: value } });
+    await toolSet.callTool({ name: 'get_emails_content', arguments: { email_ids: ['2'] } });
+
+    const reads = sidecar.calls.filter(call => call['tool'] === 'get_emails_content');
+    expect(reads.map(call => call['mark_as_read'])).toEqual([false, false]);
+  });
+
+  it('offers marking mail read as its own step, used only when the person asks, behind a card', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    const mark = listed.result.tools.find(entry => entry.name === 'mark_emails_as_read');
+    expect(mark?.description).toContain('only when the person asked');
+    expect(mark?.description).toContain('Never offer or suggest it');
+
+    const unapproved = await toolSet.callTool({ name: 'mark_emails_as_read', arguments: { email_ids: ['1'] } });
+    expect(unapproved).toHaveProperty('approvalRequired');
+    expect(sidecar.calls.filter(call => call['tool'] === 'mark_emails_as_read')).toHaveLength(0);
+
+    const approved = await toolSet.callTool({ name: 'mark_emails_as_read', arguments: { email_ids: ['1'] } }, APPROVED);
+    expect(resultText(approved).text).toContain('marked 1 email(s) as read');
+  });
+});
+
+describe('Email connector folders', () => {
+  beforeEach(() => {
+    mockConnect.mockReset();
+  });
+
+  const since = new Date(NOW - 7 * DAY_MS).toISOString();
+
+  it("reads sent mail when the model names the folder 'Sent' and the account calls it something else", async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'Sent', since } }),
+    );
+    const read = resultText(
+      await toolSet.callTool({ name: 'get_emails_content', arguments: { mailbox: 'sent items', email_ids: ['1'] } }),
+    );
+
+    expect(listed.isError).toBe(false);
+    expect(read.isError).toBe(false);
+    const reads = sidecar.calls.filter(
+      call => call['tool'] !== 'list_mailboxes' && call['tool'] !== 'list_available_accounts',
+    );
+    expect(reads.map(call => call['mailbox'])).toEqual(['[Gmail]/Sent Mail', '[Gmail]/Sent Mail']);
+  });
+
+  it('leaves the inbox and an exact folder name as given', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'inbox', since } });
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: '[Gmail]/Drafts', since } });
+
+    const listCalls = sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata');
+    expect(listCalls.map(call => call['mailbox'])).toEqual(['inbox', '[Gmail]/Drafts']);
+    // The inbox needs no folder list.
+    expect(sidecar.calls.filter(call => call['tool'] === 'list_mailboxes')).toHaveLength(1);
+  });
+
+  it('refuses a folder the account does not have, naming the folders it has, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'Taxes', since } }),
+    );
+
+    expect(isError).toBe(true);
+    expect(JSON.parse(said)).toEqual({
+      error:
+        "This Email account has no folder named 'Taxes', so nothing was read or changed. Try again with one of its folders: 'INBOX', '[Gmail]/Sent Mail', '[Gmail]/Drafts'.",
+    });
+    expect(sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata')).toEqual([]);
+  });
+
+  it("says what to do next when the mail server fails a read, instead of the server's bare words", async () => {
+    scriptedSidecar({ accountList: oneAccount, mailboxListFails: true });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'Sent', since } }),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).not.toContain('provider_failure');
+    expect(JSON.parse(said)).toEqual({
+      error:
+        'The mail server did not finish this request, so nothing was read. Try the same call once more. If it fails again, tell the person their mail server is not answering and to check the Email account in Settings.',
+    });
+  });
+
+  it('tells the model that common folder names are matched to the account', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    const tool = listed.result.tools.find(entry => entry.name === 'get_emails_content');
+    expect(JSON.stringify(tool?.inputSchema.properties?.['mailbox'])).toContain('Sent, Drafts, Trash or Spam');
+  });
+});
+
+describe('an Email message is a draft the person approved before it is sent', () => {
+  const MESSAGE = { recipients: ['friend@example.com'], subject: 'Hi', body: 'See you Saturday.' };
+
+  async function toolSetWithDrafts(): Promise<IToolSet> {
+    // A record of its own, so nothing counts as approved until a draft is saved here.
+    return emailToolSet(
+      makeResolver(new MailAccountDirectory()),
+      'chat-1',
+      defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    );
+  }
+
+  const sent = (sidecar: ReturnType<typeof scriptedSidecar>) =>
+    sidecar.calls.filter(call => call['tool'] === 'send_email');
+
+  it('refuses a send with no draft, even when it comes with an approval, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await toolSetWithDrafts();
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).toContain('save_draft');
+    expect(sent(sidecar)).toEqual([]);
+  });
+
+  it('sends the message once its draft was approved and saved, and only once', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await toolSetWithDrafts();
+
+    await toolSet.callTool({ name: 'save_draft', arguments: MESSAGE }, APPROVED);
+    expect(sent(sidecar)).toEqual([]);
+
+    await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED);
+    expect(sent(sidecar)).toHaveLength(1);
+
+    // The draft went out, so the same message needs a new draft before it can go again.
+    const again = resultText(await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED));
+    expect(again.isError).toBe(true);
+    expect(sent(sidecar)).toHaveLength(1);
+  });
+
+  it('sends once when the same send is approved twice at the same moment, and tells the other to save a draft', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await toolSetWithDrafts();
+    await toolSet.callTool({ name: 'save_draft', arguments: MESSAGE }, APPROVED);
+
+    const both = await Promise.all([
+      toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED),
+      toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED),
+    ]);
+
+    expect(sent(sidecar)).toHaveLength(1);
+    const refused = both.map(resultText).filter(result => result.isError);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.text).toContain('save_draft');
+    expect(refused[0]?.text).not.toContain('kept as a draft');
+    // The refused send put nothing back: the message still needs a new draft.
+    const again = resultText(await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED));
+    expect(again.isError).toBe(true);
+    expect(sent(sidecar)).toHaveLength(1);
+  });
+
+  it('refuses a send whose text differs from the approved draft, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await toolSetWithDrafts();
+
+    await toolSet.callTool({ name: 'save_draft', arguments: MESSAGE }, APPROVED);
+    const changed = resultText(
+      await toolSet.callTool({ name: 'send_email', arguments: { ...MESSAGE, body: 'See you Sunday.' } }, APPROVED),
+    );
+
+    expect(changed.isError).toBe(true);
+    expect(sent(sidecar)).toEqual([]);
+  });
+
+  it('does not count a draft that failed to save', async () => {
+    const sidecar = scriptedSidecar({
+      accountList: oneAccount,
+      draftResult: () => text('Error executing tool save_draft: the mail server did not answer', true),
+    });
+    const toolSet = await toolSetWithDrafts();
+
+    await toolSet.callTool({ name: 'save_draft', arguments: MESSAGE }, APPROVED);
+    const send = resultText(await toolSet.callTool({ name: 'send_email', arguments: MESSAGE }, APPROVED));
+
+    expect(send.isError).toBe(true);
+    expect(sent(sidecar)).toEqual([]);
   });
 });

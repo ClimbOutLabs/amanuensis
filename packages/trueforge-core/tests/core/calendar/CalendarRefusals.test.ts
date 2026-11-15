@@ -157,4 +157,22 @@ describe('a refusal the reply guard makes before dispatch', () => {
     expect(rows[0]?.description).toContain(REPLY_CALL_NOT_RUN_OWNER_MESSAGE);
     expect(rows[0]?.description).not.toContain('the title was missing');
   });
+
+  it('writes the plain line, not the text written for the model, when the refusal has no line of its own', async () => {
+    const rows: AuditRecordInput[] = [];
+    const built = await build({
+      routes: [],
+      features: [...WRITE],
+      timeZone: 'America/New_York',
+      services: auditingServices(rows),
+    });
+    await runCalls({
+      built,
+      calls: [{ id: 'c1', name: 'create_event', arguments: NO_START }],
+      preDispatchFailure: { kind: 'pre_dispatch_failed', message: 'Send the whole call again with the title.' },
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.description).toBe(`create_event: not done. ${REPLY_CALL_NOT_RUN_OWNER_MESSAGE}`);
+  });
 });

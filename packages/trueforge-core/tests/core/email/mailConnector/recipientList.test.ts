@@ -1,5 +1,6 @@
 import {
   mailRecipientsNotListed,
+  namedMailCopies,
   namedMailRecipients,
   normalizeMailAddress,
 } from '../../../../src/core/email/mailConnector/recipientList';
@@ -67,5 +68,14 @@ describe('namedMailRecipients', () => {
         recipients: ['a@example.com', { email: 'b@example.com' }, { address: 'c@example.com' }, { name: 'x' }, 4, null],
       }),
     ).toEqual(['a@example.com', 'b@example.com', 'c@example.com']);
+  });
+});
+
+describe('namedMailCopies', () => {
+  it('reads the cc and bcc fields as they are written', () => {
+    expect(
+      namedMailCopies({ recipients: ['a@example.com'], cc: ['b@example.com'], bcc: [{ email: 'c@example.com' }, 4] }),
+    ).toEqual({ cc: ['b@example.com'], bcc: ['c@example.com'] });
+    expect(namedMailCopies({ recipients: ['a@example.com'] })).toEqual({ cc: [], bcc: [] });
   });
 });

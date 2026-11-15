@@ -87,6 +87,13 @@ export const AgentApprovalDecisionAllowSchema = z
         'Omitted or once allows only this invocation; chat grants this exact tool for the current session; ' +
           'always allows this read-only connector tool for the caller until revoked.',
       ),
+    from_account: z
+      .string()
+      .optional()
+      .describe(
+        'For an approved Email send or draft: the account the person picked on the card. ' +
+          'Omitted means the account the card showed, which is the default unless the call named one.',
+      ),
   })
   .openapi('ApprovalAllow');
 
@@ -673,6 +680,10 @@ export const ApprovalToolCallRefSchema = z
       .optional()
       .describe('Set when a scheduled run could not save this action for the owner, and why. It will not run.'),
     can_always_allow: z.boolean().optional().describe('Whether the owner may allow this tool for good.'),
+    always_allow_covers: z
+      .literal('maps')
+      .optional()
+      .describe('Set when the lasting answer lets maps run without asking, instead of allowing one tool.'),
     can_chat_allow: z.boolean().optional().describe('Whether the user may approve this tool for the rest of the chat.'),
     expires_at: z.string().optional().describe('ISO 8601 time after which a held action can no longer be approved.'),
   })

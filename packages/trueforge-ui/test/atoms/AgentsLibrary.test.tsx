@@ -647,13 +647,13 @@ describe('AgentsLibraryButton', () => {
   });
 
   it('does not show an empty-schedules action before schedule counts load', async () => {
+    // Every read waits on the same answer, so it does not matter how many reads the library
+    // has started, or whether one starts later, by the time the answer is given.
     let resolveSchedules: (value: { data: [] }) => void = () => undefined;
-    const listSchedules = vi.fn(
-      () =>
-        new Promise<{ data: [] }>(resolve => {
-          resolveSchedules = resolve;
-        }),
-    );
+    const schedules = new Promise<{ data: [] }>(resolve => {
+      resolveSchedules = resolve;
+    });
+    const listSchedules = vi.fn(() => schedules);
     const server = createMockAgentUIServer({
       searchAgents: vi.fn(async () => [{ name: 'alpha-agent', agentId: 'alpha-agent' }]),
       schedules: {
@@ -676,6 +676,35 @@ describe('AgentsLibraryButton', () => {
 
     resolveSchedules({ data: [] });
     expect(await screen.findByRole('button', { name: 'Add schedule for alpha-agent' })).toBeInTheDocument();
+  });
+
+  it('does not read the schedules again when a reload returns the same agents in a new list', async () => {
+    const listSchedules = vi.fn(async () => ({ data: [] }));
+    const searchAgents = vi.fn(async () => [{ name: 'alpha-agent', agentId: 'alpha-agent' }]);
+    const server = createMockAgentUIServer({
+      searchAgents,
+      schedules: {
+        listSchedules,
+        getSchedule: vi.fn(),
+        createSchedule: vi.fn(),
+        updateSchedule: vi.fn(),
+        deleteSchedule: vi.fn(),
+        listScheduleRuns: vi.fn(async () => []),
+        createScheduleRun: vi.fn(),
+      },
+    });
+
+    renderLibrary(<LibraryHarness />, { server });
+    fireEvent.click(screen.getByRole('button', { name: 'Open library' }));
+    expect(await screen.findByRole('button', { name: 'Add schedule for alpha-agent' })).toBeInTheDocument();
+    const searches = searchAgents.mock.calls.length;
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'alpha' } });
+    await waitFor(() => {
+      expect(searchAgents.mock.calls.length).toBeGreaterThan(searches);
+    });
+    expect(await screen.findByRole('button', { name: 'Add schedule for alpha-agent' })).toBeInTheDocument();
+    expect(listSchedules).toHaveBeenCalledTimes(1);
   });
 
   it('disables next page when the current page is short', async () => {

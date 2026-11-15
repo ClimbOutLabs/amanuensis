@@ -32,6 +32,7 @@ export const HELP_LINES: readonly string[] = [
   'Run aman upgrade to update Aman on Windows to the newest version.',
   'Run aman backup to make a backup of Aman now, in the Backups folder on this computer.',
   'Run aman backups to list the backups kept on this computer.',
+  'Run aman restore to put Aman back the way it was in one of those backups.',
   'Run aman verify and name a downloaded file to check it against its signed release record.',
   'Run aman uninstall to remove Aman from this Windows computer.',
 ];
@@ -568,6 +569,138 @@ export function backupNameLine(name: string): string {
   return printable(name);
 }
 
+export const RESTORE_NOT_WINDOWS: Problem = {
+  happened: 'This computer was not set up with the Aman Setup download, so aman restore has nothing to put back.',
+  fix: 'Run aman status to see what is installed on this computer.',
+};
+
+export const RESTORE_NOT_INSTALLED: Problem = {
+  happened: 'Aman is not installed on this computer yet, so there is nothing to put back.',
+  fix: 'Install Aman with the Aman Setup download first, then run aman restore again.',
+};
+
+export const RESTORE_DOCKER_NOT_ANSWERING: Problem = {
+  happened: 'Docker is not answering, so nothing can be put back.',
+  fix: 'Open Docker Desktop from the Start menu, then run aman restore again.',
+};
+
+export const RESTORE_IMAGE_UNAVAILABLE: Problem = {
+  happened: 'Docker could not download the small helper it needs to put a backup back.',
+  fix: 'Check your internet connection, then run aman restore again.',
+};
+
+export const RESTORE_STATE_UNREADABLE: Problem = {
+  happened: 'The record of what is installed could not be read.',
+  fix: 'Run aman doctor to find what is wrong, then run aman restore again.',
+};
+
+export const RESTORE_COULD_NOT_LIST: Problem = {
+  happened: 'The backups kept on this computer could not be listed.',
+  fix: 'Run aman doctor to find what is wrong, then run aman restore again.',
+};
+
+// Names the folder that was read, because a backup copied from another
+// computer has to land in it as its own folder to be found.
+export function restoreNoBackupsProblem({ name, folder }: { name: string; folder: string }): Problem {
+  return {
+    happened: `There is no backup of ${printable(name)} in ${printable(folder)}, so there is nothing to put back.`,
+    fix: `Run aman backup to make one now, or copy a backup folder from another computer into ${printable(folder)}.`,
+  };
+}
+
+export const RESTORE_NO_ANSWER: Problem = {
+  happened: 'No answer was given, so nothing was changed.',
+  fix: 'Run aman restore in a window and type your answer.',
+};
+
+export const RESTORE_REMOVAL_NOTE_STUCK: Problem = {
+  happened: 'A note left by an earlier removal of Aman could not be deleted, so nothing was changed.',
+  fix: 'Delete the file docker-removed in the folder %LOCALAPPDATA%\\Programs\\Amanuensis, then run aman restore again.',
+};
+
+export const RESTORE_WORKING_LINE = 'Putting the backup back. This can take a few minutes, so leave this window open.';
+
+export const RESTORE_NOT_A_CHOICE: Problem = {
+  happened: 'That is not a number from the list, so nothing was changed.',
+  fix: 'Run aman restore again and type one of the numbers.',
+};
+
+export const RESTORE_BOTH_GIVEN: Problem = {
+  happened: 'aman restore was given both a backup and --latest.',
+  fix: 'Run aman restore with one of them, or with neither to pick from a list.',
+};
+
+// The same wait the state lock asks for, with this command's own next
+// step: the lock's dead limit, as in STATE_BUSY.
+export const RESTORE_BUSY: Problem = {
+  happened: 'Another install is running right now, so nothing was changed.',
+  fix: `Wait for it to finish, or wait ${String(LOCK_TIMING.deadSeconds / 60)} minutes if you stopped an install a moment ago, then run aman restore again.`,
+};
+
+export const RESTORE_FAILED: Problem = {
+  happened: 'The restore did not finish.',
+  fix: 'Run aman doctor to find what is wrong, then run aman restore again.',
+};
+
+export const RESTORE_DECLINED_LINE = 'Nothing was changed.';
+
+export const RESTORE_LIST_HEADING_LINE = 'Backups kept on this computer, newest first:';
+
+export const RESTORE_CHOICE_QUESTION = 'Put back which backup? Type its number:';
+
+export const RESTORE_YES_PROMPT = 'Type yes to go ahead:';
+
+// Said before the question: a restore puts the old password and sign-in back too.
+export const RESTORE_PASSWORD_LINE =
+  'Your password goes back to the one you had then, and you may need to sign in again on your devices.';
+
+export function restoreUsageProblem(word: string): Problem {
+  return {
+    happened: `aman restore does not take the word "${printable(word)}".`,
+    fix: 'Run aman restore on its own to pick a backup from a list.',
+  };
+}
+
+export function restoreNoSuchBackupProblem(backup: string): Problem {
+  return {
+    happened: `There is no backup named ${printable(backup)} on this computer.`,
+    fix: 'Run aman restore on its own to pick one from the list.',
+  };
+}
+
+export function restoreNoSuchInstanceProblem(name: string): Problem {
+  return {
+    happened: `There is no instance named ${printable(name)} on this computer.`,
+    fix: 'Run aman status to see the names of your instances.',
+  };
+}
+
+export function restoreWhichInstanceProblem(names: readonly string[]): Problem {
+  return {
+    happened: `This computer has more than one instance: ${names.map(printable).join(', ')}.`,
+    fix: 'Run aman restore again with the name of the one to put back.',
+  };
+}
+
+export function restoreChoiceLine({ number, label }: { number: number; label: string }): string {
+  return `  ${String(number)}. ${printable(label)}`;
+}
+
+// The one question before anything changes. A running instance is
+// stopped for the restore, so the question says so in plain words.
+export function restoreQuestionLine({
+  name,
+  label,
+  running,
+}: {
+  name: string;
+  label: string;
+  running: boolean;
+}): string {
+  const stop = running ? ` ${printable(name)} is running now and is stopped while this happens.` : '';
+  return `This replaces the chats and settings of ${printable(name)} with the backup from ${printable(label)}. A copy of how it is now is saved first.${stop} Put the backup back?`;
+}
+
 // The doctor's files check on Windows: the folders Aman keeps on the
 // PC itself must be readable by the person's own account only.
 export const FILES_PRIVATE_LINE = 'The files Aman keeps on this computer are private to you.';
@@ -788,7 +921,8 @@ export const INSTALL_CONTINUING_LINE = 'Continuing where it left off.';
 
 export const INSTALL_EMAIL_QUESTION = 'Your email, used to sign in:';
 
-export const INSTALL_PASSWORD_QUESTION = 'Choose a password (at least 8 characters, not shown):';
+export const INSTALL_PASSWORD_QUESTION =
+  'Choose a password with at least 8 characters, a number and a symbol, like @ # $ % (not shown):';
 
 export const INSTALL_PASSWORD_AGAIN_QUESTION = 'Type it again:';
 
@@ -830,12 +964,6 @@ export function installPasswordProblem(password: string): string | null {
   return `That password still needs ${missing[0] ?? ''}, ${missing[1] ?? ''} and ${missing[2] ?? ''}.`;
 }
 
-export const INSTALL_KEY_QUESTION = 'Paste your model key (not shown):';
-
-// Said when the key answer is empty, which is allowed: the install
-// goes ahead without a key, and Aman opens but cannot answer.
-export const INSTALL_KEY_EMPTY_LINE = 'Aman will open but cannot answer until you add a key in Settings, then Models.';
-
 export const INSTALL_PHONE_QUESTION =
   'Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):';
 
@@ -852,7 +980,7 @@ export const INSTALL_DONE_LINE = 'Aman is installed, and the getting started pag
 export const INSTALL_DRY_RUN_LINES: readonly string[] = [
   'This shows what aman install would do. Nothing is changed and nothing is asked.',
   'It checks that Docker Desktop is installed and running, and installs it first if it is missing.',
-  'It asks four questions: your email, a password, your model key, and whether to open Aman to your phone.',
+  'It asks three questions: your email, a password, and whether to open Aman to your phone.',
   'It downloads the newest Aman and sets it up with daily backups and an https address on this computer.',
   'It puts the aman command and the Start menu entries in place, and opens Aman in your browser.',
   'It opens a short getting started page in your browser at the end.',
@@ -1043,6 +1171,36 @@ export function allMessageLines(): string[] {
   lines.push(NO_BACKUPS_LINE);
   lines.push(backupsFolderLine('C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups'));
   lines.push(backupNameLine('20261009T120000Z'));
+  lines.push(problemText(RESTORE_NOT_WINDOWS));
+  lines.push(problemText(RESTORE_NOT_INSTALLED));
+  lines.push(problemText(RESTORE_DOCKER_NOT_ANSWERING));
+  lines.push(problemText(RESTORE_IMAGE_UNAVAILABLE));
+  lines.push(problemText(RESTORE_STATE_UNREADABLE));
+  lines.push(problemText(RESTORE_COULD_NOT_LIST));
+  lines.push(
+    problemText(
+      restoreNoBackupsProblem({ name: 'main', folder: 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups' }),
+    ),
+  );
+  lines.push(problemText(RESTORE_NO_ANSWER));
+  lines.push(problemText(RESTORE_REMOVAL_NOTE_STUCK));
+  lines.push(RESTORE_WORKING_LINE);
+  lines.push(RESTORE_YES_PROMPT);
+  lines.push(RESTORE_PASSWORD_LINE);
+  lines.push(problemText(RESTORE_NOT_A_CHOICE));
+  lines.push(problemText(RESTORE_BOTH_GIVEN));
+  lines.push(problemText(RESTORE_BUSY));
+  lines.push(problemText(RESTORE_FAILED));
+  lines.push(problemText(restoreUsageProblem('--force')));
+  lines.push(problemText(restoreNoSuchBackupProblem('20261009T120000Z')));
+  lines.push(problemText(restoreNoSuchInstanceProblem('work')));
+  lines.push(problemText(restoreWhichInstanceProblem(['main', 'work'])));
+  lines.push(RESTORE_DECLINED_LINE);
+  lines.push(RESTORE_LIST_HEADING_LINE);
+  lines.push(RESTORE_CHOICE_QUESTION);
+  lines.push(restoreChoiceLine({ number: 1, label: '2026-10-09 12:00 UTC (before import)' }));
+  lines.push(restoreQuestionLine({ name: 'main', label: '2026-10-09 12:00 UTC', running: true }));
+  lines.push(restoreQuestionLine({ name: 'main', label: '2026-10-09 12:00 UTC', running: false }));
   lines.push(FILES_PRIVATE_LINE);
   lines.push(FILES_MADE_PRIVATE_LINE);
   lines.push(problemText(FILES_NOT_PRIVATE));
@@ -1093,8 +1251,6 @@ export function allMessageLines(): string[] {
   lines.push(INSTALL_PASSWORD_TOO_LONG_LINE);
   lines.push(installPasswordProblem('short') ?? '');
   lines.push(installPasswordProblem('longenough') ?? '');
-  lines.push(INSTALL_KEY_QUESTION);
-  lines.push(INSTALL_KEY_EMPTY_LINE);
   lines.push(INSTALL_PHONE_QUESTION);
   lines.push(INSTALL_YES_OR_NO_LINE);
   lines.push(INSTALL_DONE_LINE);

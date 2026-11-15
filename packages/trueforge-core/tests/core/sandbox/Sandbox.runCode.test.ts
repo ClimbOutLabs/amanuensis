@@ -456,6 +456,9 @@ describe('Sandbox run_code package downloads wording', () => {
     expect(description).toContain('has no internet access');
     expect(description).toContain('Packages can be downloaded for this chat');
     expect(description).not.toContain('cannot be downloaded');
+    // Installs land in the workspace, which a run_code call never sees.
+    expect(description).toContain('cannot see the workspace or what is installed there');
+    expect(description).toContain('python3 -m venv --system-site-packages .venv');
   });
 
   it('says there are no installs when the network is up but downloads are not allowed', () => {

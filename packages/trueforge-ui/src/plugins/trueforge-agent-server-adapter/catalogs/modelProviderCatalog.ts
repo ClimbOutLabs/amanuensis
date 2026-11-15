@@ -34,12 +34,56 @@ export type UiModelProvider = ModelProviderBase<UiModelEntry>;
 export type UiModelProviderCatalogEntry = ModelProviderCatalogEntry<UiModelEntry> & { baseUrl?: string };
 
 /**
+ * Outcome of the connection check the server runs when a provider is saved. Mirrors the server's
+ * ModelProviderCheck wire shape until the generated SDK carries it; reads go through
+ * {@link modelProviderCheckOf}, which checks the shape instead of trusting it.
+ */
+export interface UiModelProviderCheck {
+  kind: 'answered' | 'key_refused' | 'unreachable' | 'timed_out' | 'server_error';
+  message: string;
+  checkedAt: string;
+}
+
+function isModelProviderCheckKind(value: string): value is UiModelProviderCheck['kind'] {
+  return (
+    value === 'answered' ||
+    value === 'key_refused' ||
+    value === 'unreachable' ||
+    value === 'timed_out' ||
+    value === 'server_error'
+  );
+}
+
+/** The save-time check outcome a provider value carries, when it carries a well-formed one. */
+export function modelProviderCheckOf(provider: object): UiModelProviderCheck | undefined {
+  if (!('lastCheck' in provider)) {
+    return undefined;
+  }
+  const check: unknown = provider.lastCheck;
+  if (typeof check !== 'object' || check === null) {
+    return undefined;
+  }
+  if (!('kind' in check) || !('message' in check) || !('checkedAt' in check)) {
+    return undefined;
+  }
+  const { kind, message, checkedAt } = check;
+  if (typeof kind !== 'string' || !isModelProviderCheckKind(kind)) {
+    return undefined;
+  }
+  if (typeof message !== 'string' || typeof checkedAt !== 'string') {
+    return undefined;
+  }
+  return { kind, message, checkedAt };
+}
+
+/**
  * A configured provider as the server lists it: `envManaged` marks one the server rewrites from its
  * environment at startup, so the key and models are read-only here. Not yet on the port's provider type.
  */
 export type UiConfiguredModelProvider = UiModelProvider & {
   streamTimeout?: UiStreamTimeout;
   envManaged?: boolean;
+  lastCheck?: UiModelProviderCheck;
 };
 
 /** True for a provider the server owns through its environment (see {@link UiConfiguredModelProvider}). */
@@ -68,6 +112,7 @@ export function toHarnessModelEntry(model: UiModelEntry): TrueForgeApi.Configure
 
 export function toUiModelProvider(provider: TrueForgeApi.ConfiguredModelProvider): UiConfiguredModelProvider {
   const { name, manifest } = provider;
+  const lastCheck = modelProviderCheckOf(provider);
   return {
     id: name,
     type: manifest.type,
@@ -76,6 +121,7 @@ export function toUiModelProvider(provider: TrueForgeApi.ConfiguredModelProvider
     models: manifest.models.map(toUiModelEntry),
     ...(manifest.streamTimeout === undefined ? {} : { streamTimeout: manifest.streamTimeout }),
     ...(provider.envManaged === true ? { envManaged: true } : {}),
+    ...(lastCheck === undefined ? {} : { lastCheck }),
   };
 }
 

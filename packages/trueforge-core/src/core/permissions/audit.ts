@@ -14,6 +14,7 @@ import {
   savedSearchHold,
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
+  withHoldSay,
 } from './searchHoldText';
 import { type AutoDenyReason, SANDBOX_SILENT_REASONS, type Tier, type TierDecision } from './tier';
 
@@ -104,6 +105,31 @@ export async function recordStandingTrustRun(input: {
 }
 
 /**
+ * One row for a space change a scheduled run saved. Nobody watches such a run, so this row is where the
+ * owner later sees what the run did to their spaces.
+ */
+export async function recordUnattendedSpaceChange(input: {
+  services: SentinelServices;
+  identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
+  info: Pick<InternalToolCallInfo, 'original_tool_name' | 'audit_description'>;
+}): Promise<void> {
+  const writer = input.services.audit;
+  if (writer === null) {
+    return;
+  }
+  await writer.record({
+    tenant_id: input.identity.tenant_id,
+    created_by: input.identity.created_by,
+    conversation_id: input.identity.conversation_id,
+    tier: 1,
+    tool_name: input.info.original_tool_name,
+    description: input.info.audit_description ?? input.info.original_tool_name,
+    outcome: 'logged',
+    auto_deny_reason: null,
+  });
+}
+
+/**
  * Audit row text for a call that asked. Any search provider call, or a card shaped like a held
  * search, is described without its query, including calls stored before audit_description existed.
  */
@@ -121,7 +147,13 @@ export function heldCallAuditText(
       page: false,
     });
   }
-  return card?.plain_what ?? info.original_tool_name;
+  if (card === null) {
+    return info.original_tool_name;
+  }
+  // The audit row keeps the reason the card asked, which the card shows on its own line. Some cards
+  // already carry it in plain_what for older clients, so it is added only when missing.
+  const reason = card.copy?.reason ?? null;
+  return reason === null || card.plain_what.includes(reason) ? card.plain_what : withHoldSay(card.plain_what, reason);
 }
 
 /**

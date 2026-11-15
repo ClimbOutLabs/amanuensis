@@ -5,5 +5,6 @@ export const GoogleFeature = {
     GmailCompose: "gmail_compose",
     CalendarRead: "calendar_read",
     CalendarWrite: "calendar_write",
+    DriveFiles: "drive_files",
 } as const;
 export type GoogleFeature = (typeof GoogleFeature)[keyof typeof GoogleFeature];

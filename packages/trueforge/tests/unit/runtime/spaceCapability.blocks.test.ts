@@ -709,7 +709,7 @@ describe('block edits carry the revision they were read at', () => {
   });
 });
 
-describe("Wendy's flow: bad anchors lock the space, a revert to the current revision unlocks it", () => {
+describe("Nora's flow: bad anchors lock the space, a revert to the current revision unlocks it", () => {
   it('repeated bad-anchor edits trip the breaker; revert unlocks; a correct block edit then lands', async () => {
     const { callTool } = makeHarness();
     await createSpace(callTool, { name: 'Bulletin', body: 'First line of the notice.\n\nSecond line of the notice.' });

@@ -50,6 +50,15 @@ describe('FoldedChatGroup', () => {
     expect(heading.className).not.toMatch(/text-\[0\.75rem\]/);
   });
 
+  it('sets the chats in under the heading, so they do not read as its siblings', () => {
+    renderGroup({ label: 'Today', defaultOpen: true });
+
+    const heading = screen.getByRole('button', { name: 'Today' });
+    const rows = heading.nextElementSibling;
+    expect(rows).toHaveClass('pl-[1.0625rem]');
+    expect(rows?.querySelectorAll('[role="listitem"]').length).toBeGreaterThan(0);
+  });
+
   it('Earlier starts closed, and its heading opens it', () => {
     renderGroup();
 

@@ -106,7 +106,7 @@ describe('approval card for connector calls', () => {
     [
       'web_fetch',
       { urls: ['https://www.usps.com/'], objective: 'o' },
-      'Fetch a web page on parallel-web?',
+      'Fetch a web page from www.usps.com?',
     ],
     ['web_search', { objective: 'o', search_queries: ['q'] }, 'Search the web on parallel-web?'],
   ])('shows %s on the Parallel connector the same way directly and through call_tool', async (name, input, what) => {
@@ -157,6 +157,7 @@ describe('approval card for connector calls', () => {
     for (const info of [direct, wrapped]) {
       expect(info.tier).toBe(3);
       expect(info.tier3_card?.plain_what).toBe('Allow this new tool from misc?');
+      expect(info.tier3_card?.copy?.headline).toBe('Allow this new tool from misc?');
       expect(info.tier3_card?.destination_host).toBe('misc.example.com');
       expect(info.tier3_card?.outbound_text).toBe('id: 7');
     }

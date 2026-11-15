@@ -1,7 +1,7 @@
 # aman-stt: local speech-to-text sidecar (Whisper small int8, CPU-only).
 #
 # Build:  docker build -t aman-stt:latest .
-# Run:    docker run --cpuset-cpus="16-19" --memory=2g --restart unless-stopped aman-stt:latest
+# Run:    docker run --memory=2g --restart unless-stopped aman-stt:latest
 #
 # No GPU access: the base image has no CUDA userspace and the service pins
 # device=cpu. The model (~464 MB) downloads once from Hugging Face at first

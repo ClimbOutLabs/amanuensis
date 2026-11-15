@@ -6,10 +6,13 @@ import {
   accountProblem,
   addressAllowed,
   allowedAddresses,
+  defaultAccount,
   ownNetworks,
   parseAccount,
+  parseAccounts,
   publicAccount,
   renderAccount,
+  renderAccounts,
 } from '../account.mjs';
 
 const ACCOUNT = {
@@ -69,7 +72,14 @@ describe('the account file', () => {
   });
 
   it('takes any printable password, and reads back exactly what was written', () => {
-    for (const password of [`it's`, 'two words', 'p@ss "quoted" #1 = é', '#starts-with-hash', 'a=b=c', '日本語パスワード']) {
+    for (const password of [
+      `it's`,
+      'two words',
+      'p@ss "quoted" #1 = é',
+      '#starts-with-hash',
+      'a=b=c',
+      '日本語パスワード',
+    ]) {
       const account = { ...ACCOUNT, password };
       assert.equal(accountIsWellFormed(account), true, password);
       assert.deepEqual(parseAccount(renderAccount(account)), account, password);
@@ -88,6 +98,40 @@ describe('the account file', () => {
     const shown = publicAccount(ACCOUNT);
     assert.deepEqual(Object.keys(shown).sort(), ['email', 'url', 'username']);
     assert.ok(!JSON.stringify(shown).includes(ACCOUNT.password));
+  });
+
+  it('renders one account exactly as the single-account form always has', () => {
+    assert.equal(renderAccounts([ACCOUNT], ACCOUNT.email), renderAccount(ACCOUNT));
+    assert.equal(renderAccounts([ACCOUNT], null), renderAccount(ACCOUNT));
+    assert.deepEqual(parseAccounts(renderAccount(ACCOUNT)), { accounts: [ACCOUNT], defaultEmail: null });
+  });
+
+  it('keeps several accounts in order, with the default named only when it is not the first', () => {
+    const second = { ...ACCOUNT, username: 'second@example.invalid', email: 'second@example.invalid' };
+    const text = renderAccounts([ACCOUNT, second], second.email);
+    assert.ok(text.includes('AMAN_CALENDAR_DEFAULT_ACCOUNT=second@example.invalid'));
+    const parsed = parseAccounts(text);
+    assert.deepEqual(parsed.accounts, [ACCOUNT, second]);
+    assert.equal(parsed.defaultEmail, second.email);
+    assert.deepEqual(defaultAccount(parsed), second);
+    const firstDefault = renderAccounts([ACCOUNT, second], ACCOUNT.email);
+    assert.ok(!firstDefault.includes('AMAN_CALENDAR_DEFAULT_ACCOUNT'));
+    assert.deepEqual(defaultAccount(parseAccounts(firstDefault)), ACCOUNT);
+  });
+
+  it('leaves a damaged block out and keeps the accounts that are whole', () => {
+    const second = { ...ACCOUNT, username: 'second@example.invalid', email: 'second@example.invalid' };
+    const damaged = 'CALDAV_URL=https://caldav.example.invalid/dav/\nCALDAV_USERNAME=broken\n';
+    const parsed = parseAccounts(
+      renderAccount(ACCOUNT) + damaged + renderAccounts([second], null).split('\n').slice(1).join('\n'),
+    );
+    assert.deepEqual(parsed.accounts, [ACCOUNT, second]);
+  });
+
+  it('reads an empty list from an empty file', () => {
+    assert.deepEqual(parseAccounts(''), { accounts: [], defaultEmail: null });
+    assert.equal(renderAccounts([], null), '');
+    assert.equal(defaultAccount(parseAccounts('')), null);
   });
 });
 

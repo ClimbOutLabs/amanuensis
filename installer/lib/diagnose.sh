@@ -5,10 +5,12 @@
 # A permission error while the app starts is never something the person can fix on their computer: the image
 # decides where the app may write.
 PERMISSION_ERROR_PATTERN='EACCES|EPERM|permission denied|read-only file system|EROFS'
+# A program file the image should hold is not there: only a new image fixes it.
+MISSING_FILE_PATTERN='ERR_MODULE_NOT_FOUND|Cannot find module'
 
 # Reads log text on stdin.
 container_failure_cause_stdin() {
-  local text path
+  local text path bind
   text=$(cat)
   path=$(printf '%s\n' "$text" | sed -n "s/.*E\\(ACCES\\|PERM\\): permission denied, mkdir '\\([^']*\\)'.*/\\2/p" | head -n 1)
   if [ -n "$path" ]; then
@@ -16,7 +18,15 @@ container_failure_cause_stdin() {
   elif printf '%s\n' "$text" | grep -Eqi "$PERMISSION_ERROR_PATTERN"; then
     echo "The app could not start: a permission error stopped it. This is a bug in Aman, not a problem on your computer."
   elif printf '%s\n' "$text" | grep -Eqi 'port is already allocated|address already in use|EADDRINUSE'; then
-    echo "A port the app needs is already in use on this computer."
+    # Docker names the address and port it could not take; the sentence names them too, so the person knows which.
+    bind=$(printf '%s\n' "$text" | sed -n 's/.*bind host port \([0-9a-fA-F.:]*\):\([0-9]*\)\/tcp.*/\1 \2/p' | head -n 1)
+    if [ -n "$bind" ]; then
+      echo "Port ${bind#* } on ${bind% *}, which the app needs, is already in use by another program on this computer. See which one with: sudo ss -ltnp 'sport = :${bind#* }'"
+    else
+      echo "A port the app needs is already in use on this computer."
+    fi
+  elif printf '%s\n' "$text" | grep -Eq "$MISSING_FILE_PATTERN"; then
+    echo "It cannot start because a file is missing from it. This is a bug in Aman, not a problem on your computer, and restarting will not fix it."
   elif printf '%s\n' "$text" | grep -Eqi 'no space left on device|ENOSPC'; then
     echo "This computer ran out of disk space."
   elif printf '%s\n' "$text" | grep -Eqi 'oom true|OOMKilled|exit code: 137'; then
@@ -28,5 +38,5 @@ container_failure_cause() { container_failure_cause_stdin <"$1"; }
 
 # bug when the log shows a failure only an update of Aman can fix, fixable when the person can act on it.
 container_failure_kind() {
-  if grep -Eqi "$PERMISSION_ERROR_PATTERN" "$1"; then echo bug; else echo fixable; fi
+  if grep -Eqi "$PERMISSION_ERROR_PATTERN" "$1" || grep -Eq "$MISSING_FILE_PATTERN" "$1"; then echo bug; else echo fixable; fi
 }

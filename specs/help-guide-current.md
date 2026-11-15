@@ -14,6 +14,8 @@ The **Help, I'm stuck** button opens Iris, the Aman guide. Her knowledge is a ge
 4. **Labels and paths stay true.** The label test also checks every "Settings, then X" path against the real Settings panels, every `aman` command against both installer front ends, every `pnpm` script against `package.json`, and every web address against the external-hosts allowlist as a link.
 5. **Honest state.** The help check gains a `state` block: setup steps (`model`, `about_you`), each connector with whether it answered and its last error in plain words, the Google login, whether the sandbox is ready, and the app version and build. Iris's first hidden message carries these under the same field names, and her instructions name them.
 
+6. **Page-by-page refresh.** Each person's Iris keeps the pack's pages as knowledge documents, one per page, each labelled with a hash of that page's title and text. When the app starts, a page whose label is already in her library is left as it is. Only new or changed pages are added and indexed, and pages that are gone are removed. A change to one page re-indexes that page alone, and a change to her instructions re-indexes nothing. The person's own documents are never touched.
+
 CI runs the first, second and fourth checks in one always-on job.
 
 ## Not in this change
@@ -35,4 +37,5 @@ Synthetic fixtures only:
 - A fixture with one uncovered Settings panel fails with its name; an exemption with a reason passes; stale rows fail.
 - A fixture diff touching a container with no topic fails; with the label it passes.
 - A renamed panel breaks the page that names it; a page naming a command that does not exist fails.
+- Starting again on the same pack indexes nothing; a pack with one changed page indexes that page only and keeps every other document as it was; changed instructions index nothing.
 - Each new help check field is present and typed by the schema, the frontend refuses a mistyped one, and the guide's instructions name only fields the check reports.

@@ -137,6 +137,12 @@ func BuildConfig(s Spec) ([]byte, error) {
 	if s.MaxProcesses > 0 {
 		rlimits = append(rlimits, ociRlimit{Type: "RLIMIT_NPROC", Hard: uint64(s.MaxProcesses), Soft: uint64(s.MaxProcesses)})
 	}
+	namespaces := []ociNamespace{{Type: "pid"}, {Type: "mount"}, {Type: "ipc"}, {Type: "uts"}}
+	if !s.SharedNetwork {
+		// Asking for a network of its own gives the guest an empty one, whatever network the runtime
+		// was started with. A guest that shares the slot's network must not ask.
+		namespaces = append(namespaces, ociNamespace{Type: "network"})
+	}
 	cfg := ociConfig{
 		OCIVersion: "1.0.2",
 		Process: ociProcess{
@@ -151,9 +157,7 @@ func BuildConfig(s Spec) ([]byte, error) {
 		Root:     ociRoot{Path: s.RootFS, Readonly: true},
 		Hostname: "sandbox",
 		Mounts:   mounts,
-		Linux: ociLinux{Namespaces: []ociNamespace{
-			{Type: "pid"}, {Type: "mount"}, {Type: "ipc"}, {Type: "uts"}, {Type: "network"},
-		}},
+		Linux:    ociLinux{Namespaces: namespaces},
 	}
 	var out bytes.Buffer
 	enc := json.NewEncoder(&out)

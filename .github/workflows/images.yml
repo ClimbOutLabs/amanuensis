@@ -1,0 +1,196 @@
+name: Images
+
+# Publishes the Aman images the installer can download instead of building, for amd64 and arm64. Each architecture
+# is built natively on its own runner, then the two are joined under one tag. Run it on the commit about to be
+# released; it pushes a branch that pins the published digests in installer/release.json, and the release tag goes
+# on the commit that merges that pin (see RELEASING.md). Kept out of ci.yml so a run builds only the images.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Push the images and the pin branch. Off builds both architectures and pushes nothing.
+        type: boolean
+        default: false
+  # A change to this workflow builds every image for both architectures, pushing nothing.
+  pull_request:
+    paths:
+      - '.github/workflows/images.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io/climboutlabs
+
+jobs:
+  ids:
+    name: Image ids
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ids: ${{ steps.ids.outputs.ids }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      # The same ids the installer computes for this checkout; a published image is used only under its id.
+      - name: Compute the image ids
+        id: ids
+        run: |
+          ids=$(pnpm --silent images:ids | jq -R -s -c 'split("\n") | map(select(length > 0) | split(" ") | {(.[0]): .[1]}) | add')
+          echo "ids=$ids" >>"$GITHUB_OUTPUT"
+          echo "$ids" | jq .
+
+  build:
+    name: Build ${{ matrix.image.name }} (${{ matrix.arch }})
+    needs: ids
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [amd64, arm64]
+        # The same build contexts and Dockerfiles as installer/lib/release.sh.
+        image:
+          - { name: aman-app, context: ., file: Dockerfile.dev }
+          - { name: aman-stt, context: ops/aman-stt, file: ops/aman-stt/Dockerfile }
+          - { name: aman-tts, context: ops/aman-tts, file: ops/aman-tts/Dockerfile }
+          - { name: aman-calendar-caldav, context: ops/calendar-sidecar, file: ops/calendar-sidecar/Dockerfile }
+          - { name: aman-browser, context: ops/browser-sidecar, file: ops/browser-sidecar/Dockerfile }
+          - { name: aman-browser-gateway, context: ops/browser-sidecar, file: ops/browser-sidecar/Dockerfile.gateway }
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GitHub Container Registry
+        if: inputs.publish
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushed by digest only; the join step below gives the two architectures their one tag.
+      - name: Build the image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: |
+            BUILD_REF=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          outputs: ${{ inputs.publish && format('type=image,name={0}/{1},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, matrix.image.name) || 'type=cacheonly' }}
+
+      - name: Save the digest
+        if: inputs.publish
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p digests
+          printf '%s\n' "$DIGEST" >"digests/${{ matrix.image.name }}-${{ matrix.arch }}"
+
+      - name: Upload the digest
+        if: inputs.publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.image.name }}-${{ matrix.arch }}
+          path: digests/*
+          retention-days: 1
+
+  pin:
+    name: Join the architectures and pin the digests
+    needs: [ids, build]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Download the digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Join each image's two architectures under its id, and record the digest
+        env:
+          IDS: ${{ needs.ids.outputs.ids }}
+        run: |
+          set -euo pipefail
+          keys='aman-app:published_app_image aman-stt:published_stt_image aman-tts:published_tts_image aman-calendar-caldav:published_calendar_image aman-browser:published_browser_image aman-browser-gateway:published_browser_gateway_image'
+          {
+            echo "### Published Aman images"
+            echo ""
+            echo "| Image | Pinned reference |"
+            echo "| --- | --- |"
+          } >>"$GITHUB_STEP_SUMMARY"
+          for entry in $keys; do
+            name=${entry%%:*}
+            key=${entry#*:}
+            id=$(jq -r --arg n "$name" '.[$n]' <<<"$IDS")
+            [[ $id =~ ^[a-f0-9]{12}$ ]] || { echo "No clean source id for $name: $id" >&2; exit 1; }
+            ref="$REGISTRY/$name"
+            docker buildx imagetools create -t "$ref:$id" "$ref@$(cat "digests/$name-amd64")" "$ref@$(cat "digests/$name-arm64")"
+            digest=$(docker buildx imagetools inspect "$ref:$id" --format '{{json .Manifest}}' | jq -r .digest)
+            [[ $digest =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "No index digest for $name" >&2; exit 1; }
+            platforms=$(docker buildx imagetools inspect "$ref@$digest" --format '{{json .Manifest}}' | jq -r '[.manifests[].platform | select(.os != "unknown") | .architecture] | sort | join(",")')
+            [ "$platforms" = "amd64,arm64" ] || { echo "$name has $platforms, not amd64 and arm64" >&2; exit 1; }
+            pinned="$ref:$id@$digest"
+            jq --arg k "$key" --arg v "$pinned" '.[$k] = $v' installer/release.json >release.json.tmp
+            mv release.json.tmp installer/release.json
+            echo "| $name | \`$pinned\` |" >>"$GITHUB_STEP_SUMMARY"
+          done
+
+      # A branch, not a pull request: a pull request opened by this workflow's token would run no checks. The
+      # release tag goes on the commit that merges it; the pin does not change any image id.
+      - name: Push the pin branch
+        env:
+          BRANCH: release/pin-images-${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add installer/release.json
+          git commit -m "Pin the published Aman images" -m "Images built from ${GITHUB_SHA} for amd64 and arm64."
+          git push origin "$BRANCH"
+          {
+            echo ""
+            echo "Open a pull request from \`$BRANCH\`: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${GITHUB_REF_NAME}...${BRANCH}?expand=1"
+          } >>"$GITHUB_STEP_SUMMARY"

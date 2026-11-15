@@ -35,6 +35,7 @@ describe('standInApprovalCard', () => {
       hostTarget: undefined,
     });
     expect(card.plain_what).toBe('Allow "draft email" on email-mcp?');
+    expect(card.copy).toEqual({ headline: 'Allow "draft email" on email-mcp?', consequence: null, reason: null });
     expect(card.outbound_text).toBe('cc: sam@example.test\nsubject: Picnic plans');
   });
 

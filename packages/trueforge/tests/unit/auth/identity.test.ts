@@ -13,7 +13,7 @@ describe('STANDALONE_REQUEST_CONTEXT', () => {
       subject: {
         id: 'trueforge-default',
         type: 'user',
-        display_name: 'trueforge-default',
+        display_name: 'Owner',
       },
       roles: ['admin'],
       user_credential: null,

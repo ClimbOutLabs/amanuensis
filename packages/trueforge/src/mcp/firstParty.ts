@@ -1,6 +1,5 @@
 import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
-import type { McpServerManifest } from '../schemas/mcpServer';
 
 /**
  * Origin (scheme, host and port) of an absolute http(s) URL as the URL standard normalizes it, so
@@ -24,44 +23,12 @@ export function normalizedOrigin(url: string): string | undefined {
 }
 
 /**
- * Whether `url` is on one of the operator's first-party origins. `origins` comes from the server
- * configuration (`FIRST_PARTY_MCP_ORIGINS`) already normalized, and is matched exactly: no
- * wildcards, no suffixes, no prefixes.
+ * Whether `url` is on one of the host's first-party origins. `origins` comes from the server
+ * configuration already normalized, and is matched exactly: no wildcards, no suffixes, no prefixes.
  */
 export function isFirstPartyOrigin({ url, origins }: { url: string; origins: readonly string[] }): boolean {
   const origin = normalizedOrigin(url);
   return origin !== undefined && origins.includes(origin);
-}
-
-/**
- * Whether the connector a save leaves behind is first-party: the server's own mark, which lets
- * its read-only, explicitly closed-world tools run without asking. Three things must all hold: the
- * save designates the connector as the memory provider, this very save passed the memory provider
- * connection check, and the connector's origin is one the operator listed in the server
- * configuration. Nothing a request carries, the URL included, can add an origin to that list, so
- * a connector added by URL is never first-party unless the operator vouched for its origin.
- *
- * Every save decides afresh, so any other save clears the mark. The mark is stored on the
- * connector record and checked against the list again each time the connector is loaded.
- *
- * A connector the server mounts itself, with no stored row, is marked where it is mounted:
- * `firstParty: true` on its tool set.
- */
-export function firstPartyAfterSave({
-  manifest,
-  memoryProviderChecked,
-  origins,
-}: {
-  manifest: McpServerManifest;
-  memoryProviderChecked: boolean;
-  origins: readonly string[];
-}): boolean {
-  return (
-    memoryProviderChecked &&
-    manifest.type === 'remote' &&
-    manifest.memory_provider === true &&
-    isFirstPartyOrigin({ url: manifest.url, origins })
-  );
 }
 
 /**

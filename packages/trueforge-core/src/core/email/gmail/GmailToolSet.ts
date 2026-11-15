@@ -4,6 +4,7 @@ import { MAX_BYTES_PER_DOCUMENT } from '../../../documents/documentExtraction';
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
 import { CHAT_IMAGE_INPUT_MIME_TYPES } from '../../chatImages';
 import { InvalidFileInputError } from '../../errors';
+import type { ApprovalDecision } from '../../events/schema';
 import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from '../../google/errors';
 import type { GoogleFeature } from '../../google/scopes';
 import { errorResult, failureResult, jsonResult as neutralizedJsonResult } from '../../google/toolResults';
@@ -11,7 +12,7 @@ import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import { toolResultResponse, type ToolInvocationContext } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../../mcp/ToolSet';
-import { classifyHostToolCall } from '../../permissions/classifier';
+import { classifyHostToolCall, messageForDisplay } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../../permissions/sendAllowlist';
 import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
@@ -19,13 +20,14 @@ import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
 import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { assessDraft } from './draftAssessment';
-import { hashDraft, type ReviewableDraft } from './draftReview';
+import { checkCodeOf, hashDraft, type ReviewableDraft } from './draftReview';
 import { mapSkippingMissing, type GmailApiPort } from './gmailApi';
 import { decodeAttachmentData, type GmailMessage } from './gmailWire';
 import { mailboxOf, nameLeftOff } from './mailbox';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
-import { answeredMessageOf, checkReplyThreading, isReply, type AnsweredMessage } from './replyThread';
+import { buildSendReceiptEvent } from './receiptEvents';
+import { answeredMessageOf, checkReplyThreading, isReply, replyRecipientOf, type AnsweredMessage } from './replyThread';
 import {
   getDraftResult,
   listDraftsResult,
@@ -36,6 +38,7 @@ import {
   UNTRUSTED_NOTICE,
   type ResultContext,
 } from './results';
+import type { NotSentReason, SendReceiptResult } from './sendReceipt';
 import {
   DOWNLOAD_ATTACHMENT_TOOL_NAME,
   DownloadAttachmentSchema,
@@ -51,6 +54,7 @@ import {
   LIST_INBOX_THREADS_TOOL_NAME,
   ListDraftsSchema,
   ListInboxThreadsSchema,
+  NO_RECIPIENT_MESSAGE,
   READ_ANNOTATIONS,
   READ_EMAIL_TOOL_NAME,
   ReadEmailSchema,
@@ -99,6 +103,42 @@ function sendRefusal(reason: string): string {
   return `${reason} Nothing was sent. ${NEW_APPROVAL}`;
 }
 
+/**
+ * Why a send that threw did not go out. Only a failure after Gmail was asked can leave the outcome unknown: a lost
+ * answer or a server error means the message may have gone, so it is never reported as not sent.
+ */
+function notSentReasonOf(input: { error: unknown; gmailAsked: boolean }): NotSentReason {
+  const { error, gmailAsked } = input;
+  if (error instanceof GoogleReconnectRequiredError || error instanceof GoogleOAuthError) {
+    return 'reconnect_google';
+  }
+  if (!(error instanceof GoogleApiError)) {
+    return 'cannot_send';
+  }
+  if (error.status >= 500) {
+    return gmailAsked ? 'unconfirmed' : 'cannot_send';
+  }
+  if (error.status === 401 || error.status === 403) {
+    return 'reconnect_google';
+  }
+  if (error.status === 429) {
+    return 'rate_limited';
+  }
+  return gmailAsked ? 'gmail_refused' : 'cannot_send';
+}
+
+/**
+ * Why a draft call's details cannot be used. A draft with no recipient gets the draft contract's own
+ * reason, so the person hears what to add rather than a general refusal.
+ */
+function invalidDraftReason(error: z.ZodError): string {
+  return error.issues.some(issue => issue.message === NO_RECIPIENT_MESSAGE)
+    ? NO_RECIPIENT_MESSAGE
+    : 'The draft details were not valid, so nothing was saved.';
+}
+
+const DRAFT_NOT_APPROVED = 'This draft was not approved, so nothing was saved. Ask to save the draft again.';
+
 /** A sandbox the staging call had to create must still reach the thread, or the next turn would not find it. */
 function sandboxCreatedOverrides(created: SandboxInfo | undefined) {
   return created === undefined ? undefined : { sandboxCreated: true, sandboxInfo: created };
@@ -111,7 +151,8 @@ function jsonResult(value: unknown, sandboxCreated?: SandboxInfo) {
 
 /**
  * Gmail for one user's turn, over Gmail's REST API with that user's own login. Reads are silent; what a call
- * may do is decided by the host classifier, never by this class.
+ * may do is decided by the host classifier, never by this class. A write still refuses a call that reaches it
+ * without the user's yes, so no other route to this class can save or send.
  */
 export class GmailToolSet extends LocalToolMCP {
   readonly name = GMAIL_SERVER_ID;
@@ -212,10 +253,10 @@ export class GmailToolSet extends LocalToolMCP {
         defineTool({
           name: DRAFT_EMAIL_TOOL_NAME,
           description:
-            'Save a new plain-text draft. Nothing is sent. Pass in_reply_to (a message id) to reply inside that thread; the subject then becomes "Re: <original subject>". The user is asked before the draft is saved.',
+            'Save a new plain-text draft. Nothing is sent. Pass in_reply_to (a message id) to reply inside that thread; the subject then becomes "Re: <original subject>", and without a "to" the reply is addressed to that message\'s sender. The user is asked before the draft is saved.',
           schema: DraftEmailSchema,
           annotations: WRITE_ANNOTATIONS,
-          handler: input => this.#draftEmail(input),
+          handler: (input, approval) => this.#draftEmail({ input, approval }),
         }),
         defineTool({
           name: UPDATE_DRAFT_TOOL_NAME,
@@ -223,7 +264,7 @@ export class GmailToolSet extends LocalToolMCP {
             'Replace the content of a saved plain-text draft, keeping its draft_id and its place in a thread. A draft with attachments or formatting cannot be changed. The user is asked first.',
           schema: UpdateDraftSchema,
           annotations: WRITE_ANNOTATIONS,
-          handler: input => this.#updateDraft(input),
+          handler: (input, approval) => this.#updateDraft({ input, approval }),
         }),
         defineTool({
           name: SEND_DRAFT_TOOL_NAME,
@@ -315,6 +356,18 @@ export class GmailToolSet extends LocalToolMCP {
     return { ...parsed, review_hash: hashDraft(assessed.draft) };
   }
 
+  /** A send the host stopped at dispatch went nowhere, and needs a fresh card; its receipt says so. */
+  refusedAtDispatchEvents(input: { params: CallToolRequest['params']; tool_call_id: string }) {
+    return input.params.name === SEND_DRAFT_TOOL_NAME
+      ? [
+          buildSendReceiptEvent({
+            tool_call_id: input.tool_call_id,
+            result: { outcome: 'not_sent', reason: 'needs_ok_again' },
+          }),
+        ]
+      : [];
+  }
+
   async #liveDraft(draftId: string) {
     const draft = await this.#options.api.getDraft(draftId);
     if (draft.message === undefined) {
@@ -354,11 +407,10 @@ export class GmailToolSet extends LocalToolMCP {
         this.#sendRefusal = null;
         return { draft: assessed.draft, replaces: undefined, answered: threading.answered ?? undefined };
       }
-      const invalid = { failure: 'The draft details were not valid, so nothing was saved.' };
       if (params.name === UPDATE_DRAFT_TOOL_NAME) {
         const parsed = UpdateDraftSchema.safeParse(params.arguments);
         if (!parsed.success) {
-          return invalid;
+          return { failure: invalidDraftReason(parsed.error) };
         }
         const existing = await this.#editableDraft(parsed.data.draft_id);
         if ('failure' in existing) {
@@ -369,7 +421,7 @@ export class GmailToolSet extends LocalToolMCP {
       }
       const parsed = DraftEmailSchema.safeParse(params.arguments);
       if (!parsed.success) {
-        return invalid;
+        return { failure: invalidDraftReason(parsed.error) };
       }
       const resolved = await this.#resolveContent({ input: parsed.data, existing: undefined });
       return { draft: resolved.reviewable, replaces: undefined, answered: resolved.answered };
@@ -409,8 +461,9 @@ export class GmailToolSet extends LocalToolMCP {
 
   /**
    * Settles what a new or changed draft contains: a reply takes its thread, its reply headers and the subject
-   * "Re: <original>" from the message it answers; a changed draft keeps the thread and reply headers it had,
-   * after they are checked against the thread again. Throws a RangeError when a reply cannot be threaded.
+   * "Re: <original>" from the message it answers, and the sender of that message as its recipient when the
+   * call names none; a changed draft keeps the thread and reply headers it had, after they are checked
+   * against the thread again. Throws a RangeError when a reply cannot be threaded or addressed.
    */
   async #resolveContent(input: { input: DraftContent; existing: GmailMessage | undefined }): Promise<{
     content: RawDraftContent;
@@ -425,6 +478,7 @@ export class GmailToolSet extends LocalToolMCP {
     let subject = call.subject.trim();
     let threadId = call.thread_id;
     let answered: AnsweredMessage | undefined;
+    let recipients = call.to ?? [];
     if (call.in_reply_to !== undefined) {
       const original = await this.#options.api.getMessage(call.in_reply_to);
       const part = original.payload;
@@ -443,6 +497,13 @@ export class GmailToolSet extends LocalToolMCP {
       subject = replySubject(headerOf({ message: original, name: 'Subject' }));
       threadId = original.threadId;
       answered = answeredMessageOf(original);
+      if (recipients.length === 0) {
+        const recipient = replyRecipientOf(original);
+        if (!recipient.ok) {
+          throw new RangeError(recipient.reason);
+        }
+        recipients = [recipient.address];
+      }
     } else if (existing?.payload !== undefined) {
       reply = {
         messageIdHeader: rawHeaderOf({ part: existing.payload, name: 'in-reply-to' }),
@@ -451,9 +512,9 @@ export class GmailToolSet extends LocalToolMCP {
       threadId ??= existing.threadId;
     }
     const body = call.body.trim();
-    const content: RawDraftContent = { to: call.to, cc: call.cc, bcc: call.bcc, subject, body };
+    const content: RawDraftContent = { to: recipients, cc: call.cc, bcc: call.bcc, subject, body };
     const reviewable: ReviewableDraft = {
-      to: call.to.map(address => mailboxOf(address)),
+      to: recipients.map(address => mailboxOf(address)),
       cc: (call.cc ?? []).map(address => mailboxOf(address)),
       bcc: (call.bcc ?? []).map(address => mailboxOf(address)),
       subject,
@@ -462,9 +523,10 @@ export class GmailToolSet extends LocalToolMCP {
       inReplyTo: replyHeaders(reply).inReplyTo,
       references: replyHeaders(reply).references,
       fromName: '',
-      // The model's recipients are validated bare addresses (toolContract), so no name is left off today. This check
+      // The recipients are bare addresses (the model's are validated in toolContract, and a filled reply
+      // recipient is the sender address read from the message), so no name is left off today. This check
       // stays as a defence in case that contract ever admits display names.
-      nameLeftOff: [...call.to, ...(call.cc ?? []), ...(call.bcc ?? [])].some(address => nameLeftOff(address)),
+      nameLeftOff: [...recipients, ...(call.cc ?? []), ...(call.bcc ?? [])].some(address => nameLeftOff(address)),
       // A draft written here never sets a Reply-To, so replies go to the sender.
       replyTo: null,
     };
@@ -650,7 +712,17 @@ export class GmailToolSet extends LocalToolMCP {
     }
   }
 
-  async #draftEmail(input: z.infer<typeof DraftEmailSchema>) {
+  /** Saves a new draft only on the user's own yes to this call. A call that arrives without one, by any route, saves nothing. */
+  async #draftEmail({
+    input,
+    approval,
+  }: {
+    input: z.infer<typeof DraftEmailSchema>;
+    approval: ApprovalDecision | undefined;
+  }) {
+    if (approval?.status !== 'allow') {
+      return errorResult(DRAFT_NOT_APPROVED);
+    }
     try {
       const { content, reply, threadId } = await this.#resolveContent({ input, existing: undefined });
       const created = await this.#options.api.createDraft({ raw: buildRawMessage({ content, reply }), threadId });
@@ -666,7 +738,17 @@ export class GmailToolSet extends LocalToolMCP {
     }
   }
 
-  async #updateDraft(input: z.infer<typeof UpdateDraftSchema>) {
+  /** Changes a draft only on the user's own yes to this call, as a new draft is saved. */
+  async #updateDraft({
+    input,
+    approval,
+  }: {
+    input: z.infer<typeof UpdateDraftSchema>;
+    approval: ApprovalDecision | undefined;
+  }) {
+    if (approval?.status !== 'allow') {
+      return errorResult(DRAFT_NOT_APPROVED);
+    }
     try {
       const existing = await this.#editableDraft(input.draft_id);
       if ('failure' in existing) {
@@ -694,6 +776,19 @@ export class GmailToolSet extends LocalToolMCP {
    * Sends only the draft the user approved: the hash of the card shown comes from the host with the approved call,
    * and the draft read right now must still hash to it. A call that arrives without one, by any route, sends nothing.
    */
+  /** Attaches the receipt event the chat turns the approval card into; absent when the call has no id to answer. */
+  #withReceipt<T extends object>(input: { response: T; toolCallId: string | undefined; result: SendReceiptResult }) {
+    const { toolCallId } = input;
+    return toolCallId === undefined
+      ? input.response
+      : { ...input.response, events: [buildSendReceiptEvent({ tool_call_id: toolCallId, result: input.result })] };
+  }
+
+  /**
+   * Sends only the draft the user approved: the hash of the card shown comes from the host with the approved call,
+   * and the draft read right now must still hash to it. A call that arrives without one, by any route, sends nothing.
+   * Every ending leaves a receipt event built from what the gate verified, never from model text.
+   */
   async #sendDraft({
     input,
     context,
@@ -701,23 +796,35 @@ export class GmailToolSet extends LocalToolMCP {
     input: z.infer<typeof DraftIdSchema>;
     context: ToolInvocationContext | undefined;
   }) {
+    const toolCallId = context?.tool_call_id;
+    const notSent = (reason: NotSentReason, response: ReturnType<typeof errorResult>) =>
+      this.#withReceipt({ response, toolCallId, result: { outcome: 'not_sent', reason } });
+    let gmailAsked = false;
     try {
       const live = await this.#liveDraft(input.draft_id);
       const assessed = assessDraft({ message: live, account: this.#options.account, forSend: true });
+      // A card is only shown for a draft that passed these checks, so a failure here means it changed since.
       if (!assessed.ok) {
-        return errorResult(this.#refuseSend(assessed.reason));
+        return notSent('draft_changed', errorResult(this.#refuseSend(assessed.reason)));
       }
       const threading = await this.#threading({ draft: assessed.draft, draftMessageId: live.id });
       if (!threading.ok) {
-        return errorResult(this.#refuseSend(threading.reason));
+        return notSent('draft_changed', errorResult(this.#refuseSend(threading.reason)));
       }
       const approved = context?.approved_params?.['review_hash'];
       if (typeof approved !== 'string') {
-        return errorResult('This send was not approved, so nothing was sent. Ask to send the draft again.');
+        return notSent(
+          'needs_ok_again',
+          errorResult('This send was not approved, so nothing was sent. Ask to send the draft again.'),
+        );
       }
-      if (approved !== hashDraft(assessed.draft)) {
-        return errorResult(
-          'The draft changed after you approved it, so nothing was sent. Ask to send it again to review the new text.',
+      const hash = hashDraft(assessed.draft);
+      if (approved !== hash) {
+        return notSent(
+          'draft_changed',
+          errorResult(
+            'The draft changed after you approved it, so nothing was sent. Ask to send it again to review the new text.',
+          ),
         );
       }
       // Checked again here so the list holds even for a send approved before demo mode limited it.
@@ -729,18 +836,30 @@ export class GmailToolSet extends LocalToolMCP {
           ),
         })
       ) {
-        return errorResult(DEMO_SEND_REFUSAL);
+        return notSent('demo_limited', errorResult(DEMO_SEND_REFUSAL));
       }
+      gmailAsked = true;
       const sent = await this.#options.api.sendDraft(input.draft_id);
-      return jsonResult({
-        account: this.#options.account,
-        draft_id: input.draft_id,
-        message_id: sent.id,
-        thread_id: sent.threadId,
-        status: 'sent',
+      return this.#withReceipt({
+        response: jsonResult({
+          account: this.#options.account,
+          draft_id: input.draft_id,
+          message_id: sent.id,
+          thread_id: sent.threadId,
+          status: 'sent',
+        }),
+        toolCallId,
+        result: {
+          outcome: 'sent',
+          sent_at: new Date().toISOString(),
+          sent_message_id: sent.id,
+          check_code: checkCodeOf(hash),
+          message: messageForDisplay(assessed.draft),
+        },
       });
     } catch (error) {
-      return failureResult(error);
+      const response = failureResult(error);
+      return notSent(notSentReasonOf({ error, gmailAsked }), response);
     }
   }
 }

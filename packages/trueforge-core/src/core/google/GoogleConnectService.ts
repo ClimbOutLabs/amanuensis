@@ -169,10 +169,16 @@ export class GoogleConnectService {
     }
     const features = [...input.features, ...grantedFeatures(stored?.granted_scopes ?? [])];
     if (!features.includes('gmail_read')) {
+      const wantsCalendar = features.includes('calendar_read') || features.includes('calendar_write');
+      const wantsDrive = features.includes('drive_files');
       throw new GoogleFeatureError(
         features.includes('gmail_compose')
           ? 'Sending needs permission to read mail too. Tick the read box as well, then connect.'
-          : 'Calendar is added to a Google connection that already reads mail. Connect Google first, then add Calendar.',
+          : wantsCalendar && wantsDrive
+            ? 'Calendar and Drive are added to a Google connection that already reads mail. Connect Google first, then add Calendar and Drive.'
+            : wantsDrive
+              ? 'Drive is added to a Google connection that already reads mail. Connect Google first, then add Drive.'
+              : 'Calendar is added to a Google connection that already reads mail. Connect Google first, then add Calendar.',
       );
     }
     if (features.includes('calendar_write') && !features.includes('calendar_read')) {

@@ -17,8 +17,8 @@ import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js'
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
 import type { ModelUsageTurnContext } from '../../components/ModelUsageContext.js';
 import { applyHeldPersona, awaitPendingPersonaMutation } from '../../personaMutationGate.js';
-import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
-import { extractSentinelFromEvent } from '../../sentinel/types.js';
+import { publishSendReceipt, publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
+import { extractSendReceiptFromEvent, extractSentinelFromEvent } from '../../sentinel/types.js';
 import type {
   AgentChatServer,
   CreateSessionRequest,
@@ -424,10 +424,13 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
  * conversion narrows it away: the vendor event unions have no case for
  * `tool.approval_required`, so it cannot travel the normal chat pipeline. The SDK parser
  * passes unknown event types and fields through, so `extractSentinelFromEvent` parses the
- * raw item defensively. Published per tool call; `SentinelStateProvider` subscribes.
+ * raw item defensively. Published per tool call; `SentinelStateProvider` subscribes. A send receipt
+ * travels the same way, since the vendor unions have no case for it either.
  */
 function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent | TrueForgeApi.SessionEvent): void {
   for (const info of extractSentinelFromEvent(data)) publishSentinelEvent(info);
+  const receipt = extractSendReceiptFromEvent(data);
+  if (receipt !== undefined) publishSendReceipt(receipt);
 }
 
 /**
@@ -510,6 +513,14 @@ interface TurnStreamCursor {
 type TurnStreamItem = { sequenceNumber: number; event: TurnStreamingEvent };
 
 /**
+ * A finished turn needs no closing event, but a failed one does: the runtime shows the failure and Retry from a
+ * failed `turn.done`, so dropping it hid the error until the chat was reloaded.
+ */
+function failedTurnDoneEvent(done: TrueForgeApi.TurnStreamingEvent): TurnStreamingEvent | undefined {
+  return done.type === 'turn.done' && done.state.status === 'error' ? toUiStreamingEvent(done) : undefined;
+}
+
+/**
  * Streams one connection attempt of a turn's live events via
  * `subscribeToTurn`, advancing `cursor` as it goes so a subsequent reconnect
  * resumes exactly after the last event this attempt saw — no duplicates, no
@@ -542,6 +553,10 @@ async function* subscribeTurnOnce(
     tapSentinelStreamEvent(item.data);
     if (item.data.type === 'turn.done') {
       seenTurnDone.done = true;
+      const failure = failedTurnDoneEvent(item.data);
+      if (failure !== undefined) {
+        yield { sequenceNumber: seq, event: failure };
+      }
       return;
     }
     const event = toUiStreamingEvent(item.data);
@@ -830,6 +845,10 @@ export function createHarnessChatServer(
           tapSentinelStreamEvent(item.data);
           if (item.data.type === 'turn.done') {
             seenTurnDone.done = true;
+            const failure = failedTurnDoneEvent(item.data);
+            if (failure !== undefined) {
+              yield { sequenceNumber: seq, event: failure };
+            }
             return;
           }
           const event = toUiStreamingEvent(item.data);

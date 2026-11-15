@@ -1,0 +1,4 @@
+# Written by `pnpm docs:site:build`.
+pages/
+build.yml
+site/

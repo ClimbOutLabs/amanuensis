@@ -65,9 +65,23 @@ export const TABLES_TO_MOVE = [
   'sentinel_user_settings',
   'approval_token',
   'brief_item_completion',
+  'recall_exclusion',
   'delivery',
   'delivery_attempt',
+  'reach_settings',
+  'person_timezone',
+  'text_contact',
+  'phone_call',
+  'text_send_count',
+  'text_word',
+  'noticing_event',
+  'noticing_checkpoint',
+  'reach_lease',
   'push_subscription',
+  'local_user',
+  'telegram_connection',
+  'telegram_pending_reply',
+  'telegram_pending_approval',
 ] as const;
 
 /**

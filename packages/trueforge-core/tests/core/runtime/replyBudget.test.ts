@@ -209,7 +209,13 @@ describe('ledger', () => {
 });
 
 describe('progressRefundFor', () => {
-  const landed = { toolName: 'edit_space', disposition: 'executed_ok', failure: false, savedNothing: false } as const;
+  const landed = {
+    toolName: 'edit_space',
+    disposition: 'executed_ok',
+    failure: false,
+    savedNothing: false,
+    sandboxCommand: false,
+  } as const;
 
   it('refunds one step when a space write landed', () => {
     expect(progressRefundFor({ results: [landed], refundsSoFar: 0 })).toBe(1);
@@ -233,6 +239,38 @@ describe('progressRefundFor', () => {
     expect(progressRefundFor({ results: [{ ...fileEdit, failure: true }], refundsSoFar: 0 })).toBe(0);
     // A connector tool that happens to be named write_file is not the sandbox's.
     expect(progressRefundFor({ results: [{ ...landed, toolName: 'write_file' }], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('refunds one step when a sandbox command ran to its end', () => {
+    // A failing test run also arrives like this, with its exit code in the result.
+    const command = { ...landed, toolName: 'exec', sandboxCommand: true };
+    expect(progressRefundFor({ results: [command], refundsSoFar: 0 })).toBe(1);
+  });
+
+  it('refunds nothing for a sandbox command the host refused or could not run', () => {
+    // The interpreter guard and the other refusals answer as an error result.
+    const refused = {
+      ...landed,
+      toolName: 'exec',
+      sandboxCommand: true,
+      disposition: 'executed_nonzero',
+      failure: true,
+    } as const;
+    expect(progressRefundFor({ results: [refused], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('refunds nothing for a sandbox command that was refused, blocked or never started', () => {
+    const command = { ...landed, toolName: 'exec', sandboxCommand: true };
+    for (const disposition of ['denied', 'policy_blocked', 'never_ran', 'outcome_unknown'] as const) {
+      expect(progressRefundFor({ results: [{ ...command, disposition }], refundsSoFar: 0 })).toBe(0);
+    }
+    // A connector tool that happens to be named exec is not the sandbox's.
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'exec' }], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('a reply of edits and command runs still stops at the same cap', () => {
+    const command = { ...landed, toolName: 'exec', sandboxCommand: true };
+    expect(progressRefundFor({ results: [command], refundsSoFar: MAX_PROGRESS_STEP_REFUNDS })).toBe(0);
   });
 
   it('refunds nothing for a write that saved nothing new, such as an append already at the end', () => {

@@ -15,10 +15,10 @@ export function DraftAgentConfigTrigger({ disabled, isRunning }: DraftAgentConfi
   const open = shell?.agentConfigOpen === true;
 
   return (
-    <Tooltip content="Agent config">
+    <Tooltip content="Agent setup">
       <button
         type="button"
-        aria-label="Agent config"
+        aria-label="Agent setup"
         aria-haspopup="dialog"
         aria-expanded={open}
         disabled={disabled || isRunning || shell == null}

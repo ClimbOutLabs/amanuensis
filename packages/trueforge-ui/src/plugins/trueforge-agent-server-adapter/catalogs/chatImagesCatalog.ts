@@ -34,7 +34,12 @@ export type ChatImageOutcome = z.infer<typeof ChatImageOutcomeSchema>;
 
 const TurnImagesResultSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('done'), images: z.array(ChatImageOutcomeSchema) }),
-  z.object({ status: z.literal('ask'), count: z.number().int().positive(), host: z.string().nullable() }),
+  z.object({
+    status: z.literal('ask'),
+    count: z.number().int().positive(),
+    host: z.string().nullable(),
+    url: z.string().nullable(),
+  }),
 ]);
 export type TurnImagesResult = z.infer<typeof TurnImagesResultSchema>;
 

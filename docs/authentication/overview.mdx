@@ -1,16 +1,28 @@
 ---
 title: 'Setup Login'
-description: 'Aman signs people in with its own sign-in service; standalone always requires it.'
+description: 'Aman signs people in itself: one local email and password, or its own sign-in service; standalone always requires one of them.'
 ---
 
-Aman uses its own sign-in. Outside sign-in services are not supported. Login is **mandatory in standalone mode** (the server refuses to start without it) and optional in hosted mode. For local development run `pnpm dev:login`, which starts Aman's sign-in service in Docker and prints the `OIDC_*` lines for `packages/trueforge/.env`. The installer sets the same service up for you.
+Aman uses its own sign-in. Outside sign-in services are not supported. Login is **mandatory in standalone mode** (the server refuses to start without it) and optional in hosted mode. The `npx amanuensis` install signs in locally: Aman keeps one email and password itself, and no sign-in service runs at all. For local development run `pnpm dev:login`, which starts Aman's sign-in service in Docker and prints the `OIDC_*` lines for `packages/trueforge/.env`. The installer sets the same service up for you.
 
 ## Choose your mode
 
 | Mode | When to use | What users see |
 | --- | --- | --- |
 | **No login** (hosted default) | Hosted evaluation on a network you fully trust; not available in standalone | No login screen; everyone is a single shared local admin |
-| **Login** | Standalone, or any shared deployment | Sign-in with Aman's sign-in service |
+| **Local sign-in** | The `npx amanuensis` install, or any standalone run with `TRUEFORGE_AUTH_MODE=local` | A sign-in form Aman serves itself; the first run asks you to create the sign-in |
+| **Login** | The installer, or any shared deployment | Sign-in with Aman's sign-in service |
+
+## Local sign-in
+
+Set `TRUEFORGE_AUTH_MODE=local` and Aman owns the sign-in. Any `OIDC_*` variables are ignored in this mode, and one line at startup says so. The rules:
+
+- **One person.** There is exactly one sign-in, stored as an email and a scrambled (bcrypt) password hash. A second one cannot be created: once the sign-in exists, the create page is gone and the create address refuses. That one person is the admin and can change every setting.
+- **Create it on the first page.** While no sign-in exists, opening Aman shows "Create your sign-in": your email and a password of at least 8 characters, typed twice. Creating it signs you in. After that, the page is a plain sign-in form. A wrong email or password gets one answer, "That email or password is not right", whichever of the two was wrong, and guessing is slowed by the same lockouts that guard the sign-in service's form.
+- **On a public address, create it straight away.** Local sign-in can be opened through a public https address. Until the sign-in exists, that address is open to claim: the first person to open the page creates the one sign-in and owns the install. Create yours as soon as the address can be reached, before telling anyone else the address.
+- **Change it in Settings, Account.** Type the current password and the new one twice. Changing it signs out every other device; the device you changed it on stays signed in.
+- **Forgot it?** There is no reset by email. Stop Aman and run `npx amanuensis --reset-password` (from a checkout, `aman reset-password`). It asks for a new password twice on the terminal, without showing what you type, and replaces the stored hash. It refuses while Aman is running; stop Aman first. The sign-in page carries the same instruction in one line.
+- **It needs a private connection.** Local sign-in works on this computer (a loopback address) or behind an https address set as `PUBLIC_BASE_URL`. If a listed origin is plain http on another computer, Aman refuses to start: "Local sign-in works on this computer or behind https. Set PUBLIC_BASE_URL to an https address, or use the Docker install."
 
 <Note>
   Standalone / local mode requires login and refuses to start without it. Hosted deployments (Docker Compose
@@ -21,7 +33,7 @@ Aman uses its own sign-in. Outside sign-in services are not supported. Login is 
 
 ## Option A — leave login off
 
-The hosted default (`STANDALONE=false`; standalone always needs login). Do **not** set any `OIDC_*` variables, run TrueForge as usual ([Quickstart](/quickstart)), and open the UI — there is no login screen, and Settings and chat are available immediately.
+The hosted default (`STANDALONE=false`; standalone always needs login). Do **not** set any `OIDC_*` variables, run Aman as usual ([Quickstart](/quickstart)), and open the UI — there is no login screen, and Settings and chat are available immediately.
 
 <Warning>
   Use this only on `localhost` or behind network controls you trust. On a public host, anyone who can reach the server gets full admin access under one shared identity.

@@ -15,9 +15,11 @@ if (!Number.isInteger(PORT)) {
   throw new Error(`FRONTEND_PORT must be an integer, got "${process.env.FRONTEND_PORT}"`);
 }
 
-const apiProxy: ProxyOptions = {
+export const apiProxy: ProxyOptions = {
   target: SERVER,
   changeOrigin: true,
+  // Voice mode opens a WebSocket under /api.
+  ws: true,
   // Keep SSE streams open without buffering.
   configure(proxy) {
     proxy.on('proxyRes', proxyRes => {

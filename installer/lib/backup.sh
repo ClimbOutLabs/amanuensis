@@ -2,6 +2,8 @@
 # Backups: the CLI writes into a scratch volume and every archive is streamed over stdout, so no host bind mounts are involved.
 
 BACKUP_KEEP=7
+# The newest manifest.json version of the backup CLI that restore understands.
+BACKUP_MANIFEST_VERSION=1
 LAST_BACKUP_DIR=
 
 write_checksums() {
@@ -20,11 +22,6 @@ write_checksums() {
 volume_tar() {
   local volume=$1 image=$2
   D run --rm --network none -v "$volume:/data:ro" "$image" tar -C /data -cf - .
-}
-
-# Value of KEY in an instance .env, so the CLI is pointed at the paths the app itself uses. Compose reads the last match.
-env_get() {
-  sed -n "s/^$2=//p" "$1" | tail -n 1
 }
 
 BACKUP_SCRATCH_LABEL=com.amanuensis.scratch=backup
@@ -85,7 +82,7 @@ backup_data() {
 
 # backup_instance NAME DESTDIR IMAGE
 backup_instance() {
-  local name=$1 dest=$2/$1 image=$3
+  local name=$1 dest=$2/$1 image=$3 file
   ensure_private_dir "$dest"
   if docker_volume_exists "aman_${name}_data"; then
     backup_data "$name" "$dest" "$image" || return 1
@@ -94,9 +91,15 @@ backup_instance() {
     volume_tar "aman_${name}_dex" "$image" >"$dest/dex.tar.part" || return 1
     mv "$dest/dex.tar.part" "$dest/dex.tar"
   fi
-  cp "$(instance_dir "$name")/.env" "$dest/env"
-  cp "$(instance_dir "$name")/dex.env" "$dest/dex.env"
-  chmod 600 "$dest/env" "$dest/dex.env"
+  # A settings file that is already lost cannot be saved; that is told, not a reason to lose the rest.
+  for file in env:.env dex.env:dex.env; do
+    if [ -f "$(instance_dir "$name")/${file#*:}" ]; then
+      cp "$(instance_dir "$name")/${file#*:}" "$dest/${file%%:*}"
+      chmod 600 "$dest/${file%%:*}"
+    else
+      warn "The settings file ${file#*:} of $name is missing, so this backup does not include it."
+    fi
+  done
 }
 
 # Only plain timestamped backups count and are pruned; a kept one (named after its stamp) stays until removed by hand.
@@ -144,12 +147,12 @@ backup_run() {
   done
   ensure_private_dir "$dir"
   for name in $(backup_targets "$only"); do
-    say "Backing up instance $name"
     if ! backup_instance "$name" "$dir" "$image"; then
       rm -rf "$dir"
       warn "The backup of $name failed, so the unfinished backup was removed."
       return 1
     fi
+    ui_ok "Backed up instance $name"
     n=$((n + 1))
   done
   # Only the authority's certificate goes into a backup, never its private key: a backup is not encrypted, and whoever
@@ -165,13 +168,13 @@ backup_run() {
   backup_prune
   log_event "backup $dir"
   if [ -n "$label" ]; then
-    say "Saved a backup to $dir, kept until you remove it."
+    ui_ok "Saved a backup to $(ui_path "$dir"), kept until you remove it."
   else
-    say "Saved a backup to $dir."
+    ui_ok "Saved a backup to $(ui_path "$dir")."
   fi
-  say "It holds your passwords and keys, so keep it on this computer."
+  ui_hint "It holds your passwords and keys, so keep it on this computer."
   if [ -f "$dir/tls/root.crt" ]; then
-    say "After a restore, each device needs to trust this computer again."
+    ui_hint "After a restore, each device needs to trust this computer again."
   fi
 }
 

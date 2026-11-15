@@ -9,14 +9,17 @@ import { Icon } from '@/icons/Icon.js';
 import { useCatalogServer } from '../../server/ServerContext.js';
 import {
   hasSkillNetworkApproval,
+  hasSkillWebsites,
   skillNetworkApprovalLines,
   skillNetworkApprovedLine,
   type SkillNetworkApprovalState,
+  type SkillWebsiteCheck,
 } from '../../server/skillNetworkApproval.js';
 import type { RegistrySkill, SkillBase, SkillCatalogEntry, SkillConfigBase } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import ImportGithubSkillForm from './ImportGithubSkillForm.js';
+import { addSkillLabel, SkillWebsitesReview } from './SkillWebsitesReview.js';
 
 const matchesQuery = (query: string, name: string, description: string) =>
   !query || name.toLowerCase().includes(query) || description.toLowerCase().includes(query);
@@ -43,6 +46,10 @@ const SkillSettings = () => {
   // A git-imported skill is deleted outright, so removing it goes through a confirm dialog.
   // A registry (catalog) skill's Remove is a disable that just returns it to Available.
   const [pendingRemoval, setPendingRemoval] = useState<SkillBase | null>(null);
+  // A starter skill that sends requests to websites waits here until the person approves them.
+  const [pendingStarter, setPendingStarter] = useState<{ entry: SkillCatalogEntry; check: SkillWebsiteCheck } | null>(
+    null,
+  );
   // Network approval state per enabled skill, keyed by skill id. A skill with no entry (the
   // catalog carries no approval calls, or the read failed) simply shows no panel.
   const [networkApprovals, setNetworkApprovals] = useState<Record<string, SkillNetworkApprovalState>>({});
@@ -114,16 +121,33 @@ const SkillSettings = () => {
     return <p className="text-sm text-text-secondary">Could not load the skills catalog. Try again.</p>;
   }
 
+  const starterDraft = (entry: SkillCatalogEntry) => ({
+    catalogId: entry.id,
+    name: entry.name,
+    description: entry.description,
+    repoURL: entry.repoURL,
+    path: entry.path,
+    ref: entry.ref,
+  });
+
   const handleSelect = (entry: SkillCatalogEntry) => {
+    if (hasSkillWebsites(skillCatalog)) {
+      void runMutation(async () => {
+        const check = await skillCatalog.checkSkillWebsites({
+          repoURL: entry.repoURL,
+          path: entry.path,
+          ref: entry.ref,
+        });
+        if (check.websites.length > 0) {
+          setPendingStarter({ entry, check });
+          return;
+        }
+        await skillCatalog.addSkillWithWebsites({ ...starterDraft(entry), approvedWebsites: [] });
+      }).catch(() => {});
+      return;
+    }
     void runMutation(async () => {
-      await skillCatalog.createSkill({
-        catalogId: entry.id,
-        name: entry.name,
-        description: entry.description,
-        repoURL: entry.repoURL,
-        path: entry.path,
-        ref: entry.ref,
-      });
+      await skillCatalog.createSkill(starterDraft(entry));
     }).catch(() => {});
   };
 
@@ -151,9 +175,25 @@ const SkillSettings = () => {
     if (skill) handleRemove(skill);
   };
 
-  const handleImport = async (draft: SkillConfigBase) => {
+  const confirmStarter = () => {
+    const pending = pendingStarter;
+    setPendingStarter(null);
+    if (pending === null || !hasSkillWebsites(skillCatalog)) return;
+    void runMutation(async () => {
+      await skillCatalog.addSkillWithWebsites({
+        ...starterDraft(pending.entry),
+        approvedWebsites: pending.check.websites,
+      });
+    }).catch(() => {});
+  };
+
+  const handleImport = async (draft: SkillConfigBase, approvedWebsites?: string[]) => {
     setFormError(null);
     await runMutation(async () => {
+      if (approvedWebsites !== undefined && hasSkillWebsites(skillCatalog)) {
+        await skillCatalog.addSkillWithWebsites({ ...draft, approvedWebsites });
+        return;
+      }
       await skillCatalog.createSkill(draft);
     }, setFormError);
     setTimeout(() => {
@@ -175,9 +215,27 @@ const SkillSettings = () => {
     }).catch(() => {});
   };
 
+  const handleClearAllowedHost = (skill: SkillBase, host: string) => {
+    if (!hasSkillNetworkApproval(skillCatalog)) return;
+    void runMutation(async () => {
+      await skillCatalog.clearSkillNetworkAllowedHost({ id: skill.id, host });
+    }).catch(() => {});
+  };
+
+  const handleClearDeniedHost = (skill: SkillBase, host: string) => {
+    if (!hasSkillNetworkApproval(skillCatalog)) return;
+    void runMutation(async () => {
+      await skillCatalog.clearSkillNetworkDeniedHost({ id: skill.id, host });
+    }).catch(() => {});
+  };
+
   const renderNetworkPanel = (skill: SkillBase): ReactNode => {
     const state = networkApprovals[skill.id];
-    if (state === undefined || state.declaredHosts.length === 0) {
+    if (state === undefined) {
+      return null;
+    }
+    const hasDecisions = state.allowedHosts.length > 0 || state.deniedHosts.length > 0 || state.sessionHosts.length > 0;
+    if (state.declaredHosts.length === 0 && !hasDecisions) {
       return null;
     }
     const hostsList = (
@@ -189,6 +247,72 @@ const SkillSettings = () => {
         ))}
       </ul>
     );
+    // The decisions the cards and this page made, one site at a time: allowed sites can be
+    // cleared back off, turned-down sites can be cleared so a card may ask again, and sites
+    // allowed once in a chat are only shown, since they end with that chat.
+    const decisionLists = hasDecisions ? (
+      <div className="mt-3 flex flex-col gap-3">
+        {state.allowedHosts.length > 0 && (
+          <div>
+            <p className="text-sm text-text-secondary">Also allowed, one by one:</p>
+            <ul className="mt-1 flex flex-col gap-1">
+              {state.allowedHosts.map(host => (
+                <li key={host} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 font-mono text-[0.8125rem] text-text-primary">{host}</span>
+                  <Button.Secondary
+                    size="small"
+                    type="button"
+                    disabled={busy || managedExternally}
+                    onClick={() => {
+                      handleClearAllowedHost(skill, host);
+                    }}
+                  >
+                    Clear
+                  </Button.Secondary>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {state.deniedHosts.length > 0 && (
+          <div>
+            <p className="text-sm text-text-secondary">Turned down, so no card asks about them:</p>
+            <ul className="mt-1 flex flex-col gap-1">
+              {state.deniedHosts.map(host => (
+                <li key={host} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 font-mono text-[0.8125rem] text-text-primary">{host}</span>
+                  <Button.Secondary
+                    size="small"
+                    type="button"
+                    disabled={busy || managedExternally}
+                    onClick={() => {
+                      handleClearDeniedHost(skill, host);
+                    }}
+                  >
+                    Clear
+                  </Button.Secondary>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {state.sessionHosts.length > 0 && (
+          <div>
+            <p className="text-sm text-text-secondary">Allowed once in a chat that is still open:</p>
+            <ul className="mt-1 flex flex-col gap-0.5">
+              {state.sessionHosts.map(host => (
+                <li key={host} className="font-mono text-[0.8125rem] text-text-primary">
+                  {host}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    ) : null;
+    if (state.declaredHosts.length === 0) {
+      return <div className="border-b border-border bg-secondary-bg/50 px-3 py-3 last:border-b-0">{decisionLists}</div>;
+    }
     if (state.approvedHosts !== null) {
       return (
         <div className="border-b border-border bg-secondary-bg/50 px-3 py-3 last:border-b-0">
@@ -206,27 +330,31 @@ const SkillSettings = () => {
               Remove network access
             </Button.Secondary>
           </div>
+          {decisionLists}
         </div>
       );
     }
     if (dismissedNetworkPrompts.has(skill.id)) {
       return (
-        <div className="flex items-center gap-3 border-b border-border bg-secondary-bg/50 px-3 py-3 last:border-b-0">
-          <p className="min-w-0 flex-1 text-sm text-text-secondary">Network access is off for this skill.</p>
-          <Button.Secondary
-            size="small"
-            type="button"
-            disabled={busy || managedExternally}
-            onClick={() => {
-              setDismissedNetworkPrompts(current => {
-                const next = new Set(current);
-                next.delete(skill.id);
-                return next;
-              });
-            }}
-          >
-            Review the sites
-          </Button.Secondary>
+        <div className="border-b border-border bg-secondary-bg/50 px-3 py-3 last:border-b-0">
+          <div className="flex items-center gap-3">
+            <p className="min-w-0 flex-1 text-sm text-text-secondary">Network access is off for this skill.</p>
+            <Button.Secondary
+              size="small"
+              type="button"
+              disabled={busy || managedExternally}
+              onClick={() => {
+                setDismissedNetworkPrompts(current => {
+                  const next = new Set(current);
+                  next.delete(skill.id);
+                  return next;
+                });
+              }}
+            >
+              Review the sites
+            </Button.Secondary>
+          </div>
+          {decisionLists}
         </div>
       );
     }
@@ -262,6 +390,7 @@ const SkillSettings = () => {
             Don’t allow
           </Button.Secondary>
         </div>
+        {decisionLists}
       </div>
     );
   };
@@ -413,6 +542,7 @@ const SkillSettings = () => {
           if (!open) setFormError(null);
         }}
         onImport={handleImport}
+        {...(hasSkillWebsites(skillCatalog) ? { onCheck: source => skillCatalog.checkSkillWebsites(source) } : {})}
         busy={busy || managedExternally}
         error={formError}
       />
@@ -438,6 +568,28 @@ const SkillSettings = () => {
           <Button variant="destructive" type="button" disabled={busy} onClick={confirmRemove}>
             Remove skill
           </Button>
+        </footer>
+      </CenteredModal>
+
+      <CenteredModal
+        open={pendingStarter !== null}
+        onOpenChange={open => {
+          if (!open) setPendingStarter(null);
+        }}
+        title={`Add ${pendingStarter?.entry.name ?? 'skill'}?`}
+        contentSized
+        className="md:max-w-md"
+      >
+        <div className="px-5 py-5">
+          {pendingStarter !== null && <SkillWebsitesReview check={pendingStarter.check} />}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">
+          <Button variant="ghost" type="button" onClick={() => setPendingStarter(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button.Primary type="button" disabled={busy} onClick={confirmStarter}>
+            {pendingStarter === null ? 'Add skill' : addSkillLabel(pendingStarter.check)}
+          </Button.Primary>
         </footer>
       </CenteredModal>
     </>

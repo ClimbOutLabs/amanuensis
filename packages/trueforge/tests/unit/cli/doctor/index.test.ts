@@ -93,6 +93,19 @@ describe('aman doctor', () => {
     expect(checks.find(c => c.id === 'model')?.state).toBe('off');
   });
 
+  it('with --local and no hosted model key, still counts the models added in the app', async () => {
+    const tokenFactoryChecks = jest.fn();
+    const deps = fakeDeps({
+      env: { ...healthyEnv, SQLITE_PATH: '/data/db/db.sqlite' },
+      get: healthyGet,
+      tokenFactoryChecks,
+      countModelProviders: () => 1,
+    });
+    const { io } = await run(['--local', '--only', 'model'], deps);
+    expect(tokenFactoryChecks).not.toHaveBeenCalled();
+    expect(z.array(CheckSchema).parse(JSON.parse(io.out.join('')))).toMatchObject([{ id: 'model', state: 'ok' }]);
+  });
+
   it('uses a longer probe timeout with --deep', async () => {
     const get = jest.fn(healthyGet);
     await run(['--deep'], fakeDeps({ env: healthyEnv, get }));

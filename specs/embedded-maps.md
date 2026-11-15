@@ -14,7 +14,7 @@ Model-callable tools only. No Map button. No automatic detection of the user's l
 
 ## Design decisions
 
-Every call asks (Tier 3). Geocoding sends place names, routing sends both endpoints, and tiles send the map viewport to third-party servers, so each call is a Tier 3 external-service action with a card, every time, in v1. No standing grant ("Always allow") and no per-chat relaxation. The classifier gets an explicit maps branch keyed on the two tool names, next to the extractor registry. The tier is not derived from MCP hints: a readOnlyHint on these tools would make them silent Tier 1 today, and the fail-closed "unrecognized tool" card names no destination and no place, which is not acceptable for data leaving the machine. Background and scheduled runs never call these tools (Tier 3 calls are held until the user is present).
+Every call asks (Tier 3). Geocoding sends place names, routing sends both endpoints, and tiles send the map viewport to third-party servers, so each call is a Tier 3 external-service action with a card, every time, in v1. No standing grant ("Always allow everywhere") and no per-chat relaxation. The classifier gets an explicit maps branch keyed on the two tool names, next to the extractor registry. The tier is not derived from MCP hints: a readOnlyHint on these tools would make them silent Tier 1 today, and the fail-closed "unrecognized tool" card names no destination and no place, which is not acceptable for data leaving the machine. Background and scheduled runs never call these tools (Tier 3 calls are held until the user is present).
 
 The card uses the existing Tier3Card fields:
 

@@ -16,6 +16,7 @@ import { useToasterOptional } from '@/containers/ToasterContainer.js';
 import { Icon } from '@/icons/Icon.js';
 import {
   isEnvManagedProvider,
+  modelProviderCheckOf,
   type UiStreamTimeout,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/modelProviderCatalog.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
@@ -331,6 +332,8 @@ const ModelSettings = () => {
                     const configuredIds = new Set(provider.models.map(model => model.id));
                     // The server rewrites an environment-managed provider on every start, so edits would not stick.
                     const envManaged = isEnvManagedProvider(provider);
+                    // The outcome of the connection check run when this provider was last saved, when one ran.
+                    const lastCheck = modelProviderCheckOf(provider);
                     const availableModels = envManaged
                       ? []
                       : catalogModels.filter(model => !configuredIds.has(model.id));
@@ -402,6 +405,14 @@ const ModelSettings = () => {
                             ) : null}
                           </div>
                         </header>
+
+                        {lastCheck ? (
+                          <p
+                            className={`mt-2 text-sm ${lastCheck.kind === 'answered' ? 'text-text-secondary' : 'text-failure-bg'}`}
+                          >
+                            Last check: {lastCheck.message}
+                          </p>
+                        ) : null}
 
                         <div className="mt-3 overflow-hidden rounded-lg border border-border bg-secondary-bg/30">
                           {provider.models.map(model => (
