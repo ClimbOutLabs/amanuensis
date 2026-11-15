@@ -90,14 +90,14 @@ newer model revision:
 
 ## Configuration (env)
 
-| Variable                          | Default            | Purpose                                                       |
-| --------------------------------- | ------------------ | ------------------------------------------------------------- |
-| `AMAN_STT_HOST` / `AMAN_STT_PORT` | `0.0.0.0` / `8001` | listen address                                                |
-| `AMAN_STT_MODEL`                  | `small`            | Whisper model size (must be a pinned size in `PINNED_MODELS`) |
-| `AMAN_STT_FALLBACK_MODEL`         | `base`             | fallback if `small` fails to load (also pinned and verified)  |
-| `AMAN_STT_CPU_THREADS`            | `4`                | faster-whisper encoder threads; keep equal to pinned cores    |
-| `AMAN_STT_MODEL_DIR`              | `/opt/aman-stt-models` | model folder baked into the image (read only)            |
-| `AMAN_STT_MAX_BODY_BYTES`         | `31457280`         | 30 MB body cap                                                |
+| Variable                          | Default                | Purpose                                                       |
+| --------------------------------- | ---------------------- | ------------------------------------------------------------- |
+| `AMAN_STT_HOST` / `AMAN_STT_PORT` | `0.0.0.0` / `8001`     | listen address                                                |
+| `AMAN_STT_MODEL`                  | `small`                | Whisper model size (must be a pinned size in `PINNED_MODELS`) |
+| `AMAN_STT_FALLBACK_MODEL`         | `base`                 | fallback if `small` fails to load (also pinned and verified)  |
+| `AMAN_STT_CPU_THREADS`            | `4`                    | faster-whisper encoder threads; keep equal to pinned cores    |
+| `AMAN_STT_MODEL_DIR`              | `/opt/aman-stt-models` | model folder baked into the image (read only)                 |
+| `AMAN_STT_MAX_BODY_BYTES`         | `31457280`             | 30 MB body cap                                                |
 
 ## Resource isolation and tuning
 
