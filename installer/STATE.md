@@ -270,5 +270,6 @@ longer than the dead limit while the others stay out.
   `<short>` is the name without a leading `aman-`, so `aman-` is written once;
   the volumes that hold no data (`aman_<short>_local_model`,
   `aman_<short>_mail_policy_status`) use the short name too. Volumes with data
-  keep the full name, so an older install keeps its data in place. Two
-  instances whose short names match (`x` and `aman-x`) are refused.
+  keep the full name, so an older install keeps its data in place. A new `x`
+  beside an existing `aman-x` is refused. An `aman-x` beside an `x` (older
+  installs could make the pair) keeps `aman-` twice, as `aman-aman-x-<service>`.

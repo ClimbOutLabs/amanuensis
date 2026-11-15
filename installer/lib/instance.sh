@@ -154,7 +154,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (the owner) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address
+  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address prefix
   dir=$(instance_dir "$name")
   instance_tailscale_https_move "$name" "$app_image"
   owner_name_backfill "$name"
@@ -255,8 +255,9 @@ instance_render() {
   if [ "$tls_on" = 1 ]; then
     if tls_home_in_volume; then tls_volume=1; else tls_host=1; fi
   fi
+  prefix=$(container_prefix "$name")
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "CONTAINER_PREFIX=$(container_prefix "$name")" "SHORT_NAME=${name#aman-}" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
+    "NAME=$name" "CONTAINER_PREFIX=$prefix" "SHORT_NAME=${prefix#aman-}" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
     "IF_BROWSER=$browser_on" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
@@ -1390,11 +1391,16 @@ refresh_report() { # name
 }
 
 # What Docker lists an instance's containers under: "aman-" and the name, written once even when the name starts with it.
+# An "aman-x" made back when an "x" could sit beside it keeps "aman-" twice, so the two never share names.
 container_prefix() { # name
-  printf 'aman-%s\n' "${1#aman-}"
+  if [ "${1#aman-}" != "$1" ] && reg_exists "${1#aman-}"; then
+    printf 'aman-%s\n' "$1"
+  else
+    printf 'aman-%s\n' "${1#aman-}"
+  fi
 }
 
-# The instance whose containers would have the same names as a new instance's, such as "x" for a new "aman-x".
+# The instance whose containers would have the same names as a new instance's, such as "aman-x" for a new "x".
 container_prefix_owner() { # name
   local other prefix
   prefix=$(container_prefix "$1")
