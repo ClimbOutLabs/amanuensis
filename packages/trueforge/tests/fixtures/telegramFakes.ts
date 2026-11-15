@@ -248,6 +248,7 @@ export interface SentTelegramMessage {
   chat_id: string;
   text: string;
   inline_buttons: readonly (readonly TelegramInlineButton[])[] | undefined;
+  no_link_preview: boolean | undefined;
 }
 
 /** A Telegram client that records sends and answers callbacks; getMe and downloads are set by the test. */
@@ -274,11 +275,17 @@ export class FakeTelegramClient implements TelegramClient {
     chat_id: string;
     text: string;
     inline_buttons?: readonly (readonly TelegramInlineButton[])[] | undefined;
+    no_link_preview?: boolean | undefined;
   }): Promise<{ message_id: number }> {
     if (this.failSend) {
       return Promise.reject(new Error('send failed'));
     }
-    this.sent.push({ chat_id: input.chat_id, text: input.text, inline_buttons: input.inline_buttons });
+    this.sent.push({
+      chat_id: input.chat_id,
+      text: input.text,
+      inline_buttons: input.inline_buttons,
+      no_link_preview: input.no_link_preview,
+    });
     return Promise.resolve({ message_id: this.sent.length });
   }
 

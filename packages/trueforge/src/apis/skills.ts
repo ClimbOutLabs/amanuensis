@@ -1,4 +1,5 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
+import { isSkillBlockedHost } from '@truefoundry/trueforge-core/core/connectors/apiServices';
 import type { Context } from 'hono';
 import type { ResolveRequestContext } from '../auth/identity';
 import { SkillNameConflictError, type ISkillStore, type SkillRecord } from '../db/skillStore';
@@ -73,18 +74,18 @@ function toSkillNetworkApproval(
   return {
     declared_hosts: [...declared],
     approved_hosts: effective === null ? null : [...effective],
-    allowed_hosts: record.network_allowed_hosts.filter(host => !denied.has(host)),
+    allowed_hosts: record.network_allowed_hosts.filter(host => !denied.has(host) && !isSkillBlockedHost(host)),
     denied_hosts: [...record.network_denied_hosts],
     session_hosts:
       viewer === undefined
         ? []
-        : [
-            ...skillNetworkTokens.sessionHostsForSkill({
+        : skillNetworkTokens
+            .sessionHostsForSkill({
               tenant_id: viewer.tenant_id,
               created_by: viewer.created_by,
               skill_name: record.name,
-            }),
-          ],
+            })
+            .filter(host => !isSkillBlockedHost(host)),
     send_capable: skillNetworkHostsCanSend(declared),
   };
 }
@@ -168,6 +169,8 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
     if (!deleted) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
     }
+    // The skill's own websites went with its record; its allow-once answers in open chats go too.
+    skillNetworkTokens.forgetSkill({ tenant_id: requestContext.tenant_id, skill_name: name });
     return c.json({}, 200);
   };
 

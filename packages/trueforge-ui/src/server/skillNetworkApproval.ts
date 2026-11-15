@@ -7,6 +7,10 @@
  * `schemas/skill.ts`); this module is its single owner on the client. It collapses into the
  * generated SDK once that carries `/settings/skills/{name}/network-approval`.
  */
+import {
+  SKILL_SITES_DATA_WARNING,
+  SKILL_SITES_EMAIL_BLOCKED,
+} from '@truefoundry/trueforge-core/core/permissions/skillSitesCopy';
 import { z } from 'zod';
 
 const SkillNetworkApprovalResponseSchema = z.object({
@@ -94,12 +98,10 @@ export function parseSkillNetworkApproval(body: unknown): SkillNetworkApprovalSt
 export function skillNetworkApprovalLines(input: { skillName: string; state: SkillNetworkApprovalState }): string[] {
   const lines = [
     `The ${input.skillName} skill needs to reach these sites to work:`,
-    'While this skill is switched on for a chat, that chat’s sandbox can contact these sites and no others. The skill can send any of your data to them, so only allow this for a skill you trust.',
+    `While this skill is switched on for a chat, that chat’s sandbox can contact these sites and no others. ${SKILL_SITES_DATA_WARNING}`,
   ];
   if (input.state.sendCapable) {
-    lines.push(
-      'One of these sites can send email. This skill will be able to send email as you, without asking each time.',
-    );
+    lines.push(SKILL_SITES_EMAIL_BLOCKED);
   }
   return lines;
 }

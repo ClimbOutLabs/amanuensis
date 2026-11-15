@@ -17,6 +17,10 @@ import {
 const SETUPS: { name: PersonalInstanceName; title: string }[] = [
   { name: 'personal', title: 'Personal instance: web search, maps, spaces, schedules, memory (no Google)' },
   { name: 'personal-with-google', title: 'Personal instance with Gmail and Google Calendar connected' },
+  {
+    name: 'personal-with-connection-offer',
+    title: 'Personal instance before email is connected (the offer to connect it is sent)',
+  },
   { name: 'personal-no-sandbox', title: 'Personal instance with the sandbox turned off (no exec tool)' },
   { name: 'personal-no-server-sandbox', title: 'Personal instance on a server with no sandbox (no exec tool)' },
 ];

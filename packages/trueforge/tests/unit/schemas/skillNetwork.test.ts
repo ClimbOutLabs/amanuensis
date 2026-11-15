@@ -2,6 +2,7 @@ import type { ApiServiceDeclaration } from '@truefoundry/trueforge-core/core/con
 import {
   SkillManifestSchema,
   effectiveSkillNetworkHosts,
+  grantedSkillNetworkHosts,
   isSkillNetworkHostName,
   skillNetworkHostsCanSend,
 } from '../../../src/schemas/skill';
@@ -62,6 +63,22 @@ describe('the skill manifest network_hosts declaration', () => {
 });
 
 describe('effectiveSkillNetworkHosts', () => {
+  it('never grants a site that can send email, and still grants the rest of an approved list', () => {
+    const declared = ['api.example-weather.test', 'gmail.googleapis.com'];
+    expect(effectiveSkillNetworkHosts({ declared, approved: declared, denied: [] })).toEqual([
+      'api.example-weather.test',
+    ]);
+    expect(
+      grantedSkillNetworkHosts({
+        declared,
+        approved: declared,
+        allowed: ['api.sendgrid.com'],
+        denied: [],
+        session: ['hooks.zapier.com'],
+      }),
+    ).toEqual(['api.example-weather.test']);
+  });
+
   it('grants the declared list when the person approved exactly it', () => {
     expect(effectiveSkillNetworkHosts({ declared: TEN_X_HOSTS, approved: TEN_X_HOSTS, denied: [] })).toEqual(
       TEN_X_HOSTS,
@@ -162,11 +179,13 @@ describe('skillNetworkHostsCanSend', () => {
   const INVENTED_SEND_SERVICE: ApiServiceDeclaration = {
     service: 'Parchment Post',
     hosts: ['api.parchment-post.example'],
+    host_patterns: [],
     can_send: true,
   };
   const INVENTED_READ_SERVICE: ApiServiceDeclaration = {
     service: 'Ledger Look',
     hosts: ['api.ledger-look.example'],
+    host_patterns: [],
     can_send: false,
   };
 

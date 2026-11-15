@@ -23,7 +23,12 @@ import { LOAD_BUNDLE_TOOL_NAME } from '@truefoundry/trueforge-core/core/runtime/
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { isRecord } from '@truefoundry/trueforge-core/core/util/records';
 import { createLogger } from 'winston';
-import { buildPersonalInstance, type PersonalInstance } from '../../../../src/runtime/promptReport/personalInstance';
+import {
+  buildPersonalInstance,
+  PERSONAL_INSTANCE_NAMES,
+  type PersonalInstance,
+  type PersonalInstanceName,
+} from '../../../../src/runtime/promptReport/personalInstance';
 
 export type Mode = 'online' | 'offline';
 
@@ -33,9 +38,13 @@ export interface ToolRow {
   /** The name the model calls the tool by. */
   name: string;
   server: string;
+  /** The server and the tool's own name, which stay the same in every kind of instance. */
+  key: string;
   /** Undefined for a tool sent on every request. */
   bundle: ToolBundleName | undefined;
   args: Record<string, unknown>;
+  /** The kind of instance that offers the tool. */
+  instance: PersonalInstanceName;
 }
 
 /** Arguments that make a call worth judging, where a placeholder would only test the schema check. */
@@ -101,10 +110,16 @@ function sentinelServices(input: { mode: Mode; audit: AuditRecordInput[] }): Sen
   };
 }
 
-/** The instance with Gmail and Calendar writes, plus the Email and CalDAV connectors. */
-async function instanceFor(input: { mode: Mode; audit: AuditRecordInput[] }) {
+/** The fullest instance comes first, so a tool that several kinds offer is judged there. */
+const INSTANCE_NAMES: PersonalInstanceName[] = [
+  'personal-with-google',
+  ...PERSONAL_INSTANCE_NAMES.filter(name => name !== 'personal-with-google'),
+];
+
+/** One kind of instance with Gmail and Calendar writes where it has Google, plus the Email and CalDAV connectors. */
+async function instanceFor(input: { name: PersonalInstanceName; mode: Mode; audit: AuditRecordInput[] }) {
   const instance = await buildPersonalInstance({
-    name: 'personal-with-google',
+    name: input.name,
     googleAccess: 'read_and_write',
     sentinelServices: sentinelServices(input),
   });
@@ -153,9 +168,8 @@ function sampleArgs(schema: Record<string, unknown>): Record<string, unknown> {
   );
 }
 
-/** Every tool the thread offers, named as the model sees it, with its bundle and arguments for one call. */
-export async function toolTable(): Promise<ToolRow[]> {
-  const instance = await instanceFor({ mode: 'online', audit: [] });
+async function toolsOf(name: PersonalInstanceName): Promise<ToolRow[]> {
+  const instance = await instanceFor({ name, mode: 'online', audit: [] });
   const builtIns: IToolSet[] = [
     ...instance.capabilities.flatMap(capability => capability.systemToolSets ?? []),
     ...(instance.sandbox === undefined ? [] : [instance.sandbox]),
@@ -176,11 +190,29 @@ export async function toolTable(): Promise<ToolRow[]> {
       {
         name: tool.function.name,
         server: mapped.toolSet.name,
+        key: `${mapped.toolSet.name}/${mapped.originalToolName}`,
         bundle: mapped.toolSet.bundleOf?.(mapped.originalToolName),
         args: ARGS[mapped.originalToolName] ?? sampleArgs(tool.function.parameters ?? {}),
+        instance: name,
       },
     ];
   });
+}
+
+/**
+ * Every tool any kind of instance offers, named as the model sees it, with its bundle and arguments
+ * for one call. A tool that only one kind of instance has is on the list too.
+ */
+export async function toolTable(): Promise<ToolRow[]> {
+  const rows = new Map<string, ToolRow>();
+  for (const name of INSTANCE_NAMES) {
+    for (const row of await toolsOf(name)) {
+      if (!rows.has(row.key)) {
+        rows.set(row.key, row);
+      }
+    }
+  }
+  return [...rows.values()];
 }
 
 async function* oneCall(input: {
@@ -242,7 +274,7 @@ export async function judge(input: { mode: Mode; row: ToolRow; loading: Loading 
 }> {
   const { row } = input;
   const audit: AuditRecordInput[] = [];
-  const instance = await instanceFor({ mode: input.mode, audit });
+  const instance = await instanceFor({ name: row.instance, mode: input.mode, audit });
   const bundle = row.bundle ?? 'extras';
   const steps =
     input.loading === 'load_bundle'
