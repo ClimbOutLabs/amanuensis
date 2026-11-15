@@ -396,9 +396,11 @@ describe('Memory explorer with several collections', () => {
     renderPersonaPanel(catalog);
 
     const zaraLine = await screen.findByText(ZARA_PENDING_LINE);
-    expect(screen.getAllByText(/^This happened on .*2026.*\d\d.*\. The model took too long to answer\.$/)).toHaveLength(
-      2,
-    );
+    expect(
+      screen.getAllByText(
+        /^This happened on .*2026.*\d\d.*\. The model took too long to answer\. If this keeps happening, choose a faster Background model in Settings\.$/,
+      ),
+    ).toHaveLength(2);
     // The server did not say which chat it was, so the note offers no way to open one.
     expect(screen.queryByRole('button', { name: 'Open the chat' })).not.toBeInTheDocument();
     const zaraNote = zaraLine.closest('div')?.parentElement;
@@ -428,7 +430,9 @@ describe('Memory explorer with several collections', () => {
       updatedAt: '2026-08-14T12:00:00.000Z',
     }));
 
-    expect(await screen.findByText('Aman stopped before the summary was finished.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Aman stopped before the summary was finished. Nothing is wrong with the model.'),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open the chat' }));
 
     await waitFor(() =>

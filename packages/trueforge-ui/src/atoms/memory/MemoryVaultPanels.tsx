@@ -44,13 +44,15 @@ function summaryFailedTime(failedAt: string | null): string | null {
       });
 }
 
-/** Why a summary failed, in one plain sentence. */
+/** Why a summary failed, in plain words, and the one thing to do about that cause. */
 const SUMMARY_FAILURE_WORDS: Record<MemoryVaultSummaryFailureCause, string> = {
-  model_too_slow: 'The model took too long to answer.',
-  model_error: 'The model gave an error instead of an answer.',
-  model_not_found: 'The model that makes summaries could not be found.',
-  answer_unusable: "The model's answer could not be used.",
-  interrupted: 'Aman stopped before the summary was finished.',
+  model_too_slow:
+    'The model took too long to answer. If this keeps happening, choose a faster Background model in Settings.',
+  model_error: 'The model gave an error instead of an answer. Check that the model is running.',
+  model_not_found: 'The model that makes summaries could not be found. Choose a Background model in Settings.',
+  answer_unusable:
+    "The model's answer could not be used. If this keeps happening, choose a different Background model in Settings.",
+  interrupted: 'Aman stopped before the summary was finished. Nothing is wrong with the model.',
 };
 
 /** When and why a summary failed, as far as the server said, or null when it said neither. */
