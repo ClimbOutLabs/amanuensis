@@ -102,6 +102,22 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
     async getHealth() {
       return await request('GET', '/healthz');
     },
+    /**
+     * Sets the skills a chat may use, as the app does after a skill is added or removed in that chat. The chat's
+     * setup is replaced, so it is built the same way as when the chat was made, with the sandbox on.
+     * @param {{ sessionId: string, model: string, temperature: number, skills: string[] }} options
+     */
+    async setSessionSkills({ sessionId, model, temperature, skills }) {
+      await request('PATCH', `/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+        agent: {
+          spec: {
+            model: { name: model, params: { temperature } },
+            config: { sandbox: { enabled: true } },
+            skills: skills.map(name => ({ name })),
+          },
+        },
+      });
+    },
     /** What the server can do, such as whether its sandbox is ready. */
     async getCapabilities() {
       const body = await request('GET', '/api/v1/capabilities');

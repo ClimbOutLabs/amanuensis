@@ -190,6 +190,23 @@ async function requireSandbox(client) {
   }
 }
 
+/**
+ * Turns a skill the chat added on for that chat, and off again once it is removed, as the app does after the card.
+ * The server does not do it for a client without that step, so without this the skill would never run here.
+ */
+async function mountAddedSkill({ client, sessionId, model, temperature, skills }) {
+  if (skills.before === undefined) {
+    return;
+  }
+  const listed = new Set((await client.listSkills()).map(skill => skill.name));
+  const wanted = skills.added !== undefined && listed.has(skills.added) ? [skills.added] : [];
+  if (wanted.join() === skills.mounted.join()) {
+    return;
+  }
+  await client.setSessionSkills({ sessionId, model: model.name, temperature, skills: wanted });
+  skills.mounted = wanted;
+}
+
 /** The messages of a case, in order. A case of one message is one step. */
 function stepsOf(testCase) {
   return testCase.steps ?? [{ prompt: testCase.prompt, checks: testCase.checks, journey: testCase.journey }];
@@ -227,7 +244,11 @@ async function runCase({
   const scheduleBefore = steps.some(step => step.journey?.type === 'scheduled_run')
     ? await snapshotJourney({ client })
     : undefined;
-  const skills = { before: usesSkills(steps) ? await snapshotSkills({ client }) : undefined, added: undefined };
+  const skills = {
+    before: usesSkills(steps) ? await snapshotSkills({ client }) : undefined,
+    added: undefined,
+    mounted: [],
+  };
   try {
     const sessionId = await client.createSession({
       model: model.name,
@@ -295,6 +316,7 @@ async function runCase({
           checks.push({ check: `${label}what the chat left behind could be read`, pass: false, detail });
         }
       }
+      await mountAddedSkill({ client, sessionId, model, temperature, skills });
     }
   } catch (caught) {
     if (isRunStopping(caught)) {
