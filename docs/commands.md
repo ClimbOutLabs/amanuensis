@@ -29,6 +29,14 @@ There are two versions of the command. Which one you have depends on how you ins
 
 The rest of this page, up to the Windows section, is for Mac, Linux and WSL.
 
+## See the list of commands
+
+```
+aman help
+```
+
+It shows every command on one screen, grouped as every day, when something is wrong, your data and advanced. To see all the options of one command, add its name: `aman help doctor`. `aman COMMAND --help` shows the same page. `aman` on its own shows the list too.
+
 ## See your addresses and settings
 
 ```
@@ -116,6 +124,8 @@ Backups go to `~/.amanuensis/backups`, one folder per backup. Aman keeps the sev
     3. Wait while it works. It backs up your data first, builds the new version (about 15 minutes), and switches over.
 
     The second and third lines ask GitHub which release is the newest. Always update to a release, not to code that is still being worked on. If the `git checkout` line fails, there is no newer release, and nothing was changed.
+
+    On Ubuntu, new files from `git checkout` or `git pull` can be changed by your group as well as by you. When that group is yours alone, `aman upgrade` takes that right away from the group by itself and says so. In any other case it stops and tells you what to do, because it won't run code that another account could have changed.
 
 === "Windows"
 

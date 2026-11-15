@@ -616,8 +616,8 @@ export async function getMcpConnection({
 /**
  * Expand agent_spec skill names into git mounts from the skill store.
  * Wire url/path/ref/description on the request are ignored — the store row wins.
- * Throws HTTPException(422) if any name is not registered or is not a git skill
- * (a registry catalog row must go through the SFY resolve path instead).
+ * Throws HTTPException(422) if a name is not a git skill (a registry catalog row must go through the SFY
+ * resolve path instead). A name that is no longer added is skipped.
  */
 export async function resolveGitSkills({
   tenant_id,
@@ -637,10 +637,10 @@ export async function resolveGitSkills({
   const resolved: GitSkill[] = [];
   for (const skill of skills) {
     const record = byName.get(skill.name);
+    // A skill removed after a chat turned it on is left out, so removing a skill never stops the chats
+    // and schedules that used it. Saving a chat's setup still refuses a name that is not added.
     if (record === undefined) {
-      throw new HTTPException(422, {
-        message: `Unknown skill "${skill.name}" — not configured`,
-      });
+      continue;
     }
     const git = parseGitSkill(record.manifest);
     if (git === undefined) {
