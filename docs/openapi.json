@@ -8531,11 +8531,35 @@
         ],
         "type": "object"
       },
+      "MemoryVaultSummaryFailureCause": {
+        "enum": [
+          "model_too_slow",
+          "model_error",
+          "model_not_found",
+          "answer_unusable",
+          "interrupted",
+          null
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "MemoryVaultSummaryStatus": {
         "properties": {
+          "cause": {
+            "$ref": "#/components/schemas/MemoryVaultSummaryFailureCause"
+          },
           "failed_at": {
             "description": "When that summary failed, or null when none is owed or the time was not kept.",
             "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "description": "The chat whose summary failed, or null when none is owed or the chat was not kept.",
             "type": [
               "string",
               "null"
@@ -8548,7 +8572,9 @@
         },
         "required": [
           "summary_pending",
-          "failed_at"
+          "failed_at",
+          "cause",
+          "session_id"
         ],
         "type": "object"
       },
