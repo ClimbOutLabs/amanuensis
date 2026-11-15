@@ -27,7 +27,7 @@ forward_problem() { # address
   value=$(lowercase "$1")
   value=${value%/}
   if ! [[ $value =~ ^(https?)://([a-z0-9.-]+)(:([0-9]{1,5}))?$ ]]; then
-    echo "$1 is not a full address. Examples: https://aman.example.ts.net or http://192.168.1.20:8080"
+    echo "$1 is not a full address. Examples: https://aman.example.com or http://192.168.1.20:8080"
     return
   fi
   scheme=${BASH_REMATCH[1]}
@@ -43,7 +43,7 @@ forward_problem() { # address
   elif [ -n "$rest" ] && [ "$scheme" = http ]; then
     echo "$1 uses plain http on a name that can be reached from the internet, which is not safe for signing in. Use https."
   elif [ -n "$rest" ] && ! [[ $host =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
-    echo "$1 is not an address or a name. Examples: https://aman.example.ts.net or http://192.168.1.20:8080"
+    echo "$1 is not an address or a name. Examples: https://aman.example.com or http://192.168.1.20:8080"
   fi
 }
 

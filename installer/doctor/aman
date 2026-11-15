@@ -1863,7 +1863,7 @@ run_address() {
   done
   case "$action" in
     list) [ -z "$value" ] || die_usage "aman address list takes no address." ;;
-    add | remove) [ -n "$value" ] || die_usage "aman address $action needs an address, for example: aman address $action https://aman.example.ts.net" ;;
+    add | remove) [ -n "$value" ] || die_usage "aman address $action needs an address, for example: aman address $action https://aman.example.com" ;;
     *) die_usage "Run aman address list, aman address add ADDRESS or aman address remove ADDRESS." ;;
   esac
   if [ -z "$instance" ]; then

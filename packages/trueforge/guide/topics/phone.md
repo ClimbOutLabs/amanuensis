@@ -1,7 +1,7 @@
 ---
 id: phone
 title: Phone and other devices
-covers:
+covers: command:address
 ---
 
 Use Aman from your phone, a tablet or another computer in your home. The device must be on the same home network (Wi-Fi) as the computer Aman runs on.
@@ -55,6 +55,16 @@ While you trust it, your device shows a long code called a fingerprint. It must 
 - "Turn on for this device" says the device doesn't trust the computer. Notices need the same trust step. Do it on this device, then go back to **Settings**, **Reach me** and press **Turn on for this device** again.
 - Aman was restored from a backup, or its certificate was made again. Each device needs to trust the computer again. Do the trust step once more.
 - The page doesn't open at all. Check that the device is on the same Wi-Fi as the computer, and that the computer is on.
+
+## Over a VPN or another address
+
+Aman answers on your home network. It doesn't answer on Tailscale or any other VPN until you add that address.
+
+1. Open Aman at the address you want to use. Aman shows a page with that address and the command to run.
+2. On the computer that runs Aman, run the command it shows, for example `aman address add 100.101.102.103`. For an address that another program passes on to Aman, such as Tailscale serve, add the full address, for example `aman address add https://aman.example.com`.
+3. Open the address again.
+
+To see the addresses you added, run `aman address list`. To take one away, run `aman address remove` with the address.
 
 ## On a small screen
 
