@@ -141,8 +141,11 @@ describe('submitRetain summary-pending marker', () => {
   });
 
   it('logs how long a failed summary took, beside the chat and the reason', async () => {
+    // The clock is moved by hand, so the seconds do not depend on how busy the machine is.
+    let now = Date.parse('2026-10-20T12:00:00.000Z');
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
     mockSummarize.mockImplementation(async () => {
-      await new Promise(resolve => setTimeout(resolve, 1_100));
+      now += 120_000;
       return { status: 'failed', reason: 'The model timed out', fallback: 'model_timeout' };
     });
     const logger = makeLogger();
@@ -161,13 +164,14 @@ describe('submitRetain summary-pending marker', () => {
       summarize: summarizeContext(),
       outcomeLog: { personaName: 'Zara' },
     });
+    clock.mockRestore();
 
     expect(info).toHaveBeenCalledWith('Turn memory not saved: the summary failed', {
       sessionId: 's1',
       turnId: 't1',
       personaName: 'Zara',
       reason: 'model_timeout',
-      seconds: 1,
+      seconds: 120,
     });
   });
 
