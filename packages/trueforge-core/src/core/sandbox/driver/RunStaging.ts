@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import type { Stats } from 'node:fs';
 import { chmod, chown, lstat, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runCodeProgramName, type RunCodeLanguage, type SandboxIdentity } from './IsolationDriver';
 
 /** Uid:gid baked into the sandbox image, used when the server is root and cannot run the container as itself. */
@@ -96,7 +96,13 @@ export async function stageRunDirs(input: {
   const egressDir = join(runRoot, 'egress');
 
   for (const file of input.files) {
-    await writeFile(join(ingressDir, file.name), file.bytes, { mode: 0o400 });
+    const ingressFull = resolve(ingressDir);
+    const target = join(ingressFull, file.name);
+    const rel = relative(ingressFull, target);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel) || rel === '') {
+      throw new Error('Invalid file path');
+    }
+    await writeFile(target, file.bytes, { mode: 0o400 });
   }
   // The program rides in ingress under a reserved name (never harvested).
   await writeFile(join(ingressDir, runCodeProgramName(input.language)), input.code, { mode: 0o400 });
