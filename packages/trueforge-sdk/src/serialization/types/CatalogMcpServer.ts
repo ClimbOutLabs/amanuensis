@@ -15,6 +15,10 @@ export const CatalogMcpServer: core.serialization.ObjectSchema<
     description: core.serialization.string(),
     logo: core.serialization.string().optional(),
     name: ResourceName,
+    pageReadTools: core.serialization.property(
+        "page_read_tools",
+        core.serialization.list(core.serialization.string()).optional(),
+    ),
     searchProvider: core.serialization.property("search_provider", core.serialization.boolean().optional()),
     searchTools: core.serialization.property(
         "search_tools",
@@ -30,6 +34,7 @@ export declare namespace CatalogMcpServer {
         description: string;
         logo?: string | null;
         name: ResourceName.Raw;
+        page_read_tools?: string[] | null;
         search_provider?: boolean | null;
         search_tools?: string[] | null;
         type: CatalogMcpServerType.Raw;

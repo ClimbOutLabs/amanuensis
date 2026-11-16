@@ -58,6 +58,7 @@ const BASE: ReviewableDraft = {
   inReplyTo: '',
   references: '',
   fromName: 'Ada',
+  fromAddress: 'ada@example.com',
   nameLeftOff: false,
   replyTo: null,
 };

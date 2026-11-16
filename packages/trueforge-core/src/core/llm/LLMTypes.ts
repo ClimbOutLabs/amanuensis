@@ -81,6 +81,12 @@ const ToolEffectHintsSchema = z.object({
     .boolean()
     .optional()
     .describe('MCP openWorldHint: the tool reaches systems beyond this machine, so data can leave it.'),
+  requires_network: z
+    .boolean()
+    .optional()
+    .describe(
+      'The tool needs the network, as its own registration declares. Set by the host from the registration, never from tool arguments.',
+    ),
   effect: z
     .enum(['inspect', 'edit', 'verify', 'commit', 'push', 'execute'])
     .optional()
@@ -265,6 +271,18 @@ export const InternalToolCallInfoSchema = z.object({
     .literal(true)
     .optional()
     .describe('Set on every call to the connector the user designated as search provider. Never model-authored.'),
+  search_result_call: z
+    .literal(true)
+    .optional()
+    .describe(
+      'Set when the call ran one of the search tools the designated provider record declares, so its results are recorded as search hits. Never model-authored.',
+    ),
+  page_read_call: z
+    .literal(true)
+    .optional()
+    .describe(
+      'Set when the call ran one of the page-read tools the designated provider record declares, so what it returned is recorded as page text. Never model-authored.',
+    ),
   secret_path_read: z
     .literal(true)
     .optional()

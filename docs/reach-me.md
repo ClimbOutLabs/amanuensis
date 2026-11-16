@@ -21,7 +21,7 @@ While it is off, Reach me does not show mail or calendar trouble, because nothin
 
 ## What Aman watches for
 
-- **Mail from people you marked always important.** It counts only when your mail server confirms the sender. Mail that only claims to be from them is treated as ordinary mail. A sender whose own mail domain does not ask servers to check it can never be confirmed. This needs a Google account. With the shared Email connector, senders cannot be confirmed yet, so their mail is treated as ordinary mail.
+- **Mail from people you marked always important.** It counts only when your mail server confirms the sender. Mail that only claims to be from them is treated as ordinary mail. A sender whose own mail domain does not ask servers to check it can never be confirmed. Whether senders can be confirmed depends on where your mail is read from. Where they can't be confirmed yet, mail from these people is treated as ordinary mail.
 - **Bills and deadlines** named in new mail. Aman tells you when one is due within three days. It stays quiet when a later message in the same thread says it was paid.
 - **Two things on your calendar at the same time** in the next 24 hours.
 - **Time to leave** for an event with a place, inside the lead time you choose.

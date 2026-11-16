@@ -363,7 +363,7 @@ describe('checkHeldReplay', () => {
     location: '',
     description: '',
     attendees: ['ana@example.com'],
-    guests_emailed: true,
+    guests_line: 'Google will email every guest about this.',
     one_of_repeating: false,
     before: { title: 'Dentist', when: 'Fri 13 Nov, 09:00', duration: '30 minutes', location: '' },
   };

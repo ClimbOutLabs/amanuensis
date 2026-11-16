@@ -111,6 +111,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
           ? null
           : { since: calendarProblem.since.toISOString(), kind: calendarProblem.kind },
       mail_source: checkpoint?.source ?? null,
+      mail_sender_confirmation: checkpoint?.sender_confirmation ?? null,
     };
   };
 

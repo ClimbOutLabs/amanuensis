@@ -13,6 +13,8 @@ import { z } from '@hono/zod-openapi';
 import type { OAuthToken } from '../mcp/auth/types';
 import { NameSchema } from './common';
 import {
+  McpDeclaredChangeToolsSchema,
+  McpSearchPlumbingFieldsSchema,
   McpSearchToolsSchema,
   McpServerDescriptionSchema,
   McpServerManifestAuthSchema,
@@ -58,7 +60,22 @@ const RemoteMcpServerManifestSchema = z
         'When true, this connector is the web search provider: its read-only tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it.',
       ),
     search_tools: McpSearchToolsSchema.optional().describe(
-      'Tools that run without asking as the web search provider even when the server does not declare them read-only. Set by the server for a known provider; a value sent is replaced.',
+      'The search tools of the web search provider, captured from the server’s own tool list when the person designated it. Their results are recorded as search hits. Set by the server; a value sent is replaced.',
+    ),
+    page_read_tools: McpSearchToolsSchema.optional().describe(
+      'The page-read tools of the web search provider, captured from the server’s own tool list when the person designated it. What they return is recorded as page text. Set by the server; a value sent is replaced.',
+    ),
+    search_plumbing_fields: McpSearchPlumbingFieldsSchema.optional().describe(
+      'Argument names that are the search provider’s own bookkeeping, not the person’s text. Set by the server; a value sent is replaced.',
+    ),
+    search_in_process: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true, the host serves this connector’s search itself, in process. Set by the server when the person designates the provider the host serves that way; a value sent is replaced.',
+      ),
+    declared_change_tools: McpDeclaredChangeToolsSchema.optional().describe(
+      'Bare names of the tools this server itself declared as changing things, captured from its own tool list at connect time. Standing grants may cover only these. Set by the server; a value sent is replaced.',
     ),
   })
   .strict()

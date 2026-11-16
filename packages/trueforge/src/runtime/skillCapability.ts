@@ -282,6 +282,7 @@ export class SkillToolSet extends LocalToolMCP {
     this.#tools = [
       defineTool({
         name: LIST_SKILLS_TOOL_NAME,
+        requiresNetwork: false,
         description:
           'List the skills that are already added, and the starter skills that can be added. Call this before install_skill to see whether the skill is already there.',
         schema: z.object({}).strict(),
@@ -290,6 +291,7 @@ export class SkillToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: INSTALL_SKILL_TOOL_NAME,
+        requiresNetwork: true,
         description:
           'Add a skill from a public GitHub repository, or one of the starter skills from list_skills, when the user asks for it. Pass where it is; its name and description are read from the skill itself. The user approves a card before anything is saved. It cannot change a skill that is already added.',
         schema: InstallSkillToolSchema,
@@ -298,6 +300,7 @@ export class SkillToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: REMOVE_SKILL_TOOL_NAME,
+        requiresNetwork: false,
         description:
           'Remove an added skill, by its name from list_skills, when the user asks for it. It is taken out of every chat, with the websites it was allowed to reach. The user approves a card first.',
         schema: RemoveSkillToolSchema,
@@ -345,6 +348,7 @@ export class SkillToolSet extends LocalToolMCP {
         tool_name: params.name,
         canonical_params: approved,
         tool_type: 'truefoundry-system',
+        requires_network: info.requires_network,
         mcp_server_name: SKILL_SERVER_ID,
         mcp_hints: {
           read_only_hint: info.read_only_hint,

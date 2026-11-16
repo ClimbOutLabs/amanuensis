@@ -1,7 +1,8 @@
 # Hosts and how an instance treats them over plain http, read by the installer tests (lib/network.test.sh) and by
 # packages/trueforge/tests/unit/config/config.test.ts, so both sides agree.
 #   private       always allowed over http
-#   cgnat         100.64.0.0/10: private only while Tailscale is on this computer, public (ISP carrier-grade NAT) otherwise
+#   cgnat         100.64.0.0/10: allowed when the owner adds it, since Tailscale and other private networks use it; Aman
+#                 never listens there by itself, because an internet provider uses the range too
 #   public        never allowed over http
 #   app-private   as private, for the app only (the installer does not handle IPv6)
 #   app-public    as public, for the app only

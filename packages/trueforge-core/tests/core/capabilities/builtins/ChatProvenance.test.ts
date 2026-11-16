@@ -27,14 +27,16 @@ const SEARCH_RESULT = JSON.stringify({
 });
 const PAGE_TEXT = `# Oslo\n<img src="${PAGE_PICTURE}" alt="Map of Oslo">`;
 
-type Stamp = Pick<InternalToolCallInfo, 'type' | 'search_provider_call'>;
+type Stamp = Pick<InternalToolCallInfo, 'type' | 'search_provider_call' | 'search_result_call' | 'page_read_call'>;
 
 /** The assistant's own built-in tool, as the host stamps it. */
 const OWN_TOOL: Stamp = { type: 'truefoundry-system' };
 /** A tool of a connector the person added. */
 const CONNECTOR_TOOL: Stamp = { type: 'mcp' };
-/** A tool of the connector the person chose as the search provider. */
-const SEARCH_PROVIDER_TOOL: Stamp = { type: 'mcp', search_provider_call: true };
+/** A search tool of the connector the person chose as the search provider, as the host stamps it from the record's declaration. */
+const SEARCH_PROVIDER_TOOL: Stamp = { type: 'mcp', search_provider_call: true, search_result_call: true };
+/** A page-read tool of that same connector, stamped from the page-read half of the declaration. */
+const PAGE_READ_TOOL: Stamp = { type: 'mcp', search_provider_call: true, page_read_call: true };
 
 function storedCall(input: { name: string; args?: Record<string, unknown>; stamp: Stamp }) {
   return {
@@ -97,7 +99,7 @@ describe('only the chosen search provider returns links that are the person to o
 
   it('counts the pictures of a page the search provider read as seen', async () => {
     const provenance = await provenanceOf(
-      chatWithResult({ name: 'web_fetch', args: { url: PAGE }, stamp: SEARCH_PROVIDER_TOOL, result: PAGE_TEXT }),
+      chatWithResult({ name: 'web_fetch', args: { url: PAGE }, stamp: PAGE_READ_TOOL, result: PAGE_TEXT }),
     );
     expect(isTrustedPicture({ provenance, url: PAGE_PICTURE })).toBe(true);
   });

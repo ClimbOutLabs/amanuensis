@@ -132,7 +132,7 @@ import {
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
 } from './mapsToolNames';
-import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { requiresNetwork } from './networkRequirements';
 import { classifyNotesFolderTool } from './notesTier';
 import {
   appendOutboundTrace,
@@ -289,10 +289,19 @@ export interface SentinelAction {
   mail_forward?: MailForwardReview | null | undefined;
   /** The user designated this connector as their search provider. Set by the host from the connector record only. */
   mcp_search_provider?: boolean | undefined;
-  /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
+  /** The designated provider's record names this tool as one of its search or page-read tools. Never from tool metadata. */
   mcp_search_tool?: boolean | undefined;
-  /** Top-level argument names the catalog declares as the designated provider's plumbing (session id, model name). Never from tool metadata. */
+  /** Top-level argument names the designated provider's record declares as its plumbing (session id, model name). Never from tool metadata. */
   mcp_search_plumbing_fields?: readonly string[] | undefined;
+  /** Bare names of the tools this server itself declared as changing things, from the connector record the host stored at connect time. Never from this call's tool metadata. */
+  mcp_declared_change_tools?: readonly string[] | undefined;
+  /**
+   * Whether this tool needs the network, as its own registration declares. Set by the host from
+   * the registration, never from tool arguments. Absent when no registration declared it (a tool
+   * another server serves, or a registration error the registry test forbids), and offline mode
+   * reads absence as needing the network.
+   */
+  requires_network?: boolean | undefined;
   mcp_hints: {
     read_only_hint?: boolean | undefined;
     destructive_hint?: boolean | undefined;
@@ -2582,6 +2591,8 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     destination_host: null,
     outbound_truncated: false,
     email,
+    // The draft was checked to send from the connected account, so the card names that account.
+    mail_from: escapeDisplayText(content.fromAddress),
   };
 }
 
@@ -2955,7 +2966,7 @@ function calendarWriteCard(input: {
       location: show(review.location),
       description: escapeDisplayText(review.description, { keepNewlines: true }),
       attendees: review.attendees.map(show),
-      guests_emailed: review.guests_emailed,
+      guests_line: show(review.guests_line),
       one_of_repeating: review.one_of_repeating,
       already_created: review.action === 'create' && review.already_created,
       span_days: review.span_days,
@@ -3870,7 +3881,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         sensitive_read: false,
       });
     }
-    if (requiresNetwork({ tool_name: action.tool_name, provenance: provenanceForToolType(action.tool_type) })) {
+    if (requiresNetwork({ declared: action.requires_network })) {
       return autoDenyDecision({
         reason: 'offline_mode',
         reason_detail: 'This tool needs network access, which is disabled while offline.',

@@ -17,7 +17,7 @@ export const Tier3CalendarEvent: core.serialization.ObjectSchema<
     calendar: core.serialization.string(),
     description: core.serialization.string(),
     duration: core.serialization.string(),
-    guestsEmailed: core.serialization.property("guests_emailed", core.serialization.boolean()),
+    guestsLine: core.serialization.property("guests_line", core.serialization.string().optional()),
     location: core.serialization.string(),
     oneOfRepeating: core.serialization.property("one_of_repeating", core.serialization.boolean()),
     spanDays: core.serialization.property("span_days", core.serialization.number().optional()),
@@ -35,7 +35,7 @@ export declare namespace Tier3CalendarEvent {
         calendar: string;
         description: string;
         duration: string;
-        guests_emailed: boolean;
+        guests_line?: string | null;
         location: string;
         one_of_repeating: boolean;
         span_days?: number | null;
