@@ -1,4 +1,5 @@
 import type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } from '@truefoundry/trueforge-core/core';
+import { isAmanGuideSourceLabel } from '../personas/amanGuide/identity';
 import type { PersonaKnowledgeHit } from './knowledgeRetrieval';
 
 /**
@@ -39,11 +40,27 @@ import type { PersonaKnowledgeHit } from './knowledgeRetrieval';
  *
  * Everything here is pure and synchronous: no extra LLM call per turn, no
  * I/O, no throws. Callers treat "text returned unchanged" as "no repair".
+ *
+ * One provenance exception: passages from the built-in guide's own pages
+ * are never cited. Her stored source label is internal bookkeeping (her
+ * name plus a hash of the page, so a refresh can replace only her pages),
+ * not a source a person chose, and a help answer ends with its last
+ * sentence. Guide passages are still detected as used, so their markers
+ * come out; they simply never reach the footer. A person's own documents
+ * cite exactly as they always have.
  */
 
 /** Machine citation marker for the injected passage at `index` (0-based). */
 export function knowledgeCitationMarker(index: number): string {
   return `⟦src:${String(index + 1)}⟧`;
+}
+
+/**
+ * True for a passage from a page the built-in guide's installer wrote, told by the label stored
+ * on its document: the same mark the installer itself uses to find her pages on a refresh.
+ */
+export function isBuiltInGuideHit(hit: PersonaKnowledgeHit): boolean {
+  return typeof hit.sourceLabel === 'string' && isAmanGuideSourceLabel(hit.sourceLabel);
 }
 
 /** Matches machine citation markers so model-echoed ones can be stripped. */
@@ -567,6 +584,10 @@ export function findUsedKnowledgeHits(answerText: string, hits: readonly Persona
  * machine-readable attribution (uniform shape, always with URL or label),
  * and making its presence depend on prose phrasing would make attribution
  * unpredictable — the opposite of enforcement.
+ *
+ * Used passages from the built-in guide's pages are left out of the
+ * footer: when they are the only ones used, the markers still come out
+ * and no line is appended, so a help answer ends with its last sentence.
  */
 export function repairKnowledgeAttribution(answerText: string, hits: readonly PersonaKnowledgeHit[]): string {
   if (hits.length === 0) {
@@ -577,7 +598,11 @@ export function repairKnowledgeAttribution(answerText: string, hits: readonly Pe
     return answerText;
   }
   const cleaned = stripCitationMarkers(answerText);
-  const footer = `Sources: ${used.map(formatSourceEntry).join('; ')}`;
+  const citable = used.filter(hit => !isBuiltInGuideHit(hit));
+  if (citable.length === 0) {
+    return cleaned;
+  }
+  const footer = `Sources: ${citable.map(formatSourceEntry).join('; ')}`;
   return cleaned.length === 0 ? footer : `${cleaned}\n\n${footer}`;
 }
 
@@ -626,7 +651,7 @@ export function repairAssistantMessageContent(
   if (used.length === 0) {
     return content;
   }
-  const footer = `Sources: ${used.map(formatSourceEntry).join('; ')}`;
+  const citable = used.filter(hit => !isBuiltInGuideHit(hit));
   let lastTextIndex = -1;
   const parts = content.map((part, index) => {
     if (part.type !== 'text') {
@@ -635,10 +660,20 @@ export function repairAssistantMessageContent(
     lastTextIndex = index;
     return { ...part, text: stripCitationMarkers(part.text) };
   });
+  const strippedAny = parts.some((part, index) => {
+    const original = content[index];
+    return part.type === 'text' && original?.type === 'text' && part.text !== original.text;
+  });
   const last = parts[lastTextIndex];
   if (last?.type !== 'text') {
     return content;
   }
+  if (citable.length === 0) {
+    // Only built-in guide pages were used: their markers come out, and no
+    // footer is added. Untouched parts keep the original content reference.
+    return strippedAny ? parts : content;
+  }
+  const footer = `Sources: ${citable.map(formatSourceEntry).join('; ')}`;
   const withFooter = last.text.length === 0 ? footer : `${last.text}\n\n${footer}`;
   return [...parts.slice(0, lastTextIndex), { ...last, text: withFooter }, ...parts.slice(lastTextIndex + 1)];
 }
