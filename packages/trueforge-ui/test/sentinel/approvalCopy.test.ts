@@ -144,7 +144,7 @@ describe('approval copy', () => {
         location: '',
         description: '',
         attendees: [],
-        guests_emailed: false,
+        guests_line: '',
         one_of_repeating: false,
         before: null,
       },

@@ -1,7 +1,7 @@
 ---
 id: getting-help
 title: Get help
-covers: command:doctor, command:backup, command:restore, command:upgrade, command:password, command:uninstall, route:help, route:bugReport
+covers: command:doctor, command:help, command:backup, command:restore, command:upgrade, command:password, command:uninstall, route:help, route:bugReport
 ---
 
 When something doesn't work, Aman's guide can look at your setup and tell you what to do. If that doesn't fix it, you can send us a bug report.
@@ -60,6 +60,7 @@ Settings has no button for these. On a Mac or Linux, type them in a terminal:
 - `aman restore` goes back to a backup. It asks which one, and waits for you to type yes. The password goes back to the one you had then, and devices may need to sign in again.
 - `aman upgrade` updates Aman. Get the newest release first, as [The aman command](../../../../docs/commands.md#update-aman) shows. It downloads Aman's parts ready-made when they match your version. When they don't, it builds them on this computer, which takes longer. If a pull left the folder you installed from changeable by your own group, as Ubuntu does, it makes that folder private to you again and says so.
 - `aman password` sets a new password.
+- `aman help` lists every command on one screen. `aman help doctor` shows the options of one command.
 
 On Windows, the Start menu has entries for the common ones, so you don't need a terminal:
 
@@ -75,7 +76,8 @@ When one of these opens a window, the window stays open until you press Enter, s
 
 - Backups happen every night on their own. [Back up and restore](../../../../docs/backup.md) shows where they are and how to make one now.
 - On Windows, Docker Desktop asks for a restart the first time it's installed. Restart the computer. Aman Setup opens again by itself and carries on. If it doesn't, open the Aman Setup download again from your Downloads folder.
-- If you also use Tailscale serve on this computer, Aman keeps off the ports it uses. When an update has to move Aman's https port for this, it prints the new port. Open Aman with that port on each device.
+- Aman answers on your home network, not on Tailscale or another VPN. To use one, run `aman address add` on the computer that runs Aman, with the address you open. If you open Aman at an address it doesn't know, its page shows the exact command.
+- If other devices can't reach Aman after your router gave the computer a new address, run `aman doctor network --fix` on that computer. Reserving the address in your router stops it changing.
 - When you ask for help, say what you were doing and what you saw on the screen.
 
 ## Related

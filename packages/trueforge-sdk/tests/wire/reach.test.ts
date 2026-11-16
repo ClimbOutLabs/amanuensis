@@ -17,6 +17,7 @@ describe("ReachClient", () => {
                 },
                 calendar_problem: { kind: "google_sign_in", since: "since" },
                 mail_problem: { kind: "too_slow", since: "since" },
+                mail_sender_confirmation: true,
                 mail_source: "google",
                 max_levels: {
                     approval_waiting: "note",
@@ -68,6 +69,7 @@ describe("ReachClient", () => {
                     kind: "too_slow",
                     since: "since",
                 },
+                mailSenderConfirmation: true,
                 mailSource: "google",
                 maxLevels: {
                     approvalWaiting: "note",
@@ -147,6 +149,7 @@ describe("ReachClient", () => {
                 },
                 calendar_problem: { kind: "google_sign_in", since: "since" },
                 mail_problem: { kind: "too_slow", since: "since" },
+                mail_sender_confirmation: true,
                 mail_source: "google",
                 max_levels: {
                     approval_waiting: "note",
@@ -232,6 +235,7 @@ describe("ReachClient", () => {
                     kind: "too_slow",
                     since: "since",
                 },
+                mailSenderConfirmation: true,
                 mailSource: "google",
                 maxLevels: {
                     approvalWaiting: "note",

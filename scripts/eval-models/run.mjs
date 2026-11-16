@@ -11,12 +11,18 @@ import {
   replyTextOf,
 } from '../eval-tokens/run.mjs';
 import { removeSpace, seedSpace } from '../eval-tokens/space.mjs';
-import { collectToolCalls, runChecks } from './checks.mjs';
+import { collectToolCalls, countRefusedCommands, runChecks } from './checks.mjs';
+import { checkMemorySaved, checkScheduledRun, cleanUpJourney, snapshotJourney, snapshotVaults } from './journey.mjs';
 import { buildJudgePrompt, parseVerdict } from './judge.mjs';
+import { newPersonaSetUp, setUpPersonas, tearDownPersonas } from './personas.mjs';
 import { buildReport, RESULT_CSV_COLUMNS, resultCsv } from './report.mjs';
+import { checkNewsTitles, checkSkillAdded, checkSkillRemoved, cleanUpSkills, snapshotSkills } from './skills.mjs';
 
 /** Which part of the score a group counts toward. Every token-set group is an everyday task. */
 export function partOf(group) {
+  if (group === 'persona') {
+    return 'memory';
+  }
   return group === 'memory' || group === 'safety' ? group : 'tasks';
 }
 
@@ -32,12 +38,20 @@ function sleep(ms) {
 
 /**
  * The cases in the order they run: memory first, so earlier chats of the same run have not yet
- * been remembered, then safety, then the everyday tasks from the token set.
- * @param {{ modelSet: import('./parse.mjs').ModelSet, tokenSet: import('../eval-tokens/parse.mjs').TokenSet }} options
+ * been remembered, then safety, then the brief, then the persona cases, then the skill cases when the instance has a
+ * sandbox for them, then the everyday tasks from the token set.
+ * @param {{ modelSet: import('./parse.mjs').ModelSet, tokenSet: import('../eval-tokens/parse.mjs').TokenSet, skills: boolean }} options
  */
-export function orderedCases({ modelSet, tokenSet }) {
+export function orderedCases({ modelSet, tokenSet, skills }) {
   const byGroup = group => modelSet.cases.filter(item => item.group === group);
-  return [...byGroup('memory'), ...byGroup('safety'), ...tokenSet.prompts.map(prompt => ({ ...prompt, checks: [] }))];
+  return [
+    ...byGroup('memory'),
+    ...byGroup('safety'),
+    ...byGroup('brief'),
+    ...byGroup('persona'),
+    ...(skills ? byGroup('skills') : []),
+    ...tokenSet.prompts.map(prompt => ({ ...prompt, checks: [] })),
+  ];
 }
 
 /**
@@ -131,34 +145,193 @@ async function removeRunMemories({ client, beforeIds, settleMs }) {
   return problems;
 }
 
-async function runCase({ client, model, testCase, temperature, run, pollIntervalMs, turnTimeoutMs }) {
+/** What a case's journey needs to know from before the chat, or undefined when it has none. */
+async function snapshotFor({ client, journey }) {
+  if (journey?.type === 'scheduled_run') {
+    return await snapshotJourney({ client });
+  }
+  if (journey?.type === 'memory_saved') {
+    return await snapshotVaults({ client, vaults: [...journey.saved_in, ...journey.not_saved_in] });
+  }
+  return undefined;
+}
+
+/** What one step's journey finds. `skills` carries the skill a case added from its add step to the later ones. */
+async function checkJourney({ client, before, journey, reply, pollIntervalMs, settleMs, skills }) {
+  switch (journey.type) {
+    case 'scheduled_run':
+      return await checkScheduledRun({ client, before, expect: journey, pollIntervalMs });
+    case 'memory_saved':
+      return await checkMemorySaved({ client, before, expect: journey, settleMs });
+    case 'skill_added': {
+      const added = await checkSkillAdded({ client, before: skills.before, websites: journey.websites });
+      skills.added = added.name;
+      return added.results;
+    }
+    case 'skill_removed':
+      return await checkSkillRemoved({ client, name: skills.added });
+    case 'news_titles':
+      return await checkNewsTitles({ reply, atLeast: journey.at_least });
+    default:
+      return [{ check: 'unknown journey', pass: false, detail: 'the set has a journey this runner does not know' }];
+  }
+}
+
+/** The skill cases need a working sandbox. Without one every skill case would fail for a reason that is not the model's. */
+async function requireSandbox(client) {
+  const capabilities = await client.getCapabilities();
+  const sandbox =
+    typeof capabilities?.sandbox === 'object' && capabilities.sandbox !== null ? capabilities.sandbox : {};
+  if (sandbox.enabled !== true) {
+    const reason = typeof sandbox.reason === 'string' && sandbox.reason !== '' ? ` (${sandbox.reason})` : '';
+    throw new Error(
+      `The eval instance has no working sandbox${reason}, so the skill cases cannot run. Start one with pnpm sandbox:slots, or leave out --skills.`,
+    );
+  }
+}
+
+/**
+ * Turns a skill the chat added on for that chat, and off again once it is removed, as the app does after the card.
+ * The server does not do it for a client without that step, so without this the skill would never run here.
+ */
+async function mountAddedSkill({ client, sessionId, model, temperature, skills }) {
+  if (skills.before === undefined) {
+    return;
+  }
+  const listed = new Set((await client.listSkills()).map(skill => skill.name));
+  const wanted = skills.added !== undefined && listed.has(skills.added) ? [skills.added] : [];
+  if (wanted.join() === skills.mounted.join()) {
+    return;
+  }
+  await client.setSessionSkills({ sessionId, model: model.name, temperature, skills: wanted });
+  skills.mounted = wanted;
+}
+
+/** The messages of a case, in order. A case of one message is one step. */
+function stepsOf(testCase) {
+  return testCase.steps ?? [{ prompt: testCase.prompt, checks: testCase.checks, journey: testCase.journey }];
+}
+
+function usesSkills(steps) {
+  return steps.some(step => step.journey?.type === 'skill_added');
+}
+
+function lastReply(turns) {
+  const last = turns.at(-1);
+  return last !== undefined && last.state.status === 'done' ? replyTextOf(last.state.output) : '';
+}
+
+async function runCase({
+  client,
+  model,
+  testCase,
+  temperature,
+  run,
+  pollIntervalMs,
+  turnTimeoutMs,
+  settleMs,
+  personaIds,
+  leftovers,
+}) {
   const progress = { turns: [], approvals: 0 };
   let status;
   let error;
   let toolCalls = [];
+  const checks = [];
+  const replies = [];
+  const steps = stepsOf(testCase);
+  const several = steps.length > 1;
+  const scheduleBefore = steps.some(step => step.journey?.type === 'scheduled_run')
+    ? await snapshotJourney({ client })
+    : undefined;
+  const skills = {
+    before: usesSkills(steps) ? await snapshotSkills({ client }) : undefined,
+    added: undefined,
+    mounted: [],
+  };
   try {
-    const sessionId = await client.createSession({ model: model.name, temperature });
-    status = await driveTurns({
-      client,
-      sessionId,
-      input: [{ type: 'user.message', content: testCase.prompt }],
-      previousTurnId: 'none',
-      approvalPolicy: testCase.approval_policy,
-      pollIntervalMs,
-      turnTimeoutMs,
-      progress,
+    const sessionId = await client.createSession({
+      model: model.name,
+      temperature,
+      incognito: testCase.incognito === true,
+      sandbox: usesSkills(steps),
     });
-    error = describeTerminalState(progress.turns.at(-1)?.state ?? {});
-    toolCalls = collectToolCalls(await client.listSessionEvents(sessionId));
+    if (testCase.persona !== undefined) {
+      await client.setSessionPersona({ sessionId, personaId: personaIds[testCase.persona] });
+    }
+    for (const [index, step] of steps.entries()) {
+      const label = several ? `step ${String(index + 1)}: ` : '';
+      const before =
+        step.journey?.type === 'scheduled_run' ? scheduleBefore : await snapshotFor({ client, journey: step.journey });
+      const firstTurn = progress.turns.length;
+      status = await driveTurns({
+        client,
+        sessionId,
+        input: [{ type: 'user.message', content: step.prompt }],
+        previousTurnId: progress.turns.at(-1)?.id ?? 'none',
+        approvalPolicy: testCase.approval_policy,
+        pollIntervalMs,
+        turnTimeoutMs,
+        progress,
+        clientTimezone: testCase.client_timezone,
+      });
+      error = describeTerminalState(progress.turns.at(-1)?.state ?? {});
+      const stepTurnIds = new Set(progress.turns.slice(firstTurn).map(turn => turn.id));
+      const events = (await client.listSessionEvents(sessionId)).filter(
+        item => !several || stepTurnIds.has(item.turn_id),
+      );
+      const stepCalls = collectToolCalls(events);
+      toolCalls = [...toolCalls, ...stepCalls];
+      const reply = lastReply(progress.turns.slice(firstTurn));
+      replies.push(several ? `Step ${String(index + 1)}: ${reply}` : reply);
+      if (status !== 'done') {
+        break;
+      }
+      checks.push(
+        ...runChecks({
+          checks: step.checks,
+          reply,
+          toolCalls: stepCalls,
+          refusedCommands: countRefusedCommands(events),
+        }).map(item => ({ ...item, check: `${label}${item.check}` })),
+      );
+      if (step.journey !== undefined) {
+        try {
+          const found = await checkJourney({
+            client,
+            before,
+            journey: step.journey,
+            reply,
+            pollIntervalMs,
+            settleMs,
+            skills,
+          });
+          checks.push(...found.map(item => ({ ...item, check: `${label}${item.check}` })));
+        } catch (caught) {
+          if (isRunStopping(caught)) {
+            throw caught;
+          }
+          // A journey that could not be followed must fail the case, never leave only the chat's checks.
+          const detail = caught instanceof Error ? caught.message : 'unknown failure';
+          checks.push({ check: `${label}what the chat left behind could be read`, pass: false, detail });
+        }
+      }
+      await mountAddedSkill({ client, sessionId, model, temperature, skills });
+    }
   } catch (caught) {
     if (isRunStopping(caught)) {
       throw caught;
     }
     status = status ?? 'request_failed';
     error = caught instanceof Error ? caught.message : 'Unknown request failure.';
+  } finally {
+    if (scheduleBefore !== undefined) {
+      leftovers.push(...(await cleanUpJourney({ client, before: scheduleBefore })));
+    }
+    if (skills.before !== undefined) {
+      leftovers.push(...(await cleanUpSkills({ client, before: skills.before })));
+    }
   }
-  const last = progress.turns.at(-1);
-  const reply = last !== undefined && last.state.status === 'done' ? replyTextOf(last.state.output) : '';
   return {
     run,
     model: model.name,
@@ -169,9 +342,9 @@ async function runCase({ client, model, testCase, temperature, run, pollInterval
     error,
     approvals: progress.approvals,
     ...combineTurnMetrics(progress.turns.map(turn => turn.state.metrics)),
-    reply,
+    reply: replies.join('\n\n'),
     tool_calls: toolCalls,
-    checks: status === 'done' ? runChecks({ checks: testCase.checks, reply, toolCalls }) : [],
+    checks: status === 'done' ? checks : [],
     checklist: testCase.checklist,
     prompt: testCase.prompt,
     judged: [],
@@ -243,6 +416,7 @@ export function rowPasses(row) {
  *   pollIntervalMs?: number,
  *   turnTimeoutMs?: number,
  *   memorySettleMs?: number,
+ *   skills?: boolean,
  *   log?: (message: string) => void,
  * }} options
  */
@@ -262,15 +436,21 @@ export async function runEvalModels({
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   memorySettleMs = DEFAULT_MEMORY_SETTLE_MS,
+  skills = false,
   log = ignoreLog,
 }) {
   const resolved = await resolveModels({ client, names: [...new Set([...models, judgeModel])] });
   const testedModels = resolved.filter(model => models.includes(model.name));
   const judge = resolved.find(model => model.name === judgeModel);
-  const cases = orderedCases({ modelSet, tokenSet });
+  const cases = orderedCases({ modelSet, tokenSet, skills });
+  if (skills) {
+    await requireSandbox(client);
+  }
   const rows = [];
   const costs = {};
   const cleanupProblems = [];
+  const journeyLeftovers = [];
+  const personaLeftovers = [];
 
   const seeded = await seedSpace({ client, content: space });
   try {
@@ -278,16 +458,38 @@ export async function runEvalModels({
       const beforeIds = new Set((await client.listMemoryEntries()).map(entry => entry.id));
       const usageBefore = await readUsage(client);
       const modelRows = [];
+      const personaSetUp = newPersonaSetUp();
       try {
         await client.importMemories(modelSet.memories);
+        await setUpPersonas({
+          client,
+          profile: modelSet.profile,
+          personas: modelSet.personas,
+          model: model.name,
+          setUp: personaSetUp,
+        });
         for (let run = 1; run <= runs; run += 1) {
           for (const testCase of cases) {
             log(`${model.name}  run ${String(run)}/${String(runs)}  ${testCase.id}`);
-            modelRows.push(await runCase({ client, model, testCase, temperature, run, pollIntervalMs, turnTimeoutMs }));
+            modelRows.push(
+              await runCase({
+                client,
+                model,
+                testCase,
+                temperature,
+                run,
+                pollIntervalMs,
+                turnTimeoutMs,
+                settleMs: memorySettleMs,
+                personaIds: personaSetUp.personaIds,
+                leftovers: journeyLeftovers,
+              }),
+            );
           }
         }
       } finally {
         cleanupProblems.push(...(await removeRunMemories({ client, beforeIds, settleMs: memorySettleMs })));
+        personaLeftovers.push(...(await tearDownPersonas({ client, setUp: personaSetUp })));
       }
       const usageAfter = await readUsage(client);
       costs[model.name] = modelCost({
@@ -340,6 +542,8 @@ export async function runEvalModels({
     costs,
     rows,
     cleanupProblems,
+    journeyLeftovers,
+    personaLeftovers,
   });
   await mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, 'results.csv');

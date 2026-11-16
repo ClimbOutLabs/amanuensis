@@ -70,6 +70,8 @@ function harness(options: {
   searchProvider?: boolean;
   /** The host's list of the designated connector's search tools. */
   searchTools?: readonly string[];
+  /** The host's list of the designated connector's page-read tools. */
+  pageReadTools?: readonly string[];
   /** Argument names the catalog declares as the provider's plumbing. */
   plumbingFields?: readonly string[];
   unattended?: boolean;
@@ -140,7 +142,7 @@ function harness(options: {
     sentinel: host,
     searchProvider:
       options.searchProvider === true
-        ? { tools: options.searchTools ?? [], plumbing_fields: options.plumbingFields ?? [] }
+        ? { tools: options.searchTools ?? [], page_read_tools: options.pageReadTools ?? [], plumbing_fields: options.plumbingFields ?? [], served_in_process: false }
         : undefined,
   });
   return { toolSet, host, audit, dispatched };
@@ -177,7 +179,7 @@ describe('the designated search provider', () => {
   });
 
   it('runs an unannotated tool only when the host lists it as a search tool', async () => {
-    const listed = harness({ searchProvider: true, searchTools: ['read_page'] });
+    const listed = harness({ searchProvider: true, pageReadTools: ['read_page'] });
     const info = await listed.toolSet.toolCallInfo({ name: 'read_page', arguments: { query: 'weather in Oslo' } });
     expect(info.tier).toBe(1);
     // The default approval selectors would gate an unannotated tool; the host's list waives that.
@@ -186,7 +188,10 @@ describe('the designated search provider', () => {
     const unlisted = harness({ searchProvider: true });
     const held = await unlisted.toolSet.toolCallInfo({ name: 'read_page', arguments: { query: 'weather in Oslo' } });
     expect(held.tier).toBe(3);
-    expect(held.is_approval_required).toBe(true);
+    // Not listed, so the search flow does not own the call, and a query with no verifiable
+    // destination is refused rather than carded. A call that carries nothing still asks.
+    expect(held.is_approval_required).toBe(false);
+    expect(held.pre_dispatch_failure?.kind).toBe('policy_blocked');
     expect(isApprovalRequiredResponse(await unlisted.toolSet.callTool({ name: 'read_page', arguments: {} }))).toBe(
       true,
     );
@@ -554,7 +559,14 @@ describe('the loop breaker', () => {
 describe('a map the user approved, and the text the next silent search is checked against', () => {
   it('holds a server secret split between an approved map and a silent search', async () => {
     const secret = 'synthetic-server-secret-value-0003';
-    const mapTool: ToolSchema = { name: 'render_map', description: 'Shows a map.', inputSchema: schema };
+    // The map tool declares itself read-only and closed-world: it only reads map data and
+    // shows it, so its card still asks and its text is checked the same way.
+    const mapTool: ToolSchema = {
+      name: 'render_map',
+      description: 'Shows a map.',
+      inputSchema: schema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    };
     const h = harness({ searchProvider: true, secrets: [secret], tools: [searchTool, mapTool] });
     await h.toolSet.callTool({ name: 'render_map', arguments: { query: secret.slice(0, 16) } }, { status: 'allow' });
     const second = await runSearch(h, secret.slice(16));
@@ -595,14 +607,18 @@ describe('links and where they came from', () => {
     recordToolResultProvenance({
       state: h.host.web_search,
       tool_name: input.tool_name,
-      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
+      stamp: hostToolStamp({
+        type: 'mcp',
+        search_provider_call: true,
+        ...(input.tool_name === 'web_search' ? { search_result_call: true as const } : {}),
+      }),
       argument_values: input.args,
       texts: [input.text],
     });
   }
 
   it('opens a page the person typed, or one the model chose, without asking', async () => {
-    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
+    const h = harness({ searchProvider: true, pageReadTools: ['read_page'], result: results });
     recordPersonText({
       provenance: h.host.web_search.provenance,
       text: 'What does https://docs.example.net/guide say?',
@@ -612,20 +628,20 @@ describe('links and where they came from', () => {
   });
 
   it('opens a search result, and another page on its site, without asking', async () => {
-    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
+    const h = harness({ searchProvider: true, pageReadTools: ['read_page'], result: results });
     readResult(h, { tool_name: 'web_search', args: ['oslo weather'], text: results('lookup') });
     expect((await fetchInfo(h, page)).tier).toBe(1);
     expect((await fetchInfo(h, `${page}?view=hourly`)).tier).toBe(1);
   });
 
   it('opens a link from a mail exactly as the mail wrote it, since that sends nothing of the person', async () => {
-    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
+    const h = harness({ searchProvider: true, pageReadTools: ['read_page'], result: results });
     readResult(h, { tool_name: 'read_email', args: ['m1'], text: mail });
     expect((await fetchInfo(h, mailLink)).tier).toBe(1);
   });
 
   it("holds a link from someone else's mail when the call adds the person's address to it", async () => {
-    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
+    const h = harness({ searchProvider: true, pageReadTools: ['read_page'], result: results });
     readResult(h, { tool_name: 'read_email', args: ['m1'], text: mail });
     const info = await fetchInfo(h, `${mailLink}sam.rivers@example.com`);
     expect(info.tier).toBe(3);
@@ -640,14 +656,14 @@ describe('links and where they came from', () => {
   });
 
   it('holds a search query that carries such a link', async () => {
-    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
+    const h = harness({ searchProvider: true, pageReadTools: ['read_page'], result: results });
     readResult(h, { tool_name: 'read_page', args: ['https://blog.example.net/'], text: `See ${mailLink}` });
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `summarize ${mailLink}abc` } });
     expect(info.tier).toBe(3);
   });
 
   it('still holds the link when the person named the same site, since the mail chose the page and the call adds to it', async () => {
-    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
+    const h = harness({ searchProvider: true, pageReadTools: ['read_page'], result: results });
     readResult(h, { tool_name: 'read_email', args: ['m1'], text: mail });
     recordPersonText({ provenance: h.host.web_search.provenance, text: 'log me in at evil.example please' });
     expect((await fetchInfo(h, `${mailLink}sam`)).tier).toBe(3);
@@ -675,7 +691,7 @@ describe('links and where they came from', () => {
   });
 
   it('opens many pages of one site in a reply without asking', async () => {
-    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
+    const h = harness({ searchProvider: true, pageReadTools: ['read_page'], result: results });
     for (const n of [1, 2, 3, 4]) {
       expect((await fetchInfo(h, `https://news.example.org/story-${String(n)}`)).tier).toBe(1);
       await h.toolSet.callTool({
@@ -750,13 +766,20 @@ describe('Tavily as the designated search provider', () => {
     expect((await extract([page, 'https://evil.example/collect?d=notes'])).tier).toBe(3);
   });
 
-  it('keeps asking for the Tavily tools its preset does not list', async () => {
+  it('refuses the Tavily tools its preset does not list, since a query with no verifiable destination is never carded', async () => {
     const h = harness({ serverName: 'tavily', searchProvider: true, searchTools, tools, result: results });
-    for (const name of ['tavily_crawl', 'tavily_map', 'tavily_research', 'tavily_feedback']) {
+    for (const name of ['tavily_map', 'tavily_research', 'tavily_feedback']) {
       const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
       expect(info.tier).toBe(3);
-      expect(info.is_approval_required).toBe(true);
+      expect(info.is_approval_required).toBe(false);
+      expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
     }
+    // A crawl is claimed by the fetch family, which describes it as fetching a page and does
+    // not send, so it keeps that family's card rather than the refusal.
+    const crawl = await h.toolSet.toolCallInfo({ name: 'tavily_crawl', arguments: { query: 'oslo' } });
+    expect(crawl.tier).toBe(3);
+    expect(crawl.is_approval_required).toBe(true);
+    expect(crawl.tier3_card?.plain_what).toBe('Fetch a web page?');
   });
 
   it('asks for the same tools when Tavily does not hold the role', async () => {
@@ -794,17 +817,11 @@ describe('a write-capable connector designated as the search provider', () => {
     }
   });
 
-  it('keeps every unannotated or write tool on the normal approval path', async () => {
+  it('keeps every unannotated or write tool off the silent path on the designated provider', async () => {
     const h = harness({ serverName: 'github', searchProvider: true, tools });
-    for (const name of [
-      'create_issue',
-      'add_issue_comment',
-      'merge_pull_request',
-      'push_files',
-      'create_or_update_file',
-      'fork_repository',
-      'run_workflow',
-    ]) {
+    // Writes a connector family claims, and a write escalated by its own destructive hint,
+    // keep the approval path: they ask, with a card that shows the arguments.
+    for (const name of ['push_files', 'create_or_update_file', 'run_workflow']) {
       const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
       expect(info.tier).toBe(3);
       expect(info.is_approval_required).toBe(true);
@@ -812,8 +829,36 @@ describe('a write-capable connector designated as the search provider', () => {
       const response = await h.toolSet.callTool({ name, arguments: { query: 'oslo' } });
       expect(isApprovalRequiredResponse(response)).toBe(true);
     }
+    // An unclaimed write that carries words and names no destination is refused outright
+    // under the unverifiable-destination rule. Either way, nothing here ever runs silently.
+    for (const name of ['create_issue', 'add_issue_comment', 'merge_pull_request', 'fork_repository']) {
+      const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
+      expect(info.tier).toBe(3);
+      expect(info.is_approval_required).toBe(false);
+      expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
+      expect(info.silent_search_query).toBeUndefined();
+      const response = await h.toolSet.callTool({ name, arguments: { query: 'oslo' } });
+      expect(isApprovalRequiredResponse(response)).toBe(false);
+    }
     expect(h.dispatched).toEqual([]);
-    expect(h.audit).toEqual([]);
+    // The carded writes were never run, so they leave no audit row. Each refusal is audited
+    // as an auto-denied call, once when the call is classified and once at dispatch.
+    expect(h.audit).toHaveLength(8);
+    for (const row of h.audit) {
+      expect(row).toMatchObject({ outcome: 'auto_denied', auto_deny_reason: 'destination_unverifiable', tier: 3 });
+    }
+    expect(h.audit.map(row => row.tool_name).sort()).toEqual(
+      [
+        'add_issue_comment',
+        'add_issue_comment',
+        'create_issue',
+        'create_issue',
+        'fork_repository',
+        'fork_repository',
+        'merge_pull_request',
+        'merge_pull_request',
+      ].sort(),
+    );
   });
 
   it('does not let a server claim read-only on a tool whose name says it writes or deletes', async () => {

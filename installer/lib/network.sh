@@ -34,8 +34,7 @@ run_bounded() { # seconds command...
   return "$rc"
 }
 
-# Loopback, RFC 1918, link-local, and 100.64.0.0/10 only where it is Tailscale's own address on this computer
-# (otherwise that range is carrier-grade NAT from an internet provider, which is not a private network).
+# Loopback, RFC 1918 and link-local: the addresses of a private network that Aman listens on by itself.
 private_ipv4() {
   local a b
   valid_ipv4 "$1" || return 1
@@ -45,8 +44,18 @@ private_ipv4() {
   [ "$a" = 192 ] && [ "$b" = 168 ] && return 0
   [ "$a" = 169 ] && [ "$b" = 254 ] && return 0
   [ "$a" = 172 ] && [ "$b" -ge 16 ] && [ "$b" -le 31 ] && return 0
-  [ "$a" = 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ] && network_tailscale_address "$1" && return 0
   return 1
+}
+
+# An address the owner may add for Aman to listen on: a private one, or one in 100.64.0.0/10, the shared range that
+# Tailscale, NetBird and other private networks hand out. Aman never picks that range by itself, because an internet
+# provider uses it too.
+listenable_ipv4() {
+  local a b
+  private_ipv4 "$1" && return 0
+  valid_ipv4 "$1" || return 1
+  IFS=. read -r a b _ <<<"$1"
+  [ "$a" = 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ]
 }
 
 # A label made only of numbers or hex (0x7f, 1e3) is read as part of an address by some systems, so it is not a name.
@@ -58,12 +67,12 @@ has_numeric_label() {
   return 1
 }
 
-# A private address, or a name that only resolves on a private network: .local, .ts.net, or a single label.
+# An address the owner may add, or a name that only resolves on a private network: .local, .ts.net or a single label.
 private_host() {
   local host LC_ALL=C
   host=$(lowercase "$1")
   if [[ $host =~ ^[0-9.]+$ ]]; then
-    private_ipv4 "$host"
+    listenable_ipv4 "$host"
     return
   fi
   if has_numeric_label "$host"; then return 1; fi
@@ -92,32 +101,11 @@ network_interface_addresses() {
   printf '%s\n' "$out"
 }
 
-# This computer's address on Tailscale as its own command reports it (empty when it is not running).
-network_tailscale_ip() {
-  command -v tailscale >/dev/null 2>&1 || return 0
-  run_bounded 3 tailscale ip -4 2>/dev/null | head -n 1 || true
-}
-
-# True for Tailscale's own address here: on its tailscale0 interface, or on a macOS utun that its command names.
-network_tailscale_address() { # address
-  local iface addr
-  while read -r iface addr; do
-    [ "$addr" = "$1" ] || continue
-    case "$iface" in
-      tailscale0) return 0 ;;
-      utun*) [ "$1" = "$(network_tailscale_ip)" ] && return 0 ;;
-    esac
-  done < <(network_interface_addresses)
-  return 1
-}
-
-# Interfaces whose addresses other devices cannot use: loopback, container, virtual-machine and other VPN links.
-# Tailscale's own link is the one exception among them.
-network_interface_skipped() { # interface address
+# Interfaces that are not the home network: loopback, container, virtual-machine and VPN links. Aman listens on an
+# address of one of them only when the owner adds it.
+network_interface_skipped() { # interface
   case "$1" in
-    tailscale0) return 1 ;;
-    utun*) [ "$2" != "$(network_tailscale_ip)" ] ;;
-    lo* | docker* | br-* | veth* | virbr* | cni* | flannel* | cali* | tun* | tap* | wg* | lxdbr* | lxcbr* | vboxnet* | podman* | vmnet* | bridge* | zt* | tailscale*) return 0 ;;
+    lo* | docker* | br-* | veth* | virbr* | cni* | flannel* | cali* | tun* | utun* | tap* | wg* | lxdbr* | lxcbr* | vboxnet* | podman* | vmnet* | bridge* | zt* | tailscale*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -127,7 +115,7 @@ network_skipped_addresses() {
   local iface addr
   while read -r iface addr; do
     [ -n "$addr" ] || continue
-    if valid_ipv4 "$addr" && network_interface_skipped "$iface" "$addr"; then printf '%s %s\n' "$iface" "$addr"; fi
+    if valid_ipv4 "$addr" && network_interface_skipped "$iface"; then printf '%s %s\n' "$iface" "$addr"; fi
   done < <(network_interface_addresses)
 }
 
@@ -137,13 +125,23 @@ network_ipv4_addresses() {
   while read -r iface line; do
     [ -n "$line" ] || continue
     case "$line" in 127.* | 169.254.*) continue ;; esac
-    network_interface_skipped "$iface" "$line" && continue
+    network_interface_skipped "$iface" && continue
     case "$seen" in *" $line "*) continue ;; esac
     if valid_ipv4 "$line"; then
       seen="$seen$line "
       printf '%s\n' "$line"
     fi
   done < <(network_interface_addresses)
+}
+
+# True when the address is one of this computer's own on any of its interfaces, VPN links included: an address the
+# owner adds is listened on only then, because Docker cannot listen on an address this computer does not have.
+network_own_ipv4() { # address
+  local iface addr
+  while read -r iface addr; do
+    [ "$addr" = "$1" ] && return 0
+  done < <(network_interface_addresses)
+  return 1
 }
 
 # This computer's short name, lowercase, when it is a usable host name.
@@ -154,18 +152,6 @@ network_hostname() {
   fi
   name=$(lowercase "$name")
   if [[ $name =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then printf '%s' "$name"; fi
-}
-
-# This computer's own MagicDNS name when Tailscale is running (for example host.example.ts.net): the DNSName of
-# "Self", never one of the other machines on the tailnet.
-network_tailscale_name() {
-  local name='' LC_ALL=C
-  if command -v tailscale >/dev/null 2>&1; then
-    name=$(run_bounded 3 tailscale status --json 2>/dev/null | awk '/"Self"/ { in_self = 1 } in_self && /"DNSName"/ { print; exit }' |
-      sed -n 's/.*"DNSName": *"\([^"]*\)".*/\1/p' || true)
-  fi
-  name=$(lowercase "${name%.}")
-  if [[ $name =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] && private_host "$name"; then printf '%s' "$name"; fi
 }
 
 # The hosts an instance answers at by default, one per line: this computer's own names, its private addresses and its
@@ -179,8 +165,6 @@ network_default_hosts() {
   done
   name=$(network_hostname)
   if [ -n "$name" ]; then printf '%s\n%s.local\n' "$name" "$name"; fi
-  name=$(network_tailscale_name)
-  if [ -n "$name" ]; then printf '%s\n' "$name"; fi
 }
 
 # True on a Mac, where Docker runs in a virtual machine and its port forwarding fails when one container publishes on
@@ -244,22 +228,29 @@ origins_reach_the_network() {
 }
 
 # The addresses to publish the app on: 127.0.0.1 and each address of this computer that an origin list names, one per
-# line. Never a wildcard, never a public address (the list only holds private ones), and never an address that belongs
-# to another machine (an --address that only names where this one can be reached).
+# line. Never a wildcard, never a public address, and never an address that belongs to another machine (an --address
+# that only names where this one can be reached). An address the owner added on a VPN link counts as this computer's.
 network_bind_addresses() { # origin list
-  local origin host mine seen=' 127.0.0.1 '
+  local origin host seen=' 127.0.0.1 '
   printf '%s\n' 127.0.0.1
   if network_publishes_on_loopback_only; then return 0; fi
-  mine=" $(network_ipv4_addresses | tr '\n' ' ')"
   while IFS= read -r origin; do
     host=$(origin_host "$origin")
     case "$seen" in *" $host "*) continue ;; esac
-    case "$mine" in *" $host "*) ;; *) continue ;; esac
-    if valid_ipv4 "$host" && private_ipv4 "$host"; then
+    if valid_ipv4 "$host" && listenable_ipv4 "$host" && ! is_loopback_host_name "$host" && network_own_ipv4 "$host"; then
       seen="$seen$host "
       printf '%s\n' "$host"
     fi
   done < <(printf '%s\n' "$1" | tr ',' '\n')
+}
+
+# The addresses of a list that this computer no longer has, one per line. Docker cannot listen on them, so other
+# devices cannot reach an instance at them until its addresses are read again.
+network_gone_addresses() { # space-separated addresses
+  local host
+  for host in $1; do
+    if [ "$host" != 127.0.0.1 ] && ! network_own_ipv4 "$host"; then printf '%s\n' "$host"; fi
+  done
 }
 
 # On native Linux, Engine 27 and older let other devices on the network reach ports published to 127.0.0.1 only.

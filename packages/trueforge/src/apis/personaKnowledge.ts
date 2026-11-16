@@ -300,7 +300,7 @@ export function createPersonaKnowledgeRouter(deps: PersonaKnowledgeRouterDeps) {
     if ((await withPersona(c, personaId)) === undefined) {
       return c.json({ error: { message: `Persona not found: ${personaId}` } }, 404);
     }
-    // Read-only: never triggers the download from a status check.
+    // Read-only: a status check never loads the model.
     const model = getSharedEmbeddingModel({ modelDir: deps.modelDir });
     const phase = model.currentPhase;
     if (phase === 'unavailable' && model.failureReason !== '') {
@@ -311,13 +311,11 @@ export function createPersonaKnowledgeRouter(deps: PersonaKnowledgeRouterDeps) {
     const message =
       phase === 'ready'
         ? 'Ready — new documents become searchable as soon as they finish indexing.'
-        : phase === 'downloading'
-          ? 'Downloading the search model (about 120 MB, one time only). Your documents will index automatically when it finishes.'
-          : phase === 'loading'
-            ? 'Loading the search model. Your documents will index automatically in a moment.'
-            : phase === 'unavailable'
-              ? 'The search model isn’t available right now. Your documents are saved and will index automatically once it is.'
-              : 'Not downloaded yet. Add your first document and the search model downloads once, automatically (about 120 MB).';
+        : phase === 'loading'
+          ? 'Loading the search model. Your documents will index automatically in a moment.'
+          : phase === 'unavailable'
+            ? 'The search model isn’t available right now. Your documents are saved and will index automatically once it is.'
+            : 'Not loaded yet. The search model starts when you add your first document.';
     return c.json({ data: { phase, message } }, 200);
   };
 

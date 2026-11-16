@@ -35,8 +35,8 @@ One look for all three commands, set in the shared style file
   yellow or red). Only the verdict is boxed in the closing block: the
   addresses and commands under it stay unframed, so they copy cleanly. A closing rule ends the block, with the
   total time.
-- The closing block stays short: one address to open (the Tailscale name,
-  then the `.local` name, then a network address), who signs in, and only the
+- The closing block stays short: one address to open (the `.local` name,
+  then a network address), who signs in, and only the
   rows that need something. How to set up a new device (trust link,
   fingerprint, phone code) shows only after the first install, a move to
   https, or a new root certificate. `aman status` prints everything.

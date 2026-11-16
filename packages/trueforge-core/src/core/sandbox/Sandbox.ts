@@ -91,17 +91,11 @@ import {
   sandboxCommandHasGitSubcommand,
   sandboxCommandHasNetworkIntent,
   sandboxCommandRequiresApproval,
-  sandboxCommandUsesEvaluatorWrapper,
-  sandboxCommandUsesUnstructuredOperation,
   sandboxCommandWebEgressRejection,
   sandboxInvocationPolicy,
-  sandboxUnstructuredOperationName,
-  sandboxVerifyCommandUsesInlineEval,
-  sandboxVerifyCommandUsesUnsafeSyntax,
   type SandboxCommandEffect,
   type SandboxInvocationPurpose,
 } from './commandClassification';
-import { classifyExecCommand, interpreterInvocationRefusal, type ExecGuardHost } from './driver/ExecGuard';
 import { buildProvisioningEvent } from './driver/provisionEvents';
 import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './driver/RunCodeSchemas';
 import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './driver/RunCodeService';
@@ -174,8 +168,7 @@ import {
 } from './workspaceStateCapture';
 // Import submodules, not the ./skills barrel, to avoid a cycle (the mounters import from Sandbox).
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants as fsConstants } from 'node:fs';
-import { dirname, join, delimiter as pathDelimiter, posix, relative } from 'node:path';
+import { dirname, join, posix, relative } from 'node:path';
 import { convertOpenAIPatchToGitDiff, detectApplyPatchFormat } from './openaiPatchFormat';
 import { matchReplaceText } from './replaceTextDiagnostics';
 import type { ISkillMounter } from './skills/ISkillMounter';
@@ -1609,7 +1602,7 @@ export function createSandboxRunCodeDescription({
   return `Run Python or Node.js code in an isolated, offline sandbox: language is 'python' (3.13) or 'node' (22). Pass exactly one of code or script_path (a file you wrote under ${workspaceDir}; the run reads a copy of it). cwd is /scratch: read /ingress/<name>, write results to /egress (files left in /scratch are collected too). Returns stdout and stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name, size, sha256); bytes are never inlined. To give the user a file, list it in a sandbox_artifacts block as [name](run_code/<name>). A non-zero exit is the program's result, not an infra failure.
 ${runCodeEnvironmentSentences({ offline, packageDownloads })}
 files_in is for content you compose; never re-upload an /ingress file.
-If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; inline code in exec is rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
+If run_code fails, do NOT fall back to exec (or any shell tool) to run the code. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
 `;
 }
 
@@ -1892,71 +1885,6 @@ function applyExecOutputBounds(rawOutput: string, output: SandboxExecOutputInput
   return `${selected.join(lineSeparator)}${hasTrailingNewline && selected.length > 0 ? lineSeparator : ''}`;
 }
 
-/**
- * Host binding for the exec interpreter guard (classifier in `./driver/ExecGuard`).
- * Threat model: `exec` is a trusted-operator tool — the operator already consented
- * to shell access in this session. This guard does not try to contain a malicious
- * model (a determined one has git, npm, and awk); it keeps code that is not a file
- * in `run_code`, and it stops a run_code failure from becoming an exec workaround.
- * A program that is a file in the workspace runs here, behind the permission rules.
- *
- * Runs inside `sandboxExecPreflightFailure`, so code that is not a file is rejected
- * before approval and before the provider ever sees the command. Resolution is
- * best-effort: bare interpreter names are caught without any filesystem access;
- * PATH lookup (from the call's own `env` when it sets PATH — no ambient
- * `process.env` read in core) only sharpens evasion cases.
- * Resolutions are cached per Sandbox because preflight runs on every exec call.
- */
-function execInterpreterGuardFailure(input: {
-  command: string;
-  env: Readonly<Record<string, string>> | undefined;
-  resolveCache: Map<string, string | undefined>;
-}): string | undefined {
-  const pathValue = input.env?.['PATH'];
-  const searchDirs = pathValue === undefined || pathValue === '' ? [] : pathValue.split(pathDelimiter);
-  const host: ExecGuardHost = {
-    resolveExecutable: name => {
-      if (input.resolveCache.has(name)) {
-        return input.resolveCache.get(name);
-      }
-      let resolved: string | undefined;
-      for (const dir of searchDirs) {
-        if (dir === '') {
-          continue;
-        }
-        const candidate = join(dir, name);
-        try {
-          accessSync(candidate, fsConstants.X_OK);
-          resolved = candidate;
-          break;
-        } catch {
-          // Not executable here — keep scanning.
-        }
-      }
-      input.resolveCache.set(name, resolved);
-      return resolved;
-    },
-  };
-  const verdict = classifyExecCommand({ command: input.command, host });
-  return verdict.verdict === 'reject' ? interpreterInvocationRefusal(verdict.reason) : undefined;
-}
-
-/**
- * Names what was refused and the route that works. run_code is offline, so a job that needs a website (often a
- * skill whose instructions loop over curl) has to go through a script file run by exec instead.
- */
-function unstructuredCommandRefusal(command: string): string {
-  return (
-    `This command was not run because it uses ${sandboxUnstructuredOperationName(command)}. ` +
-    'exec runs plain commands only, so the approval shows exactly what runs; pipes between plain commands are fine. ' +
-    'Do not retry it in another shell form. ' +
-    "For a loop, several steps, or one command's output feeding the next, write the steps as a Python script with write_file and run that file with exec, for example python3 fetch.py. " +
-    'That script reaches the same websites a plain command could. run_code is offline and cannot reach any website. ' +
-    'To read a file use cat, head or sed -n; to edit one use apply_patch or replace_text. ' +
-    "To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields."
-  );
-}
-
 const OFFLINE_NETWORK_COMMAND_REFUSAL =
   'This sandbox is offline by design, so this command cannot reach the internet and was not run. Do not retry it and do not try another tool for the same job. Tell the user in plain words that you cannot open websites from here.';
 
@@ -1984,19 +1912,10 @@ function sandboxExecPreflightFailure(input: {
   packageDownloadBlock: PackageDownloadBlock | undefined;
   /** True when the person approved network access for a skill mounted in this chat. */
   skillNetworkGranted: boolean;
-  resolveCache: Map<string, string | undefined>;
 }): string | undefined {
   const outputFailure = sandboxOutputPreflightFailure(input.output);
   if (outputFailure !== undefined) {
     return outputFailure;
-  }
-  const interpreterGuardFailure = execInterpreterGuardFailure({
-    command: input.command,
-    env: input.env,
-    resolveCache: input.resolveCache,
-  });
-  if (interpreterGuardFailure !== undefined) {
-    return interpreterGuardFailure;
   }
   // An impossible action must not reach an approval card. A skill network grant is the middle
   // state: the command may try, and the gateway is the wall that refuses every site outside the
@@ -2027,33 +1946,11 @@ function sandboxExecPreflightFailure(input: {
   ) {
     return 'Run git commit and git push as separate commands so each can be reviewed.';
   }
-  if (sandboxCommandUsesEvaluatorWrapper(input.command)) {
-    return 'Nested shell and command-evaluator wrappers are not allowed because they hide the operation from approval classification. Run the underlying command directly; use write_file for a new file or apply_patch/replace_text for an edit.';
-  }
-  if (
-    (input.purpose === 'inspect' || input.purpose === 'edit' || input.purpose === 'execute') &&
-    sandboxCommandUsesUnstructuredOperation(input.command)
-  ) {
-    return unstructuredCommandRefusal(input.command);
-  }
-  // Verification has to stay observable: redirection, substitution, and
-  // backgrounding hide what the check actually ran, so a green result would
-  // not prove the repository was verified.
-  if (input.purpose === 'verify' && sandboxVerifyCommandUsesUnsafeSyntax(input.command)) {
-    return "Verification commands must not use shell redirection, command substitution, backgrounding, or malformed quoting. Run the check in the foreground with observable output; trim long output with the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell redirect.";
-  }
-  // A "verify" label must not cover opaque code: inline evaluators, heredocs,
-  // and tee would let arbitrary code execution ride on a verification
-  // approval. A named shell script keeps the verification step reviewable.
-  if (
-    input.purpose === 'verify' &&
-    (sandboxCommandUsesUnstructuredOperation(input.command) || sandboxVerifyCommandUsesInlineEval(input.command))
-  ) {
-    return 'Inline code evaluation (python -c, node -e), heredocs, and tee are not allowed for verify-purpose exec calls. Put the check in a shell script and run it by name so the verification step stays reviewable. Python and Node code cannot run through exec at all.';
-  }
+  // A skill's approved websites are reached the way the skill says, so curl is not redirected to the web tool;
+  // the gateway still refuses every other site.
   const webEgressRejection = sandboxCommandWebEgressRejection({
     command: input.command,
-    webConnectorAttached: input.webConnectorAttached,
+    webConnectorAttached: input.webConnectorAttached && !input.skillNetworkGranted,
     webConnectorToolHint: input.webConnectorToolHint,
   });
   if (webEgressRejection !== undefined) {
@@ -2303,8 +2200,6 @@ export class Sandbox extends LocalToolMCP {
   private deliveredSkillNotices: SkillNotice[] = [];
   /** Flag to track if we've already checked prerequisites. */
   private prerequisitesChecked = false;
-  /** PATH-resolution cache for the exec interpreter guard (preflight runs per call). */
-  private readonly execGuardResolveCache = new Map<string, string | undefined>();
   /** Code-execution backend behind `run_code`; undefined when no isolation driver is configured. */
   private readonly runCodeService: RunCodeBackend | undefined;
   /** The person's download setting for this chat's scope, read before each tool-list read and call. */
@@ -2325,6 +2220,7 @@ export class Sandbox extends LocalToolMCP {
   private tools = [
     defineTool({
       name: SANDBOX_EXEC_TOOL_NAME,
+      requiresNetwork: false,
       // Rendered in getTools(): the provider is not known when this field initializes.
       description: '',
       schema: sandboxExecSchema,
@@ -2332,6 +2228,7 @@ export class Sandbox extends LocalToolMCP {
     }),
     defineTool({
       name: SANDBOX_RUN_CODE_TOOL_NAME,
+      requiresNetwork: false,
       // Description is rendered per turn in getTools(): the /ingress list is dynamic.
       description: '',
       schema: RunCodeInputSchema,
@@ -2339,36 +2236,42 @@ export class Sandbox extends LocalToolMCP {
     }),
     defineTool({
       name: SANDBOX_APPLY_PATCH_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_APPLY_PATCH_DESCRIPTION,
       schema: sandboxApplyPatchSchema,
       handler: (input, approvalDecision, context) => this.handleApplyPatch(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_REPLACE_TEXT_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_REPLACE_TEXT_DESCRIPTION,
       schema: sandboxReplaceTextSchema,
       handler: (input, approvalDecision, context) => this.handleReplaceText(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_WRITE_FILE_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_WRITE_FILE_DESCRIPTION,
       schema: sandboxWriteFileSchema,
       handler: (input, approvalDecision, context) => this.handleWriteFile(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION,
       schema: sandboxRunRegisteredCommandSchema,
       handler: (input, approvalDecision, context) => this.handleRunRegisteredCommand(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_RUN_SKILL_SCRIPT_DESCRIPTION,
       schema: sandboxRunSkillScriptSchema,
       handler: (input, approvalDecision, context) => this.handleRunSkillScript(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_DESCRIPTION,
       schema: sandboxImplementationPlanSchema,
       handler: (input, approvalDecision) => this.handleSubmitImplementationPlan(input, approvalDecision),
@@ -2496,7 +2399,6 @@ export class Sandbox extends LocalToolMCP {
         hasNetwork: this.hasNetwork(),
         packageDownloadBlock: this.packageDownloadBlock(),
         skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
-        resolveCache: this.execGuardResolveCache,
       }) !== undefined;
     const invalidWriteFilePath =
       params.name === SANDBOX_WRITE_FILE_TOOL_NAME &&
@@ -2657,6 +2559,7 @@ export class Sandbox extends LocalToolMCP {
           canonical_params: effectiveArguments ?? {},
           tool_type: 'truefoundry-system',
           sandbox_effect: effect,
+          requires_network: info.requires_network,
           mcp_hints: {
             read_only_hint: info.read_only_hint,
             destructive_hint: info.destructive_hint,
@@ -6031,7 +5934,6 @@ export class Sandbox extends LocalToolMCP {
       hasNetwork: this.hasNetwork(),
       packageDownloadBlock: this.packageDownloadBlock(),
       skillNetworkGranted: this.skillNetworkHostsForChat.length > 0,
-      resolveCache: this.execGuardResolveCache,
     });
     if (preflightFailure !== undefined) {
       await this.recordPreflightRefusal(preflightFailure);

@@ -82,12 +82,12 @@ export function servesHttps(entries: readonly RegistryEntry[]): boolean {
   );
 }
 
-type OriginKind = 'address' | 'tailscale' | 'local' | 'name' | 'loopback';
+type OriginKind = 'address' | 'local' | 'name' | 'loopback';
 
 // The order the shell shows an instance's addresses in
 // (origins_display_order in instance.sh): the computer's own addresses
 // first, its names after, and this computer itself last.
-const ORIGIN_KIND_ORDER: readonly OriginKind[] = ['address', 'tailscale', 'local', 'name', 'loopback'];
+const ORIGIN_KIND_ORDER: readonly OriginKind[] = ['address', 'local', 'name', 'loopback'];
 
 function isIpv4(host: string): boolean {
   const parts = host.split('.');
@@ -100,9 +100,6 @@ function originKind(origin: string): OriginKind {
   const host = afterScheme.split(/[:/]/)[0] ?? '';
   if (host === '127.0.0.1' || host === 'localhost') {
     return 'loopback';
-  }
-  if (host.endsWith('.ts.net')) {
-    return 'tailscale';
   }
   if (host.endsWith('.local')) {
     return 'local';

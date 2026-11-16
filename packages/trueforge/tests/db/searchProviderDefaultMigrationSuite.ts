@@ -51,7 +51,9 @@ export function runSearchProviderDefaultMigrationSuite({
       expect(await h.manifestOf('c1')).toEqual({
         ...manifest,
         search_provider: true,
-        search_tools: ['web_search', 'web_fetch'],
+        search_tools: ['web_search'],
+        page_read_tools: ['web_fetch'],
+        search_plumbing_fields: ['session_id', 'model_name'],
       });
     });
 
@@ -65,7 +67,8 @@ export function runSearchProviderDefaultMigrationSuite({
       await h.migrate();
       expect(await h.manifestOf('c1')).toMatchObject({
         search_provider: true,
-        search_tools: ['web_search', 'web_fetch'],
+        search_tools: ['web_search'],
+        page_read_tools: ['web_fetch'],
       });
     });
 

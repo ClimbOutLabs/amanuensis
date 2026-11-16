@@ -24,6 +24,12 @@ interface Connection {
   url: string;
   headers: RemoteMcpHeaders;
   designated: boolean;
+  /**
+   * Whether the connector record carries the in-process mark. The host writes that mark only
+   * when the designation was captured from the Tavily preset, so a connector at any other
+   * address is handed over without it, as the last test models.
+   */
+  servedInProcess?: boolean;
 }
 
 async function resolveTavily(connection: Connection): Promise<IToolSet> {
@@ -49,7 +55,12 @@ async function resolveTavily(connection: Connection): Promise<IToolSet> {
         url: connection.url,
         headers: connection.headers,
         search_provider: connection.designated
-          ? { tools: ['tavily_search', 'tavily_extract'], plumbing_fields: [] }
+          ? {
+              tools: ['tavily_search'],
+              page_read_tools: ['tavily_extract'],
+              plumbing_fields: [],
+              served_in_process: connection.servedInProcess ?? true,
+            }
           : undefined,
       }),
     mcpRequestTimeoutMs: 1_000,
@@ -150,10 +161,13 @@ describe('Tavily as the designated search provider', () => {
   });
 
   it('does not treat another host as Tavily', async () => {
+    // The record of a designated connector at another host carries no in-process mark, so the
+    // resolver leaves it on its ordinary MCP connection, and the saved key goes nowhere else.
     const toolSet = await resolveTavily({
       url: 'https://mcp.tavily.com.attacker.example/mcp',
       headers: { Authorization: 'Bearer tvly-test-key-1' },
       designated: true,
+      servedInProcess: false,
     });
     await toolSet.listTools();
     expect(mockConnect).toHaveBeenCalledTimes(1);

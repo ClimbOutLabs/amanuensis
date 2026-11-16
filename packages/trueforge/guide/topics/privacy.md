@@ -16,6 +16,8 @@ Aman runs on your own computer, so your things stay with you. Only a few things 
 
 Voice mode ends by itself after 2 minutes of quiet, so the microphone isn't left on.
 
+The speech and memory search models ship inside Aman. Nothing is downloaded while Aman runs.
+
 ## What leaves your computer
 
 Some things go out, and only when needed:

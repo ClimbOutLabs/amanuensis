@@ -415,7 +415,7 @@ describe('extractSentinelFromEvent', () => {
     location: 'Room 4',
     description: '',
     attendees: ['lin@example.com'],
-    guests_emailed: true,
+    guests_line: 'Google will email every guest about this.',
     one_of_repeating: false,
     before: {
       title: 'Team sync',
@@ -468,8 +468,20 @@ describe('extractSentinelFromEvent', () => {
       })[0]?.card.calendar_event;
     expect(event(undefined)).toBeNull();
     expect(event({ ...CALENDAR_EVENT, attendees: undefined })).toBeNull();
-    expect(event({ ...CALENDAR_EVENT, guests_emailed: 'yes' })).toBeNull();
+    expect(event({ ...CALENDAR_EVENT, guests_line: 42 })).toBeNull();
     expect(event({ ...CALENDAR_EVENT, action: 'delete' })).toBeNull();
+  });
+
+  it('rebuilds the guest line of a card stored before the line was carried, from its flag', () => {
+    const event = (calendar_event: unknown) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-16', tier: 3, tier3_card: { plain_what: 'Do it', calendar_event } }],
+      })[0]?.card.calendar_event;
+    const stored: Record<string, unknown> = { ...CALENDAR_EVENT };
+    delete stored['guests_line'];
+    expect(event({ ...stored, guests_emailed: true })?.guests_line).toBe('The guests will be emailed about this.');
+    expect(event({ ...stored, guests_emailed: false })?.guests_line).toBe('The guests will not be emailed about this.');
   });
 
   it('reads a camel-cased card from a regenerated SDK shape', () => {

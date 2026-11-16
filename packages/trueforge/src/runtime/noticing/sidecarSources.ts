@@ -415,6 +415,8 @@ export function sidecarMailSource({
   };
   return {
     trustedAuthenticationServers: [],
+    // The connector passes on no Authentication-Results yet, so no sender can be confirmed from its mail.
+    reportsSenderConfirmation: false,
     async listAfter({ cursor, since, limit, out_of_time }) {
       if (out_of_time()) {
         throw new MailTooSlowError({ cause: new Error('The pass ran out of time.') });

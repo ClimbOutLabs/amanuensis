@@ -1,8 +1,10 @@
 /**
  * Shipped MCP catalog (mcp-catalog.yaml): the discovery list of server
  * presets offered by GET /catalogs/mcp-servers for the UI to copy into
- * PUT /settings/mcp-servers bodies. Beyond discovery, a saved connector is linked to its preset
- * by endpoint to learn a known web search provider's search tools and plumbing arguments.
+ * PUT /settings/mcp-servers bodies. Beyond discovery, a preset carries the search declaration
+ * of the server it describes, which the connector record copies when the person designates
+ * that server as the web search provider. Downstream of the designation, nothing reads the
+ * catalog for a connector again: the record is the one place the declaration lives.
  *
  * Default: YAML inlined into `mcpCatalog.gen.ts` at build time. Optional
  * override: `MCP_CATALOG_PATH` (file on disk).
@@ -40,8 +42,9 @@ export class McpCatalog {
   /** The presets as the public catalog shows them, without what only the server reads. */
   list(): readonly CatalogMcpServer[] {
     return this.mcpServers.map(entry => {
-      const { search_plumbing_fields: serverOnly, ...preset } = entry;
+      const { search_plumbing_fields: serverOnly, search_in_process: serverOnlyInProcess, ...preset } = entry;
       void serverOnly;
+      void serverOnlyInProcess;
       return preset;
     });
   }
@@ -63,23 +66,81 @@ export class McpCatalog {
     return this.mcpServers.find(entry => endpointKey(entry.url) === key);
   }
 
-  /** Search tools the catalog lists for the preset at this endpoint, empty for any other server. */
-  searchToolsForUrl(url: string): readonly string[] {
-    return this.presetForUrl(url)?.search_tools ?? [];
+  /**
+   * The search declaration the preset at this endpoint carries, undefined for any other server
+   * and for a preset that carries no search declaration.
+   * Read at designation time and by the boot-time defaults, which copy it onto the connector
+   * record; nothing reads it for a connector that is already designated.
+   */
+  searchDeclarationForUrl(url: string): SearchDeclaration | undefined {
+    const preset = this.presetForUrl(url);
+    if (preset === undefined || (preset.search_tools === undefined && preset.page_read_tools === undefined)) {
+      return undefined;
+    }
+    return {
+      search_tools: preset.search_tools ?? [],
+      page_read_tools: preset.page_read_tools ?? [],
+      plumbing_fields: preset.search_plumbing_fields ?? [],
+      in_process: preset.search_in_process === true,
+    };
   }
 
   /**
-   * What a designated search provider may do silently. Stored tools win when present; a connector
-   * saved before the tools were recorded falls back to its preset's list. Plumbing arguments are
-   * always the catalog's say, since they are never stored.
+   * What a designated search provider may do silently, built from the declaration stored on
+   * its connector record. A record written before the declaration was split into search and
+   * page-read tools holds one mixed list: the split is recomputed for it here from its
+   * preset's declaration, the one read that still consults the catalog, and it runs until
+   * the record is saved again and stores the split itself. A legacy record at no preset's
+   * endpoint keeps its whole list as search tools and gains no page readers, the closest
+   * honest reading of what was stored.
    */
-  searchProviderGrant({ url, storedTools }: { url: string; storedTools: readonly string[] }): SearchProviderGrant {
-    const preset = this.presetForUrl(url);
+  searchProviderGrant({ manifest }: { manifest: StoredSearchDeclaration }): SearchProviderGrant {
+    if (manifest.page_read_tools !== undefined) {
+      return {
+        tools: manifest.search_tools ?? [],
+        page_read_tools: manifest.page_read_tools,
+        plumbing_fields: manifest.search_plumbing_fields ?? [],
+        served_in_process: manifest.search_in_process === true,
+      };
+    }
+    const stored = manifest.search_tools ?? [];
+    const preset = this.presetForUrl(manifest.url);
+    if (preset === undefined) {
+      return { tools: stored, page_read_tools: [], plumbing_fields: [], served_in_process: false };
+    }
+    if (stored.length === 0) {
+      return {
+        tools: preset.search_tools ?? [],
+        page_read_tools: preset.page_read_tools ?? [],
+        plumbing_fields: preset.search_plumbing_fields ?? [],
+        served_in_process: preset.search_in_process === true,
+      };
+    }
+    const presetPageReaders = new Set(preset.page_read_tools ?? []);
     return {
-      tools: storedTools.length > 0 ? storedTools : (preset?.search_tools ?? []),
-      plumbing_fields: preset?.search_plumbing_fields ?? [],
+      tools: stored.filter(name => !presetPageReaders.has(name)),
+      page_read_tools: stored.filter(name => presetPageReaders.has(name)),
+      plumbing_fields: preset.search_plumbing_fields ?? [],
+      served_in_process: preset.search_in_process === true,
     };
   }
+}
+
+/** The search declaration as one source states it: a preset, or a capture from a server's own tool list. */
+export interface SearchDeclaration {
+  search_tools: readonly string[];
+  page_read_tools: readonly string[];
+  plumbing_fields: readonly string[];
+  in_process: boolean;
+}
+
+/** The search fields of a stored connector record, as the grant builder reads them. */
+export interface StoredSearchDeclaration {
+  url: string;
+  search_tools?: readonly string[] | undefined;
+  page_read_tools?: readonly string[] | undefined;
+  search_plumbing_fields?: readonly string[] | undefined;
+  search_in_process?: boolean | undefined;
 }
 
 function endpointKey(url: string): string | undefined {

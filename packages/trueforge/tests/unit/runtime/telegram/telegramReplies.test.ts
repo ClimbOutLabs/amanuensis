@@ -1,6 +1,6 @@
 import type { TurnRecord, TurnState } from '@truefoundry/trueforge-core/agent-session';
 import { Tier3CardSchema, type Tier3Card } from '@truefoundry/trueforge-core/core';
-import type { ActionRequiredEvent } from '@truefoundry/trueforge-core/core/events/schema';
+import type { ActionRequiredEvent, ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
 import {
   Tier3CalendarEventSchema,
   Tier3EmailSchema,
@@ -12,8 +12,10 @@ import {
 import winston from 'winston';
 
 import type { TurnCustom } from '../../../../src/db/sessionCustom';
+import type { TelegramReplyOrigin } from '../../../../src/db/telegramStore';
 import {
   deliverPendingTelegramReplies,
+  FROM_APP_APPROVAL_LINE,
   TELEGRAM_SHOWN_CARD_FIELDS,
   TELEGRAM_SHOWN_SECTION_FIELDS,
   TELEGRAM_SKILL_INSTRUCTIONS_CHARS,
@@ -111,7 +113,11 @@ function doneTurnWith(action: ActionRequiredEvent): TurnRecord<TurnCustom> {
   });
 }
 
-function harness(turn: TurnRecord<TurnCustom> | undefined, appAddress?: string) {
+function harness(
+  turn: TurnRecord<TurnCustom> | undefined,
+  appAddress?: string,
+  origin: TelegramReplyOrigin = 'telegram',
+) {
   const store = new InMemoryTelegramStore();
   store.connection = fakePairedConnection();
   const client = new FakeTelegramClient();
@@ -123,6 +129,7 @@ function harness(turn: TurnRecord<TurnCustom> | undefined, appAddress?: string) 
     session_id: 'session-1',
     turn_id: 'turn-1',
     chat_id: '777',
+    origin,
   });
   const deps = {
     store,
@@ -398,6 +405,11 @@ describe('telegram pending replies', () => {
   it.each([
     { field: 'already_created', event: { already_created: true }, line: 'You already have this event.' },
     { field: 'span_days', event: { span_days: 3 }, line: 'This event runs over 3 days.' },
+    {
+      field: 'guests_line',
+      event: { attendees: ['lin@example.com'], guests_line: 'Moonmail will email every guest about this.' },
+      line: 'Moonmail will email every guest about this.',
+    },
   ])("shows the calendar card's $field line, as the app card does", async ({ event, line }) => {
     const card = cardWith({
       plain_what: 'Add this event.',
@@ -411,7 +423,7 @@ describe('telegram pending replies', () => {
         location: '',
         description: '',
         attendees: [],
-        guests_emailed: false,
+        guests_line: '',
         one_of_repeating: false,
         before: null,
         ...event,
@@ -810,5 +822,72 @@ describe('telegram pending replies', () => {
     // A second pass, as after a restart, sends nothing again.
     await deliverPendingTelegramReplies(deps);
     expect(client.sent).toHaveLength(1);
+  });
+});
+
+describe('telegram replies for a message typed in the app', () => {
+  const answer: ModelMessageEvent = {
+    type: 'model.message',
+    id: 'msg-1',
+    thread_id: 'main',
+    content: 'Tuesday is clear.',
+    created_at: '2026-11-06T00:01:00.000Z',
+  };
+
+  function typedInApp(state: TurnState, input: TurnRecord<TurnCustom>['input']): TurnRecord<TurnCustom> {
+    return { ...turnWith(state), input };
+  }
+
+  it("sends the person's own words first, then the answer", async () => {
+    const { store, client, deps } = harness(
+      typedInApp({ status: 'done', output: answer, required_actions: [], completed_at: '2026-11-06T00:01:00.000Z' }, [
+        { type: 'user.message', content: 'Am I free on Tuesday?' },
+      ]),
+      undefined,
+      'app',
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent.map(message => message.text)).toEqual([
+      'You, in Aman: Am I free on Tuesday?',
+      'Tuesday is clear.',
+    ]);
+    expect(store.pendingReplies).toHaveLength(0);
+  });
+
+  it('says a file stays in the app, and sends only the text', async () => {
+    const { client, deps } = harness(
+      typedInApp({ status: 'done', output: answer, required_actions: [], completed_at: '2026-11-06T00:01:00.000Z' }, [
+        {
+          type: 'user.message',
+          content: [
+            { type: 'text', text: 'What does this say?' },
+            { type: 'file', name: 'letter.pdf', data: 'data:application/pdf;base64,AAAA' },
+          ],
+        },
+      ]),
+      undefined,
+      'app',
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toBe('You, in Aman: What does this say?\nIt came with a file, which stays in Aman.');
+  });
+
+  it('never offers buttons for an ask raised in the app: it is answered there', async () => {
+    const { store, client, deps } = harness(
+      typedInApp(
+        { status: 'done', output: null, required_actions: [APPROVAL_ACTION], completed_at: '2026-11-06T00:01:00.000Z' },
+        [{ type: 'user.message', content: 'Email Sam the plan.' }],
+      ),
+      'https://aman.example',
+      'app',
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent.map(message => message.text)).toEqual([
+      'You, in Aman: Email Sam the plan.',
+      `${FROM_APP_APPROVAL_LINE}\nhttps://aman.example/sessions/session-1`,
+    ]);
+    expect(client.sent.every(message => message.inline_buttons === undefined)).toBe(true);
+    expect(client.sent.some(message => message.text.includes('sam@example.com'))).toBe(false);
+    expect(store.pendingApprovals).toHaveLength(0);
   });
 });

@@ -251,18 +251,21 @@ describe('usage', () => {
       const result = world.run(args);
       assert.equal(result.code, 2, args.join(' '));
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, /Usage:/);
+      assert.match(result.stderr, /Run aman help/);
     }
   });
 
   it('needs the doctor command and no longer takes --home (the state directory is AMANUENSIS_HOME)', () => {
     make();
-    for (const argv of [[], ['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
+    for (const argv of [['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
       const result = world.shim(argv);
       assert.equal(result.code, 2, argv.join(' '));
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, /Usage:/);
+      assert.match(result.stderr, /Run aman help/);
     }
+    const bare = world.shim([]);
+    assert.equal(bare.code, 0, 'a bare aman shows the list of commands');
+    assert.match(bare.stdout, /aman help doctor/);
     assert.equal(world.shim(['doctor', '--json', '--instance', 'main']).code, 0);
   });
 
@@ -1637,15 +1640,25 @@ describe('network address check', () => {
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
 
-  it('does not offer a carrier-grade address unless it is on the Tailscale link', () => {
+  it('never offers a VPN address by itself, Tailscale included: the owner adds one with aman address add', () => {
     make();
     world.install('tailscale', '#!/usr/bin/env bash\nexit 1\n');
     world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'eth1:100.101.102.103'] });
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
     world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'tailscale0:100.101.102.103'] });
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
+  });
+
+  it('names an address an older version listed by itself that this one would not use, such as a VPN address', () => {
+    make();
+    world.network('main', {
+      origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791',
+      addresses: ['127.0.0.1', '192.168.1.20', 'tailscale0:100.101.102.103'],
+    });
     const check = find(world.json().doc.instances.main, 'network');
     assert.equal(check.state, 'warn');
-    assert.match(check.detail, /100\.101\.102\.103/);
+    assert.match(check.detail, /would not use today: 100\.101\.102\.103/);
+    assert.match(check.fix, /aman doctor network --fix/);
   });
 
   it('does not offer an address on a container or VPN link', () => {
@@ -1914,11 +1927,13 @@ describe('aman backup and aman upgrade', () => {
     );
   });
 
-  it('aman --help says the password command is run on the computer where Aman is installed', () => {
+  it('aman help password says the password command is run on the computer where Aman is installed', () => {
     make();
-    const result = world.shim(['--help']);
-    assert.match(result.stderr, /aman password \[--instance NAME\] \[--password-stdin\]/);
-    assert.match(result.stderr, /on the computer where Aman is installed/);
+    const result = world.shim(['help', 'password']);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /aman password \[--instance NAME\] \[--password-stdin\]/);
+    assert.match(result.stdout, /Run it on the computer/);
+    assert.match(result.stdout, /where Aman is installed/);
   });
 
   it('say plainly when the folder Aman was installed from is gone', () => {

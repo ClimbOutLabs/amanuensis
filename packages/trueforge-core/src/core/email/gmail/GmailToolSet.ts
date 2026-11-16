@@ -12,7 +12,9 @@ import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import { toolResultResponse, type ToolInvocationContext } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../../mcp/ToolSet';
-import { classifyHostToolCall, messageForDisplay } from '../../permissions/classifier';
+import { REVIEW_HASH_ARGUMENT } from '../../permissions/approvalTokens';
+import { messageForDisplay } from '../../permissions/cardText';
+import { classifyHostToolCall } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../../permissions/sendAllowlist';
 import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
@@ -199,6 +201,7 @@ export class GmailToolSet extends LocalToolMCP {
       tools.push(
         defineTool({
           name: LIST_INBOX_THREADS_TOOL_NAME,
+          requiresNetwork: true,
           description:
             'List or search mail threads with Gmail search syntax (in:inbox, in:sent, is:unread, from:, to:, subject:, newer_than:2d, has:attachment, plain words). The single list and search tool.',
           schema: ListInboxThreadsSchema,
@@ -207,6 +210,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: GET_THREAD_TOOL_NAME,
+          requiresNetwork: true,
           description: 'Read one thread, oldest message first. Pass exactly one of thread_id or message_id.',
           schema: GetThreadSchema,
           annotations: READ_ANNOTATIONS,
@@ -214,6 +218,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: READ_EMAIL_TOOL_NAME,
+          requiresNetwork: true,
           description: 'Read one message by message_id, with its attachments listed.',
           schema: ReadEmailSchema,
           annotations: READ_ANNOTATIONS,
@@ -221,6 +226,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: LIST_DRAFTS_TOOL_NAME,
+          requiresNetwork: true,
           description: 'List the saved drafts with subject, recipients and a snippet.',
           schema: ListDraftsSchema,
           annotations: READ_ANNOTATIONS,
@@ -228,6 +234,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: GET_DRAFT_TOOL_NAME,
+          requiresNetwork: true,
           description: 'Read one saved draft in full, by draft_id.',
           schema: DraftIdSchema,
           annotations: READ_ANNOTATIONS,
@@ -239,6 +246,7 @@ export class GmailToolSet extends LocalToolMCP {
         tools.push(
           defineTool({
             name: DOWNLOAD_ATTACHMENT_TOOL_NAME,
+            requiresNetwork: true,
             description: `Fetch one attachment of a message into the sandbox workspace and return its path, so you can read it there with ${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} (PDFs, images, Word, Excel, CSV, PowerPoint, OpenDocument, RTF, HTML, forwarded .eml or .msg e-mails, calendar invites and text files). Name the attachment by its handle from the message's attachments list.`,
             schema: DownloadAttachmentSchema,
             annotations: READ_ANNOTATIONS,
@@ -252,6 +260,7 @@ export class GmailToolSet extends LocalToolMCP {
       tools.push(
         defineTool({
           name: DRAFT_EMAIL_TOOL_NAME,
+          requiresNetwork: true,
           description:
             'Save a new plain-text draft. Nothing is sent. Pass in_reply_to (a message id) to reply inside that thread; the subject then becomes "Re: <original subject>", and without a "to" the reply is addressed to that message\'s sender. The user is asked before the draft is saved.',
           schema: DraftEmailSchema,
@@ -260,6 +269,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: UPDATE_DRAFT_TOOL_NAME,
+          requiresNetwork: true,
           description:
             'Replace the content of a saved plain-text draft, keeping its draft_id and its place in a thread. A draft with attachments or formatting cannot be changed. The user is asked first.',
           schema: UpdateDraftSchema,
@@ -268,6 +278,7 @@ export class GmailToolSet extends LocalToolMCP {
         }),
         defineTool({
           name: SEND_DRAFT_TOOL_NAME,
+          requiresNetwork: true,
           description:
             'Send a saved draft. The only way to send. The user always sees the whole message and is asked first; a draft with attachments or formatting, or one that is very long, cannot be sent.',
           schema: DraftIdSchema,
@@ -311,6 +322,7 @@ export class GmailToolSet extends LocalToolMCP {
         tool_name: params.name,
         canonical_params: this.#approvedParams({ call: params, draft: prepared.draft }),
         tool_type: 'truefoundry-system',
+        requires_network: info.requires_network,
         mcp_server_name: GMAIL_SERVER_ID,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
@@ -335,7 +347,7 @@ export class GmailToolSet extends LocalToolMCP {
   #approvedParams(input: { call: CallToolRequest['params']; draft: ReviewableDraft | undefined }) {
     const args = input.call.arguments ?? {};
     return input.call.name === SEND_DRAFT_TOOL_NAME && input.draft !== undefined
-      ? { ...args, review_hash: hashDraft(input.draft) }
+      ? { ...args, [REVIEW_HASH_ARGUMENT]: hashDraft(input.draft) }
       : args;
   }
 
@@ -353,7 +365,7 @@ export class GmailToolSet extends LocalToolMCP {
     if (!assessed.ok) {
       throw new Error(assessed.reason);
     }
-    return { ...parsed, review_hash: hashDraft(assessed.draft) };
+    return { ...parsed, [REVIEW_HASH_ARGUMENT]: hashDraft(assessed.draft) };
   }
 
   /** A send the host stopped at dispatch went nowhere, and needs a fresh card; its receipt says so. */
@@ -523,6 +535,8 @@ export class GmailToolSet extends LocalToolMCP {
       inReplyTo: replyHeaders(reply).inReplyTo,
       references: replyHeaders(reply).references,
       fromName: '',
+      // A draft written here is saved on the connected account, so that account is the address sent from.
+      fromAddress: this.#options.account,
       // The recipients are bare addresses (the model's are validated in toolContract, and a filled reply
       // recipient is the sender address read from the message), so no name is left off today. This check
       // stays as a defence in case that contract ever admits display names.
@@ -811,7 +825,7 @@ export class GmailToolSet extends LocalToolMCP {
       if (!threading.ok) {
         return notSent('draft_changed', errorResult(this.#refuseSend(threading.reason)));
       }
-      const approved = context?.approved_params?.['review_hash'];
+      const approved = context?.approved_params?.[REVIEW_HASH_ARGUMENT];
       if (typeof approved !== 'string') {
         return notSent(
           'needs_ok_again',

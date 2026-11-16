@@ -1,11 +1,5 @@
 import type { AuditLogWriter, AuditRecordInput } from '../../../src/core/permissions/audit';
-import {
-  classifyHostToolCall,
-  classifyTier,
-  mapsDestinationHosts,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { classifyHostToolCall, classifyTier, mapsDestinationHosts } from '../../../src/core/permissions/classifier';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
@@ -19,6 +13,7 @@ import {
   MAPS_SILENT_REASON,
 } from '../../../src/core/permissions/mapsToolNames';
 import { recordPersonText } from '../../../src/core/permissions/provenance';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import {
   createWebSearchTurnState,
   NO_HOST_STAMP,

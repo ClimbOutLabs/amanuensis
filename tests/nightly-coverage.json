@@ -94,6 +94,10 @@
       "set": "calendar",
       "tests": []
     },
+    "command:address": {
+      "set": "install",
+      "tests": ["installer/tests/lib/address.test.sh"]
+    },
     "command:adopt": {
       "set": "install",
       "tests": []
@@ -109,6 +113,10 @@
     "command:doctor": {
       "set": "install",
       "tests": ["installer/tests/lib/look.test.sh"]
+    },
+    "command:help": {
+      "set": "install",
+      "tests": ["installer/tests/lib/help.test.sh"]
     },
     "command:import": {
       "set": "install",

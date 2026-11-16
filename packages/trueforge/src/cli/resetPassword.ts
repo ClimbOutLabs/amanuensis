@@ -34,9 +34,9 @@ export interface ResetPasswordDeps {
 
 /** Server config validates the environment on import, so the real wiring loads it only when asked. */
 const lazyDeps: ResetPasswordDeps = {
-  serverRunning: async () => (await import('./resetPasswordRuntime')).serverRunning(),
-  openStore: async () => (await import('./resetPasswordRuntime')).openLocalUserStore(),
-  readPasswordPair: async () => (await import('./resetPasswordRuntime')).readPasswordPair(),
+  serverRunning: async () => (await import('./localSignInRuntime')).serverRunning(),
+  openStore: async () => (await import('./localSignInRuntime')).openLocalUserStore({ create: false }),
+  readPasswordPair: async () => (await import('./localSignInRuntime')).readPasswordPair(),
 };
 
 export async function runResetPassword({

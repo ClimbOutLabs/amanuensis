@@ -22,6 +22,7 @@ import { z } from 'zod';
 import { isLoopbackHost } from '../../config';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { ITelegramStore, TelegramConnection, TelegramPendingReply } from '../../db/telegramStore';
+import { extractUserMessageText } from '../userMessageText';
 import { telegramCallbackData } from './telegramChannel';
 import { TELEGRAM_MAX_MESSAGE_CHARS } from './telegramClient';
 import { sendTelegramText, type TelegramSendQueue } from './telegramSendQueue';
@@ -41,6 +42,11 @@ import type { TelegramService } from './telegramService';
 const TURN_ERROR_LINE = 'Something went wrong with that answer. Open Aman to see the chat, or send the message again.';
 const TURN_CANCELLED_LINE = 'That was stopped in Aman, so there is no answer to send.';
 const APP_ONLY_LINE = 'Aman needs something only the app can give. Open Aman to continue.';
+/** Heads the person's own message when it was typed in the app's Telegram chat. */
+export const FROM_APP_PREFIX = 'You, in Aman:';
+const FROM_APP_FILE_LINE = 'It came with a file, which stays in Aman.';
+/** An ask raised by a message typed in the app is answered in the app, so Telegram only hears of it. */
+export const FROM_APP_APPROVAL_LINE = 'Aman is waiting for your ok on something. Answer it in Aman.';
 
 /** How many owed replies one pass works through. */
 export const TELEGRAM_PENDING_REPLY_BATCH = 20;
@@ -186,7 +192,7 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'location',
     'description',
     'attendees',
-    'guests_emailed',
+    'guests_line',
     'one_of_repeating',
     'before',
     'already_created',
@@ -406,12 +412,8 @@ function approvalCardLines(card: Tier3Card): string[] {
       lines.push('Repeats: Only this one event of the series changes');
     }
     lines.push(`Guests: ${event.attendees.length === 0 ? 'None' : event.attendees.join(', ')}`);
-    if (event.attendees.length > 0) {
-      lines.push(
-        event.guests_emailed
-          ? 'Google will email every guest about this.'
-          : 'Google will not email the guests about this.',
-      );
+    if (event.guests_line !== '') {
+      lines.push(event.guests_line);
     }
     if (event.description !== '') {
       lines.push('Description:');
@@ -644,6 +646,23 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
     }
   };
 
+  if (reply.origin === 'app') {
+    // What the person typed in the app comes first, so the Telegram chat reads in order. Text only:
+    // a file stays in the app, and the message says so.
+    const typed = extractUserMessageText(turn.input).trim();
+    const hadFile = turn.input.some(
+      item =>
+        item.type === 'user.message' &&
+        typeof item.content !== 'string' &&
+        item.content.some(part => part.type === 'file'),
+    );
+    const lines = [typed === '' ? undefined : `${FROM_APP_PREFIX} ${typed}`, hadFile ? FROM_APP_FILE_LINE : undefined];
+    const said = lines.filter(line => line !== undefined);
+    if (said.length > 0) {
+      await send(said.join('\n'));
+    }
+  }
+
   if (turn.state.status === 'done') {
     const text = modelMessageText(turn.state.output);
     if (text !== undefined) {
@@ -653,6 +672,15 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
     for (const action of turn.state.required_actions) {
       if (action.type !== 'tool.approval_required') {
         appOnly = true;
+        continue;
+      }
+      if (reply.origin === 'app') {
+        await send(
+          deps.appAddress === undefined
+            ? FROM_APP_APPROVAL_LINE
+            : `${FROM_APP_APPROVAL_LINE}\n${chatLink({ appAddress: deps.appAddress, sessionId: reply.session_id })}`,
+          { noLinkPreview: true },
+        );
         continue;
       }
       for (const call of action.tool_calls) {

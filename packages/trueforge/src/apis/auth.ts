@@ -14,21 +14,14 @@ import {
 } from '../auth/cookies';
 import { EmailNotAllowedError } from '../auth/emailAllowlist';
 import { resolveRequestContext } from '../auth/identity';
-import { LOCAL_LOGIN_PAGE_HEADERS, localCreateAccountPage, localSignInPage } from '../auth/localLoginPage';
+import { LOCAL_LOGIN_PAGE_HEADERS, localNoAccountPage, localSignInPage } from '../auth/localLoginPage';
 import {
   LOCAL_SESSION_MAX_AGE_SECONDS,
   getOrCreateLocalSessionSecret,
   issueLocalSessionToken,
   verifyLocalSessionToken,
 } from '../auth/localSession';
-import {
-  LOCAL_PASSWORDS_DO_NOT_MATCH_MESSAGE,
-  LOCAL_SIGN_IN_EXISTS_MESSAGE,
-  LOCAL_WRONG_CREDENTIALS_MESSAGE,
-  changeLocalUserPassword,
-  createLocalUser,
-  verifyLocalSignIn,
-} from '../auth/localSignIn';
+import { LOCAL_WRONG_CREDENTIALS_MESSAGE, changeLocalUserPassword, verifyLocalSignIn } from '../auth/localSignIn';
 import { clientKeyFor, tooManyText } from '../auth/loginProxy';
 import { LoginAttemptLimiter } from '../auth/loginRateLimit';
 import { resolveOidcRequestContext } from '../auth/middleware';
@@ -144,9 +137,6 @@ export function createAuthRouter(params: {
   };
   router.use('/login', requireListedAddress);
   router.use('/callback', requireListedAddress);
-  if (local !== undefined) {
-    router.use('/create-account', requireListedAddress);
-  }
 
   /** Signs the person in: a fresh session token in the same cookie the OIDC callback sets. */
   const issueLocalSession = async (c: Context, user: LocalUserRecord): Promise<void> => {
@@ -177,8 +167,8 @@ export function createAuthRouter(params: {
   };
 
   if (local !== undefined && localLimiter !== undefined) {
-    // The form itself, served ahead of the login route like the retry page: the create form while
-    // no user exists, the sign-in form after, and a signed-in person is sent straight through.
+    // The form itself, served ahead of the login route like the retry page: while no user exists the
+    // page only says how to make one at the computer that runs Aman, since nobody may create it from a browser.
     const localLoginPage: MiddlewareHandler = async (c, next) => {
       if (c.req.method !== 'GET') {
         return next();
@@ -195,48 +185,12 @@ export function createAuthRouter(params: {
       }
       const user = await local.localUserStore.getUser();
       return c.html(
-        user === undefined
-          ? localCreateAccountPage({ returnTo: returnTo ?? '' })
-          : localSignInPage({ returnTo: returnTo ?? '' }),
+        user === undefined ? localNoAccountPage() : localSignInPage({ returnTo: returnTo ?? '' }),
         200,
         LOCAL_LOGIN_PAGE_HEADERS,
       );
     };
     router.use('/login', localLoginPage);
-
-    // First run: create the one sign-in. The store refuses a second, so this path closes itself.
-    router.post('/create-account', async c => {
-      const pageStart = localLimiter.allowPageStart(localClientKey(c));
-      if (!pageStart.allowed) {
-        return c.text(tooManyText(pageStart.retryAfterSeconds, 'address'), 429, {
-          'Retry-After': String(pageStart.retryAfterSeconds),
-        });
-      }
-      const fields = await formFields(c);
-      const returnTo = fields['return_to'] ?? '';
-      const email = fields['email'] ?? '';
-      const password = fields['password'] ?? '';
-      if (password !== (fields['password_confirm'] ?? '')) {
-        return c.html(
-          localCreateAccountPage({ returnTo, email, error: LOCAL_PASSWORDS_DO_NOT_MATCH_MESSAGE }),
-          400,
-          LOCAL_LOGIN_PAGE_HEADERS,
-        );
-      }
-      const created = await createLocalUser({ store: local.localUserStore, email, password });
-      if (!created.ok) {
-        if (created.message === LOCAL_SIGN_IN_EXISTS_MESSAGE) {
-          return c.html(localSignInPage({ returnTo, email, error: created.message }), 400, LOCAL_LOGIN_PAGE_HEADERS);
-        }
-        return c.html(
-          localCreateAccountPage({ returnTo, email, error: created.message }),
-          400,
-          LOCAL_LOGIN_PAGE_HEADERS,
-        );
-      }
-      await issueLocalSession(c, created.user);
-      return c.redirect(safeReturnTo(returnTo === '' ? undefined : returnTo), 302);
-    });
 
     // The password check sits behind the same limiter that guards the sign-in service's form.
     router.post('/login', async c => {

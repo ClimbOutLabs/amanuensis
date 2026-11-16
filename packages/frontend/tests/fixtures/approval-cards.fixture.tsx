@@ -43,7 +43,7 @@ const cards: { kind: string; card: SentinelApprovalCard }[] = [
         location: 'Corner cafe',
         description: 'Talk about the lease.',
         attendees: ['ada@example.com'],
-        guests_emailed: true,
+        guests_line: 'Google will email every guest about this.',
         one_of_repeating: false,
         before: null,
       },
