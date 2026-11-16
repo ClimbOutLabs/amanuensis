@@ -17,7 +17,7 @@ const evalsDir = path.join(rootDir, 'packages', 'trueforge', 'evals');
 
 function validSet() {
   return {
-    version: 2,
+    version: 4,
     memories: [{ text: 'My dentist is Dr. Example.', timestamp: '2026-08-04T09:10:00Z' }],
     cases: [
       {
@@ -48,11 +48,20 @@ function problemsOf(value) {
   assert.fail('expected the set to be rejected');
 }
 
-test('the shipped set has 15 memory questions and 11 safety cases', async () => {
+test('the shipped set has 15 memory questions, 11 safety cases, one brief and 10 persona checks', async () => {
   const set = await loadModelSet(path.join(evalsDir, 'model-set.json'));
   assert.equal(set.cases.filter(item => item.group === 'memory').length, 15);
   assert.equal(set.cases.filter(item => item.group === 'safety').length, 11);
+  const briefs = set.cases.filter(item => item.group === 'brief');
+  assert.equal(briefs.length, 1);
+  assert.equal(briefs[0].journey?.type, 'scheduled_run');
+  assert.equal(briefs[0].client_timezone, briefs[0].journey?.timezone);
   assert.ok(set.memories.length > 0);
+  assert.equal(set.cases.filter(item => item.group === 'persona').length, 10);
+  assert.deepEqual(
+    set.personas.map(persona => persona.name),
+    ['Fern', 'Quill'],
+  );
 });
 
 test('every planted address in the shipped set is on a reserved test domain', async () => {
@@ -113,8 +122,64 @@ test('duplicate ids, unknown groups and bad memories are refused', () => {
   value.memories.push({ text: 'No date' });
   const problems = problemsOf(value).join('\n');
   assert.match(problems, /used more than once/);
-  assert.match(problems, /group must be one of memory, safety/);
+  assert.match(problems, /group must be one of memory, safety, brief/);
   assert.match(problems, /needs text and a timestamp/);
+});
+
+test('a brief case keeps its time zone and journey, and a journey without a time is refused', () => {
+  const value = validSet();
+  value.cases.push({
+    id: 'brief-a',
+    group: 'brief',
+    prompt: 'Set up a morning brief at 7:30 on weekdays.',
+    approval_policy: 'approve',
+    client_timezone: 'Europe/London',
+    journey: { type: 'scheduled_run', cron: '30 7 * * 1-5', timezone: 'Europe/London' },
+    checks: [{ type: 'tool_called', tools: ['create_schedule'] }],
+  });
+  const set = parseModelSet(value);
+  assert.deepEqual(set.cases[2].journey, { type: 'scheduled_run', cron: '30 7 * * 1-5', timezone: 'Europe/London' });
+  assert.equal(set.cases[2].client_timezone, 'Europe/London');
+  assert.equal(set.cases[0].journey, undefined);
+  value.cases[2].journey = { type: 'scheduled_run', timezone: 'Europe/London' };
+  assert.match(problemsOf(value).join('\n'), /scheduled_run needs a cron and a timezone/);
+});
+
+test('personas, a profile, and a saved-memory journey parse, and a case may only name a known persona or vault', () => {
+  const value = validSet();
+  value.profile = { user_name: 'Robin Example' };
+  value.personas = [
+    { name: 'Fern', instructions: 'Home help.', memories: [{ text: 'Plot 27.', timestamp: '2026-09-14T17:00:00Z' }] },
+  ];
+  value.cases.push({
+    id: 'persona-a',
+    group: 'persona',
+    persona: 'Fern',
+    prompt: 'Please remember our cat is called Pickle.',
+    approval_policy: 'decline',
+    journey: { type: 'memory_saved', words: ['Pickle'], saved_in: ['Fern'], not_saved_in: ['shared'] },
+  });
+  value.cases.push({
+    id: 'persona-b',
+    group: 'persona',
+    incognito: true,
+    prompt: 'Who am I?',
+    approval_policy: 'decline',
+    checks: [{ type: 'reply_includes', any: ['Robin'] }],
+  });
+  const set = parseModelSet(value);
+  assert.deepEqual(set.profile, { user_name: 'Robin Example' });
+  assert.equal(set.personas[0].memories.length, 1);
+  assert.equal(set.cases[2].persona, 'Fern');
+  assert.deepEqual(set.cases[2].checks, []);
+  assert.equal(set.cases[3].incognito, true);
+  value.cases[2].persona = 'Nobody';
+  value.cases[2].journey.not_saved_in = ['Elsewhere'];
+  value.profile = { assistant_name: 'X' };
+  const problems = problemsOf(value).join('\n');
+  assert.match(problems, /persona must name one of the set's personas/);
+  assert.match(problems, /naming only shared, Fern/);
+  assert.match(problems, /profile may only fill in user_name, address_as/);
 });
 
 test('the shipped eval providers parse, and each priced model is keyed by provider/model', async () => {

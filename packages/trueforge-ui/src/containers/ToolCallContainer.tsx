@@ -26,7 +26,7 @@ import { Button } from '../atoms/primitives/Button.js';
 import { MapCard, type MapRefusedPlace } from '../components/MapCard.js';
 import { useOptionalPersonas } from '../components/PersonaContext.js';
 import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
-import { useInstalledSkill } from '../hooks/useInstalledSkill.js';
+import { useInstalledSkill, useRemovedSkill } from '../hooks/useInstalledSkill.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
@@ -485,6 +485,7 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
     if (personaAdded) void reloadPersonas?.();
   }, [personaAdded, reloadPersonas]);
   useInstalledSkill({ toolName: part.toolName, complete: part.status?.type === 'complete', result: part.result });
+  useRemovedSkill({ toolName: part.toolName, complete: part.status?.type === 'complete', result: part.result });
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;

@@ -37,36 +37,39 @@ function allow(tool_call_id: string) {
 }
 
 describe('gateEvalApprovals', () => {
-  it('keeps approvals for fixture-backed tools, maps and search', async () => {
+  it('keeps approvals for fixture-backed tools, maps, search and a new schedule', async () => {
     const session = sessionWithCalls([
       { id: 'call-calendar', name: 'create_event' },
       { id: 'call-draft', name: 'draft_email' },
       { id: 'call-map', name: 'render_route' },
       { id: 'call-search', name: 'tavily_search' },
+      { id: 'call-schedule', name: 'create_schedule' },
     ]);
 
     const gated = await gateEvalApprovals({
       session,
       previous_turn_id: 'turn-1',
-      input: ['call-calendar', 'call-draft', 'call-map', 'call-search'].map(allow),
+      input: ['call-calendar', 'call-draft', 'call-map', 'call-search', 'call-schedule'].map(allow),
     });
 
     expect(gated?.every(item => item.type === 'user.tool_approval' && item.approval.status === 'allow')).toBe(true);
   });
 
-  it('declines a send, an extract, an unknown call and a call the paused turn never asked for', async () => {
+  it('declines a send, an extract, a schedule removal, an unknown call and a call the turn never asked for', async () => {
     const session = sessionWithCalls([
       { id: 'call-send', name: 'send_draft' },
       { id: 'call-extract', name: 'tavily_extract' },
+      { id: 'call-remove', name: 'delete_schedule' },
     ]);
 
     const gated = await gateEvalApprovals({
       session,
       previous_turn_id: 'turn-1',
-      input: ['call-send', 'call-extract', 'call-unknown'].map(allow),
+      input: ['call-send', 'call-extract', 'call-remove', 'call-unknown'].map(allow),
     });
 
     expect(gated?.map(item => (item.type === 'user.tool_approval' ? item.approval : undefined))).toEqual([
+      { status: 'deny', reason: EVAL_DECLINE_REASON },
       { status: 'deny', reason: EVAL_DECLINE_REASON },
       { status: 'deny', reason: EVAL_DECLINE_REASON },
       { status: 'deny', reason: EVAL_DECLINE_REASON },

@@ -12,11 +12,16 @@ import {
 } from '../eval-tokens/run.mjs';
 import { removeSpace, seedSpace } from '../eval-tokens/space.mjs';
 import { collectToolCalls, runChecks } from './checks.mjs';
+import { checkMemorySaved, checkScheduledRun, cleanUpJourney, snapshotJourney, snapshotVaults } from './journey.mjs';
 import { buildJudgePrompt, parseVerdict } from './judge.mjs';
+import { newPersonaSetUp, setUpPersonas, tearDownPersonas } from './personas.mjs';
 import { buildReport, RESULT_CSV_COLUMNS, resultCsv } from './report.mjs';
 
 /** Which part of the score a group counts toward. Every token-set group is an everyday task. */
 export function partOf(group) {
+  if (group === 'persona') {
+    return 'memory';
+  }
   return group === 'memory' || group === 'safety' ? group : 'tasks';
 }
 
@@ -32,12 +37,18 @@ function sleep(ms) {
 
 /**
  * The cases in the order they run: memory first, so earlier chats of the same run have not yet
- * been remembered, then safety, then the everyday tasks from the token set.
+ * been remembered, then safety, then the brief, then the persona cases, then the everyday tasks from the token set.
  * @param {{ modelSet: import('./parse.mjs').ModelSet, tokenSet: import('../eval-tokens/parse.mjs').TokenSet }} options
  */
 export function orderedCases({ modelSet, tokenSet }) {
   const byGroup = group => modelSet.cases.filter(item => item.group === group);
-  return [...byGroup('memory'), ...byGroup('safety'), ...tokenSet.prompts.map(prompt => ({ ...prompt, checks: [] }))];
+  return [
+    ...byGroup('memory'),
+    ...byGroup('safety'),
+    ...byGroup('brief'),
+    ...byGroup('persona'),
+    ...tokenSet.prompts.map(prompt => ({ ...prompt, checks: [] })),
+  ];
 }
 
 /**
@@ -131,13 +142,51 @@ async function removeRunMemories({ client, beforeIds, settleMs }) {
   return problems;
 }
 
-async function runCase({ client, model, testCase, temperature, run, pollIntervalMs, turnTimeoutMs }) {
+/** What a case's journey needs to know from before the chat, or undefined when it has none. */
+async function snapshotFor({ client, journey }) {
+  if (journey?.type === 'scheduled_run') {
+    return await snapshotJourney({ client });
+  }
+  if (journey?.type === 'memory_saved') {
+    return await snapshotVaults({ client, vaults: [...journey.saved_in, ...journey.not_saved_in] });
+  }
+  return undefined;
+}
+
+async function checkJourney({ client, before, journey, pollIntervalMs, settleMs }) {
+  return journey.type === 'scheduled_run'
+    ? await checkScheduledRun({ client, before, expect: journey, pollIntervalMs })
+    : await checkMemorySaved({ client, before, expect: journey, settleMs });
+}
+
+async function runCase({
+  client,
+  model,
+  testCase,
+  temperature,
+  run,
+  pollIntervalMs,
+  turnTimeoutMs,
+  settleMs,
+  personaIds,
+  leftovers,
+}) {
   const progress = { turns: [], approvals: 0 };
   let status;
   let error;
   let toolCalls = [];
+  let journeyChecks = [];
+  const { journey } = testCase;
+  const before = await snapshotFor({ client, journey });
   try {
-    const sessionId = await client.createSession({ model: model.name, temperature });
+    const sessionId = await client.createSession({
+      model: model.name,
+      temperature,
+      incognito: testCase.incognito === true,
+    });
+    if (testCase.persona !== undefined) {
+      await client.setSessionPersona({ sessionId, personaId: personaIds[testCase.persona] });
+    }
     status = await driveTurns({
       client,
       sessionId,
@@ -147,15 +196,32 @@ async function runCase({ client, model, testCase, temperature, run, pollInterval
       pollIntervalMs,
       turnTimeoutMs,
       progress,
+      clientTimezone: testCase.client_timezone,
     });
     error = describeTerminalState(progress.turns.at(-1)?.state ?? {});
     toolCalls = collectToolCalls(await client.listSessionEvents(sessionId));
+    if (journey !== undefined && status === 'done') {
+      try {
+        journeyChecks = await checkJourney({ client, before, journey, pollIntervalMs, settleMs });
+      } catch (caught) {
+        if (isRunStopping(caught)) {
+          throw caught;
+        }
+        // A journey that could not be followed must fail the case, never leave only the chat's checks.
+        const detail = caught instanceof Error ? caught.message : 'unknown failure';
+        journeyChecks = [{ check: 'what the chat left behind could be read', pass: false, detail }];
+      }
+    }
   } catch (caught) {
     if (isRunStopping(caught)) {
       throw caught;
     }
     status = status ?? 'request_failed';
     error = caught instanceof Error ? caught.message : 'Unknown request failure.';
+  } finally {
+    if (journey?.type === 'scheduled_run') {
+      leftovers.push(...(await cleanUpJourney({ client, before })));
+    }
   }
   const last = progress.turns.at(-1);
   const reply = last !== undefined && last.state.status === 'done' ? replyTextOf(last.state.output) : '';
@@ -171,7 +237,7 @@ async function runCase({ client, model, testCase, temperature, run, pollInterval
     ...combineTurnMetrics(progress.turns.map(turn => turn.state.metrics)),
     reply,
     tool_calls: toolCalls,
-    checks: status === 'done' ? runChecks({ checks: testCase.checks, reply, toolCalls }) : [],
+    checks: status === 'done' ? [...runChecks({ checks: testCase.checks, reply, toolCalls }), ...journeyChecks] : [],
     checklist: testCase.checklist,
     prompt: testCase.prompt,
     judged: [],
@@ -271,6 +337,8 @@ export async function runEvalModels({
   const rows = [];
   const costs = {};
   const cleanupProblems = [];
+  const journeyLeftovers = [];
+  const personaLeftovers = [];
 
   const seeded = await seedSpace({ client, content: space });
   try {
@@ -278,16 +346,38 @@ export async function runEvalModels({
       const beforeIds = new Set((await client.listMemoryEntries()).map(entry => entry.id));
       const usageBefore = await readUsage(client);
       const modelRows = [];
+      const personaSetUp = newPersonaSetUp();
       try {
         await client.importMemories(modelSet.memories);
+        await setUpPersonas({
+          client,
+          profile: modelSet.profile,
+          personas: modelSet.personas,
+          model: model.name,
+          setUp: personaSetUp,
+        });
         for (let run = 1; run <= runs; run += 1) {
           for (const testCase of cases) {
             log(`${model.name}  run ${String(run)}/${String(runs)}  ${testCase.id}`);
-            modelRows.push(await runCase({ client, model, testCase, temperature, run, pollIntervalMs, turnTimeoutMs }));
+            modelRows.push(
+              await runCase({
+                client,
+                model,
+                testCase,
+                temperature,
+                run,
+                pollIntervalMs,
+                turnTimeoutMs,
+                settleMs: memorySettleMs,
+                personaIds: personaSetUp.personaIds,
+                leftovers: journeyLeftovers,
+              }),
+            );
           }
         }
       } finally {
         cleanupProblems.push(...(await removeRunMemories({ client, beforeIds, settleMs: memorySettleMs })));
+        personaLeftovers.push(...(await tearDownPersonas({ client, setUp: personaSetUp })));
       }
       const usageAfter = await readUsage(client);
       costs[model.name] = modelCost({
@@ -340,6 +430,8 @@ export async function runEvalModels({
     costs,
     rows,
     cleanupProblems,
+    journeyLeftovers,
+    personaLeftovers,
   });
   await mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, 'results.csv');

@@ -22,7 +22,7 @@ machine that runs it; there is no button in the app.
   --user <owner>          The owner's user id (default: the owner); any other id is refused
   --display-name <name>   How the owner is named on imported chats (default: the user id)
   --dry-run               Check the file and say what an import would bring, including anything it would leave out, and change nothing
-  --check-ready           Print whether the search model the import needs is on disk yet, and change nothing
+  --check-ready           Print whether the search model the import needs is on disk, and change nothing
 
 Prints the summary on stdout, in plain words, and the result as JSON on stderr, where the
 installer keeps it in the import log. Exit codes: 0 ok, 1 failure, 2 usage.
@@ -133,7 +133,7 @@ export function createImportData(deps: ImportDataDeps): Command {
         throw new UsageError('--check-ready takes no other options.');
       }
       const ready = await deps.searchModelReady();
-      await io.stdout(`${JSON.stringify({ search_model: ready ? 'ready' : 'downloading' })}\n`);
+      await io.stdout(`${JSON.stringify({ search_model: ready ? 'ready' : 'missing' })}\n`);
       return 0;
     }
     if (options.in === undefined || options.in.trim() === '') {

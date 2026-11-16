@@ -26,7 +26,7 @@ async function withLogsOnStderr<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** The import refuses until this is true; the app downloads the model at boot, so the installer polls this first. */
+/** The import refuses until this is true; the installer asks this first, so a missing model stops it before any change. */
 export async function isSearchModelReady(): Promise<boolean> {
   const [{ default: configuration }, { isEmbeddingModelCached }] = await Promise.all([
     import('../../config'),
