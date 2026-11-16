@@ -24,11 +24,19 @@ export type TerminalPairingConfirmation = {
 };
 
 /**
- * The terminal pairing surface: confirming a pairing code, and looking after the
- * terminals already paired. Hosts provide it; absent it, the pairing page and the
- * Paired terminals list in Settings never render.
+ * The terminal pairing surface: confirming a pairing code, looking up the terminal
+ * waiting on one, and looking after the terminals already paired. Hosts provide it;
+ * absent it, the pairing page and the Paired terminals list in Settings never render.
  */
 export type TerminalPairingApi = {
+  /**
+   * The name of the terminal waiting on a pairing code, or null when the server
+   * holds no live pairing for that code. Wrong, expired and already used codes all
+   * answer the same way, so the page cannot tell them apart. This never throws:
+   * when no name comes back, the page shows the code alone, as it did before the
+   * lookup existed.
+   */
+  lookupPairing: (input: { code: string }) => Promise<string | null>;
   /**
    * Confirms a pairing code for the signed-in person and pairs the terminal that
    * asked. A failure throws an Error whose message is one plain line the page can

@@ -76,8 +76,8 @@ const PairedTerminalsSection = () => {
     <div className="rounded-lg border border-border bg-card-bg p-4">
       <h3 className="text-sm font-semibold text-text-primary">Paired terminals</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        A terminal pairs with Aman instead of signing in, so it can reach your chats and nothing else. Revoking one
-        stops it the next time it asks.
+        A terminal pairs with Aman instead of signing in, so it can reach your chats and answer approval cards in them,
+        and nothing else. Revoking one stops it the next time it asks.
       </p>
 
       {error !== null ? (

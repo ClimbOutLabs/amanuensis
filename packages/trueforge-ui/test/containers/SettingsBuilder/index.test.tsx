@@ -95,6 +95,7 @@ function createServer(options: { catalog?: boolean; skills?: boolean; signInMode
 }
 
 const terminalPairingStub: TerminalPairingApi = {
+  lookupPairing: async () => null,
   confirmPairing: async () => ({ device_name: 'Pippa', paired_at: '2026-11-14T09:15:00.000Z' }),
   listPairedTerminals: async () => [],
   revokePairedTerminal: async () => {},

@@ -63,10 +63,10 @@ A terminal app can pair with Aman instead of signing in. Pairing starts on the t
 To confirm a pairing:
 
 1. Open the link the terminal shows. If you are not signed in, sign in first, and Aman brings you back to the page.
-2. Check that the code on the page matches the code on your terminal.
+2. Check that the code on the page matches the code on your terminal. The page names the terminal that is waiting when it can, so check that name too.
 3. Click **Confirm pairing**.
 
-The page then names the terminal that paired, and you can close the page. A paired terminal can reach your chats, and nothing else. It cannot open Settings or change any setting. In the terminal app, approval cards appear in the chat and you can answer them there, so anything a card guards still waits for your answer before it happens.
+The page then names the terminal that paired, and you can close the page. A paired terminal can reach your chats and answer approval cards in them, and nothing else. It cannot open Settings or change any setting. In the terminal app, approval cards appear in the chat and you can answer them there, so anything a card guards still waits for your answer before it happens.
 
 To stop a terminal:
 

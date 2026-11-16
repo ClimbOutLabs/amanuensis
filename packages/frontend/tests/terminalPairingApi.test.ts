@@ -40,6 +40,41 @@ function fetcherReturning(response: Response, capture: CapturedCall): typeof fet
 const emptyCapture = (): CapturedCall => ({ url: '', method: undefined, body: undefined });
 
 describe('createTerminalPairingApi', () => {
+  it('looks up the name of the terminal waiting on a code', async () => {
+    const capture = emptyCapture();
+    const api = createTerminalPairingApi(fetcherReturning(jsonResponse({ data: { device_name: 'Pippa' } }), capture));
+
+    const name = await api.lookupPairing({ code: 'K7QX-42PD' });
+
+    assert.equal(name, 'Pippa');
+    assert.equal(capture.method, 'POST');
+    assert.ok(capture.url.endsWith('/api/v1/terminal-pairings/lookup'), capture.url);
+    assert.deepEqual(JSON.parse(capture.body ?? '{}'), { code: 'K7QX-42PD' });
+  });
+
+  it('reads the one refusal for a code as no name waiting', async () => {
+    const api = createTerminalPairingApi(
+      fetcherReturning(jsonResponse({ error: { message: REFUSAL_LINE } }, 404), emptyCapture()),
+    );
+
+    assert.equal(await api.lookupPairing({ code: 'K7QX-42PD' }), null);
+  });
+
+  it('reads an unreachable server as no name waiting', async () => {
+    const fetcher: typeof fetch = async () => {
+      throw new Error('network down');
+    };
+    const api = createTerminalPairingApi(fetcher);
+
+    assert.equal(await api.lookupPairing({ code: 'K7QX-42PD' }), null);
+  });
+
+  it('reads an answer in an unexpected shape as no name waiting', async () => {
+    const api = createTerminalPairingApi(fetcherReturning(jsonResponse({ data: {} }), emptyCapture()));
+
+    assert.equal(await api.lookupPairing({ code: 'K7QX-42PD' }), null);
+  });
+
   it('confirms a code and returns the terminal that was paired', async () => {
     const capture = emptyCapture();
     const api = createTerminalPairingApi(

@@ -24,6 +24,7 @@ const accountStub: LocalAccountApi = {
 
 function pairingStub(): TerminalPairingApi {
   return {
+    lookupPairing: vi.fn(async () => null),
     confirmPairing: vi.fn(async () => ({ device_name: 'Pippa', paired_at: PIPPA.paired_at })),
     listPairedTerminals: vi.fn(async () => [PIPPA]),
     revokePairedTerminal: vi.fn(async () => undefined),

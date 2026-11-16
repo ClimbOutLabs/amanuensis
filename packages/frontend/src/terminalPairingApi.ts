@@ -2,6 +2,7 @@ import type { PairedTerminal, TerminalPairingApi, TerminalPairingConfirmation } 
 
 import { apiPath } from './publicPath';
 
+const LOOKUP_URL = '/api/v1/terminal-pairings/lookup';
 const CONFIRM_URL = '/api/v1/terminal-pairings/confirm';
 const TERMINAL_KEYS_URL = '/api/v1/settings/terminal-keys';
 const COULD_NOT_REACH_LINE = "Couldn't reach the server. Check your connection and try again.";
@@ -33,6 +34,11 @@ function serverErrorMessage(body: unknown): string | undefined {
 /** The answer's `data`, read defensively; undefined when the body does not carry one. */
 function dataOf(body: unknown): unknown {
   return isRecord(body) ? body.data : undefined;
+}
+
+function readDeviceName(body: unknown): string | undefined {
+  const data = dataOf(body);
+  return isRecord(data) ? readNonEmptyString(data.device_name) : undefined;
 }
 
 function readConfirmation(body: unknown): TerminalPairingConfirmation | undefined {
@@ -102,6 +108,31 @@ export function createTerminalPairingApi(fetcher: typeof fetch): TerminalPairing
   };
 
   return {
+    /**
+     * The one call here that never throws. The name is a hint the page shows
+     * before the confirm, never a gate, so any failure at all (the server's one
+     * refusal for a wrong, expired or used code, an unreachable server, an answer
+     * in an unexpected shape) reads as no name, and the page shows the code alone.
+     */
+    async lookupPairing(input) {
+      let response: Response;
+      try {
+        response = await fetcher(apiPath(LOOKUP_URL), {
+          credentials: 'include',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        });
+      } catch {
+        return null;
+      }
+      if (!response.ok) {
+        return null;
+      }
+      const body: unknown = await response.json().catch(() => undefined);
+      return readDeviceName(body) ?? null;
+    },
+
     async confirmPairing(input) {
       const body = await call(
         CONFIRM_URL,

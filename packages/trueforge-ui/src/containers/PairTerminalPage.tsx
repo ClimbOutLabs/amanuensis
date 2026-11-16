@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Button } from '@/atoms/primitives/Button.js';
 import { useOptionalTerminalPairing, type TerminalPairingConfirmation } from '@/components/TerminalPairingContext.js';
@@ -14,15 +14,40 @@ const NOT_YOUR_PAIRING_LINE = 'If you did not just start pairing on your own ter
 /**
  * The page a pairing link opens. The terminal that asked shows the same code, so the
  * person can check the two match before confirming. Nothing pairs until the person
- * presses the button: opening the link on its own pairs nothing. The name of the
- * terminal that asked arrives with the answer, because the server offers no way to
- * look a code up before it is confirmed.
+ * presses the button: opening the link on its own pairs nothing. Before the confirm,
+ * the page looks up the name of the terminal waiting on the code and shows it when
+ * the server holds a live pairing for it. When it does not, the page shows the code
+ * alone, as it did before the lookup existed.
  */
 const PairTerminalPage = ({ code }: { code: string | null }) => {
   const pairing = useOptionalTerminalPairing();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [paired, setPaired] = useState<TerminalPairingConfirmation | null>(null);
+  const [waitingName, setWaitingName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pairing === null || code === null) {
+      return;
+    }
+    let cancelled = false;
+    pairing.lookupPairing({ code }).then(
+      name => {
+        if (!cancelled) {
+          setWaitingName(name);
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [pairing, code]);
+
+  const askingLine =
+    waitingName !== null
+      ? `${waitingName} is asking to pair with your Aman. Pairing lets that terminal reach your chats and answer approval cards in them, and nothing else.`
+      : 'A terminal is asking to pair with your Aman. Pairing lets that terminal reach your chats and answer approval cards in them, and nothing else.';
 
   const handleConfirm = async () => {
     if (pairing === null || code === null || busy) {
@@ -58,10 +83,7 @@ const PairTerminalPage = ({ code }: { code: string | null }) => {
               <p className="text-sm leading-6 text-text-secondary">{NO_CODE_LINE}</p>
             ) : (
               <>
-                <p className="text-sm leading-6 text-text-secondary">
-                  A terminal is asking to pair with your Aman. Pairing lets that terminal reach your chats, and nothing
-                  else.
-                </p>
+                <p className="text-sm leading-6 text-text-secondary">{askingLine}</p>
                 <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Pairing code</p>
                 <p className="text-3xl font-semibold tracking-wide text-text-primary">{code}</p>
                 <p className="text-sm leading-6 text-text-secondary">

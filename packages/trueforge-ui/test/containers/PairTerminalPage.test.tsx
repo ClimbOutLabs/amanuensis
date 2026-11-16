@@ -12,6 +12,7 @@ const SIGN_IN_LINE = 'Sign in first, then open this link again.';
 
 function apiStub(overrides: Partial<TerminalPairingApi>): TerminalPairingApi {
   return {
+    lookupPairing: vi.fn(async () => null),
     confirmPairing: vi.fn(async () => ({ device_name: 'Pippa', paired_at: '2026-11-15T10:30:00.000Z' })),
     listPairedTerminals: vi.fn(async () => []),
     revokePairedTerminal: vi.fn(async () => undefined),
@@ -45,6 +46,53 @@ describe('PairTerminalPage', () => {
     expect(api.confirmPairing).toHaveBeenCalledWith({ code: CODE });
     expect(screen.getByText(/Pippa is paired and ready to use/)).toBeInTheDocument();
     expect(screen.getByText(/You can close this page/)).toBeInTheDocument();
+  });
+
+  it('names the waiting terminal before confirming when the lookup finds one', async () => {
+    const api = apiStub({ lookupPairing: vi.fn(async () => 'Pippa') });
+
+    renderPage(api, CODE);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Pippa is asking to pair with your Aman/)).toBeInTheDocument();
+    });
+    expect(api.lookupPairing).toHaveBeenCalledWith({ code: CODE });
+    expect(screen.getByText(/answer approval cards in them, and nothing else/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm pairing' })).toBeInTheDocument();
+    // The name is shown on the page only. It is never written into the address,
+    // where the code was carefully kept out of as well.
+    expect(window.location.href).not.toContain('Pippa');
+  });
+
+  it('shows the code alone when the lookup finds no live pairing, and confirm still pairs', async () => {
+    const api = apiStub({ lookupPairing: vi.fn(async () => null) });
+
+    renderPage(api, CODE);
+
+    await waitFor(() => {
+      expect(api.lookupPairing).toHaveBeenCalledWith({ code: CODE });
+    });
+    expect(screen.getByText(/A terminal is asking to pair with your Aman/)).toBeInTheDocument();
+    expect(screen.getByText(CODE)).toBeInTheDocument();
+    expect(
+      screen.getByText('If you did not just start pairing on your own terminal, close this page.'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm pairing' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Terminal paired' })).toBeInTheDocument();
+    });
+  });
+
+  it('says plainly that a paired terminal can answer approval cards', () => {
+    renderPage(apiStub({}), CODE);
+
+    expect(
+      screen.getByText(
+        /Pairing lets that terminal reach your chats and answer approval cards in them, and nothing else/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('warns a person who did not start the pairing to close the page, before the confirm button', () => {

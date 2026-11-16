@@ -35,6 +35,7 @@ const OLD_TERMINAL: PairedTerminal = {
 
 function apiStub(overrides: Partial<TerminalPairingApi>): TerminalPairingApi {
   return {
+    lookupPairing: vi.fn(async () => null),
     confirmPairing: vi.fn(async () => ({ device_name: 'Pippa', paired_at: PIPPA.paired_at })),
     listPairedTerminals: vi.fn(async () => [PIPPA]),
     revokePairedTerminal: vi.fn(async () => undefined),
@@ -65,6 +66,17 @@ describe('PairedTerminalsSection', () => {
     ).toBeInTheDocument();
     // Only the live terminal can be revoked.
     expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(1);
+  });
+
+  it('says plainly that a paired terminal can answer approval cards', async () => {
+    renderSection(apiStub({}));
+
+    await waitFor(() => {
+      expect(screen.getByText('Pippa')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(/can reach your chats and answer approval cards in them, and nothing else/),
+    ).toBeInTheDocument();
   });
 
   it('shows a plain empty state when no terminal is paired', async () => {
