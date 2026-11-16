@@ -5,8 +5,8 @@ import { JOURNEYS } from './journey.mjs';
 import { SHARED_VAULT } from './personas.mjs';
 
 /** Must match the `group` values in packages/trueforge/evals/model-set.json. */
-export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety', 'brief', 'persona']);
-export const MODEL_SET_VERSION = 4;
+export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety', 'brief', 'persona', 'skills']);
+export const MODEL_SET_VERSION = 5;
 /** The Personalization page fields a set may fill in for the run. */
 const PROFILE_FIELDS = Object.freeze(['user_name', 'address_as']);
 export const CHECK_TYPES = Object.freeze([
@@ -15,6 +15,7 @@ export const CHECK_TYPES = Object.freeze([
   'tool_called',
   'no_tool',
   'no_tool_args_include',
+  'refused_commands_at_most',
 ]);
 
 /**
@@ -22,13 +23,18 @@ export const CHECK_TYPES = Object.freeze([
  *   | { type: 'reply_excludes', all: string[] }
  *   | { type: 'tool_called', tools: string[] }
  *   | { type: 'no_tool', tools: string[] }
- *   | { type: 'no_tool_args_include', any: string[] }} Check
+ *   | { type: 'no_tool_args_include', any: string[] }
+ *   | { type: 'refused_commands_at_most', max: number }} Check
  * @typedef {{ type: 'scheduled_run', cron: string, timezone: string }
- *   | { type: 'memory_saved', words: string[], saved_in: string[], not_saved_in: string[] }} Journey
- * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[], client_timezone?: string, journey?: Journey, persona?: string, incognito?: boolean }} ModelCase
+ *   | { type: 'memory_saved', words: string[], saved_in: string[], not_saved_in: string[] }
+ *   | { type: 'skill_added', websites: string[] }
+ *   | { type: 'skill_removed' }
+ *   | { type: 'news_titles', at_least: number }} Journey
+ * @typedef {{ prompt: string, checks: Check[], journey?: Journey }} CaseStep
+ * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[], client_timezone?: string, journey?: Journey, persona?: string, incognito?: boolean, steps?: CaseStep[] }} ModelCase
  * @typedef {{ text: string, timestamp: string }} SeedMemory
  * @typedef {{ name: string, instructions: string, memories: SeedMemory[] }} SetPersona
- * @typedef {{ version: 4, memories: SeedMemory[], profile?: Record<string, string>, personas: SetPersona[], cases: ModelCase[] }} ModelSet
+ * @typedef {{ version: 5, memories: SeedMemory[], profile?: Record<string, string>, personas: SetPersona[], cases: ModelCase[] }} ModelSet
  */
 
 export class ModelSetError extends Error {
@@ -74,6 +80,13 @@ function parseCheck(check, where, problems) {
   if (!isPlainObject(check) || !CHECK_TYPES.includes(check.type)) {
     problems.push(`${where}.type must be one of ${CHECK_TYPES.join(', ')}`);
     return undefined;
+  }
+  if (check.type === 'refused_commands_at_most') {
+    if (!Number.isInteger(check.max) || check.max < 0) {
+      problems.push(`${where}.max must be a whole number, 0 or more`);
+      return undefined;
+    }
+    return { type: check.type, max: check.max };
   }
   const field = CHECK_LIST_FIELD[check.type];
   if (!isTextList(check[field])) {
@@ -171,8 +184,53 @@ function parseJourney(journey, label, { vaults, problems }) {
     );
     return undefined;
   }
+  if (isPlainObject(journey) && journey.type === 'skill_added') {
+    const websites = journey.websites ?? [];
+    if (Array.isArray(websites) && websites.every(isNonEmptyString)) {
+      return { type: journey.type, websites: [...websites] };
+    }
+    problems.push(`${label}.journey of type skill_added takes websites, a list of host names`);
+    return undefined;
+  }
+  if (isPlainObject(journey) && journey.type === 'skill_removed') {
+    return { type: journey.type };
+  }
+  if (isPlainObject(journey) && journey.type === 'news_titles') {
+    if (Number.isInteger(journey.at_least) && journey.at_least > 0) {
+      return { type: journey.type, at_least: journey.at_least };
+    }
+    problems.push(`${label}.journey of type news_titles needs at_least, a whole number above 0`);
+    return undefined;
+  }
   problems.push(`${label}.journey needs a type (${JOURNEYS.join(', ')})`);
   return undefined;
+}
+
+/**
+ * The messages of a case that runs in one chat, one after another, each with its own checks.
+ * @returns {CaseStep[] | undefined}
+ */
+function parseSteps(value, label, { vaults, problems }) {
+  if (!Array.isArray(value) || value.length < 2) {
+    problems.push(`${label}.steps must be a list of at least two messages`);
+    return undefined;
+  }
+  return value.map((step, index) => {
+    const where = `${label}.steps[${String(index)}]`;
+    if (!isPlainObject(step) || !isNonEmptyString(step.prompt)) {
+      problems.push(`${where} needs a prompt`);
+      return { prompt: '', checks: [] };
+    }
+    const rawChecks = Array.isArray(step.checks) ? step.checks : [];
+    if (rawChecks.length === 0 && step.journey === undefined) {
+      problems.push(`${where} needs at least one check or a journey, or it can never fail`);
+    }
+    const checks = rawChecks
+      .map((check, checkIndex) => parseCheck(check, `${where}.checks[${String(checkIndex)}]`, problems))
+      .filter(check => check !== undefined);
+    const journey = step.journey === undefined ? undefined : parseJourney(step.journey, where, { vaults, problems });
+    return { prompt: step.prompt, checks, ...(journey === undefined ? {} : { journey }) };
+  });
 }
 
 /**
@@ -206,9 +264,12 @@ export function parseModelSet(value) {
       problems.push(`${where} must be an object`);
       return;
     }
-    const { id, group, prompt, approval_policy: policy } = entry;
+    const { id, group, approval_policy: policy } = entry;
     const label = isNonEmptyString(id) ? `${where} (${id})` : where;
     const before = problems.length;
+    const steps = entry.steps === undefined ? undefined : parseSteps(entry.steps, label, { vaults, problems });
+    // A case of several messages is read as one prompt by the judge and the report.
+    const prompt = steps === undefined ? entry.prompt : steps.map(step => step.prompt).join('\n\n');
     if (!isNonEmptyString(id)) {
       problems.push(`${where}.id must be a non-empty string`);
     } else if (seenIds.has(id)) {
@@ -219,8 +280,14 @@ export function parseModelSet(value) {
     if (!MODEL_SET_GROUPS.includes(group)) {
       problems.push(`${label}.group must be one of ${MODEL_SET_GROUPS.join(', ')}`);
     }
-    if (!isNonEmptyString(prompt)) {
+    if (entry.steps === undefined && !isNonEmptyString(prompt)) {
       problems.push(`${label}.prompt must be a non-empty string`);
+    }
+    if (
+      entry.steps !== undefined &&
+      (entry.prompt !== undefined || entry.checks !== undefined || entry.journey !== undefined)
+    ) {
+      problems.push(`${label} has steps, so its prompt, checks and journey belong in the steps`);
     }
     if (!APPROVAL_POLICIES.includes(policy)) {
       problems.push(`${label}.approval_policy must be "approve" or "decline"`);
@@ -237,7 +304,8 @@ export function parseModelSet(value) {
       Array.isArray(rawChecks) &&
       Array.isArray(rawChecklist) &&
       rawChecks.length + rawChecklist.length === 0 &&
-      entry.journey === undefined
+      entry.journey === undefined &&
+      steps === undefined
     ) {
       problems.push(`${label} needs at least one check, checklist item or journey, or it can never fail`);
     }
@@ -269,6 +337,7 @@ export function parseModelSet(value) {
         ...(journey === undefined ? {} : { journey }),
         ...(persona === undefined ? {} : { persona }),
         ...(incognito === true ? { incognito } : {}),
+        ...(steps === undefined ? {} : { steps }),
       });
     }
   });

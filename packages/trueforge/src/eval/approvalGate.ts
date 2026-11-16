@@ -1,7 +1,8 @@
 /**
  * Server-side approval gate for eval instances. The runner answers every approval card with its prompt's
  * policy, so the server alone decides what an eval may run: only the fixture-backed mail and calendar tools,
- * maps, web search, and making a schedule. Any other approval is turned into a denial before the turn runs.
+ * maps, web search, and making a schedule, plus adding, running and removing a skill when the instance has its own
+ * sandbox for that. Any other approval is turned into a denial before the turn runs.
  */
 import { z } from 'zod';
 
@@ -23,8 +24,14 @@ import {
   UPDATE_DRAFT_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/email/gmail/toolContract';
 import { MAPS_TOOL_NAMES } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
+import {
+  SANDBOX_EXEC_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+  SANDBOX_WRITE_FILE_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/sandbox/Sandbox';
 import { CREATE_SCHEDULE_TOOL_NAME } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { TAVILY_SEARCH_TOOL_NAME } from '@truefoundry/trueforge-core/core/search/TavilyClient';
+import { INSTALL_SKILL_TOOL_NAME, REMOVE_SKILL_TOOL_NAME } from '@truefoundry/trueforge-core/core/skills/toolContract';
 
 /** Sending mail is deliberately absent: an eval run may draft, never send. */
 const EVAL_APPROVABLE_TOOL_NAMES: readonly string[] = [
@@ -46,8 +53,20 @@ const EVAL_APPROVABLE_TOOL_NAMES: readonly string[] = [
   CREATE_SCHEDULE_TOOL_NAME,
 ];
 
+/**
+ * Adding a skill, running it in the sandbox and removing it again. Sending mail stays out: a skill's sandbox can
+ * reach only the websites its card listed, and the eval removes the skill after.
+ */
+const EVAL_SKILL_TOOL_NAMES: readonly string[] = [
+  INSTALL_SKILL_TOOL_NAME,
+  REMOVE_SKILL_TOOL_NAME,
+  SANDBOX_EXEC_TOOL_NAME,
+  SANDBOX_WRITE_FILE_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+];
+
 export const EVAL_DECLINE_REASON =
-  'Declined: an eval instance approves only its own mail, calendar, map and search tools, and making a schedule.';
+  'Declined: an eval instance approves only its own mail, calendar, map and search tools, making a schedule, and skills when it is set up for them.';
 
 const ModelMessageSchema = z.object({
   type: z.literal(EventType.MODEL_MESSAGE),
@@ -99,11 +118,14 @@ export async function gateEvalApprovals({
   session,
   previous_turn_id,
   input,
+  allowSkills,
 }: {
   session: EvalApprovalSession;
   /** The paused turn the approvals answer, already resolved to a real turn; null when there is none. */
   previous_turn_id: string | null;
   input: TurnInputItem[] | undefined;
+  /** True on an eval instance set up to add, run and remove skills. */
+  allowSkills: boolean;
 }): Promise<TurnInputItem[] | undefined> {
   if (!input?.some(item => item.type === EventType.USER_TOOL_APPROVAL && item.approval.status === 'allow')) {
     return input;
@@ -116,7 +138,10 @@ export async function gateEvalApprovals({
       return item;
     }
     const name = names.get(item.tool_call_id);
-    if (name !== undefined && EVAL_APPROVABLE_TOOL_NAMES.includes(name)) {
+    if (
+      name !== undefined &&
+      (EVAL_APPROVABLE_TOOL_NAMES.includes(name) || (allowSkills && EVAL_SKILL_TOOL_NAMES.includes(name)))
+    ) {
       return item;
     }
     return { ...item, approval: { status: 'deny', reason: EVAL_DECLINE_REASON } };

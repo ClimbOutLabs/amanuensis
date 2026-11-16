@@ -2720,6 +2720,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             session,
             previous_turn_id: previousTurnId,
             input: submitted.input,
+            allowSkills: configuration.AMAN_EVAL_SKILLS,
           }),
         }
       : submitted;

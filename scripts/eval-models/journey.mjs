@@ -4,7 +4,7 @@
 import { isRunStopping, replyTextOf } from '../eval-tokens/run.mjs';
 import { vaultNamespace } from './personas.mjs';
 
-export const JOURNEYS = Object.freeze(['scheduled_run', 'memory_saved']);
+export const JOURNEYS = Object.freeze(['scheduled_run', 'memory_saved', 'skill_added', 'skill_removed', 'news_titles']);
 
 /** How many times a vault is read while waiting for the instance to save a finished chat. */
 const MEMORY_SAVE_POLLS = 10;

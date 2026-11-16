@@ -1532,6 +1532,12 @@ export interface SharedServerConfiguration {
    * Default false.
    */
   AMAN_EVAL_MODE: boolean;
+  /**
+   * With eval mode on, also approves adding, running and removing a skill: the skill cards and the
+   * sandbox's command and file tools. Only for an eval instance with its own sandbox. Env: `AMAN_EVAL_SKILLS`.
+   * Default false.
+   */
+  AMAN_EVAL_SKILLS: boolean;
   /** Folder holding the eval fixtures (inbox, calendar). Set by the package layout, not by an env var. */
   EVAL_FIXTURE_DIR: string;
   /** Node environment. Env: `NODE_ENV`. */
@@ -2692,6 +2698,11 @@ const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
   AMAN_EVAL_MODE: parseBoolean({ envKey: 'AMAN_EVAL_MODE', raw: getEnv('AMAN_EVAL_MODE'), defaultValue: false }),
+  AMAN_EVAL_SKILLS: parseBoolean({
+    envKey: 'AMAN_EVAL_SKILLS',
+    raw: getEnv('AMAN_EVAL_SKILLS'),
+    defaultValue: false,
+  }),
   EVAL_FIXTURE_DIR: path.join(PACKAGE_ROOT, 'evals', 'fixtures'),
   NODE_ENV: getEnv('NODE_ENV'),
   BUILD_REF: parseBuildRef(getEnv('BUILD_REF')),
