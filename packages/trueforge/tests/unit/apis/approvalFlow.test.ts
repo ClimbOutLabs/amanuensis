@@ -15,6 +15,7 @@ import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../
 import {
   INERT_ASK_MEMORY_TOOL,
   INERT_ECHO_TOOL,
+  INERT_MAILBOX,
   INERT_READ_TOOL,
   INERT_SERVER_NAME,
   INERT_UNANNOTATED_TOOL,
@@ -366,6 +367,8 @@ describe('approval gate over an inert connector', () => {
     'asks before a read-only tool on a user-added connector runs, whatever its hints claim',
     async () => {
       const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      // The call names the connector's own folder: a call carrying only words is refused instead.
+      server.model.next({ toolArguments: { text: 'inert', mailbox: INERT_MAILBOX } });
       const echo = await runTurn({ server, sessionId, input: userMessage(INERT_ECHO_TOOL) });
       expect(pendingApproval(echo)).toBeDefined();
       expect(server.mcp.echoInvocations()).toBe(0);
@@ -681,6 +684,8 @@ describe('approval gate over an inert connector', () => {
       'refuses Always allow for a read-only tool that does not declare itself closed-world',
       async () => {
         const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        // The call names the connector's own folder: a call carrying only words is refused instead.
+        server.model.next({ toolArguments: { text: 'inert', mailbox: INERT_MAILBOX } });
         const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ECHO_TOOL) });
         const pending = pendingApproval(turn);
         expect(pending).toBeDefined();
@@ -1066,13 +1071,24 @@ describe('web search provider over an inert connector', () => {
   );
 
   it(
-    'still asks for the same tool once the connector is no longer the designated provider',
+    'refuses the same query once the connector is no longer the designated provider, since it shows no verifiable destination',
     async () => {
       await designateSearchProvider(false);
       const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
       const turn = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
 
-      expect(pendingApproval(turn)).toBeDefined();
+      // Nothing owns the call once the role is gone, and words with nowhere verifiable to go are
+      // refused rather than asked about. Either way it never runs silently.
+      expect(pendingApproval(turn)).toBeUndefined();
+      const audit = await auditEntries({ server, sessionId });
+      expect(audit).toContainEqual(
+        expect.objectContaining({
+          tool_name: INERT_ECHO_TOOL,
+          outcome: 'auto_denied',
+          auto_deny_reason: 'destination_unverifiable',
+        }),
+      );
+      expect(audit.every(entry => entry.outcome === 'auto_denied')).toBe(true);
       expect(server.mcp.echoInvocations()).toBe(0);
       expect(await stampedQueries(sessionId)).toEqual([]);
     },

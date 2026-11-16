@@ -54,6 +54,17 @@ export const INERT_SEARCH_MESSAGES_TOOL = 'search_messages';
 export const INERT_SEARCH_NOTES_TOOL = 'search_notes';
 export const INERT_WRITE_TOOL = 'inert_write';
 export const INERT_UNANNOTATED_TOOL = 'inert_unannotated';
+/**
+ * The folder in the connector's own store that the text tools act on. A connector call that
+ * carries words and names no place is refused as a send the card cannot show; naming this
+ * folder keeps the call inside the connector, so it still asks with a card.
+ */
+export const INERT_MAILBOX = 'inert';
+/**
+ * The tools whose scripted calls name `INERT_MAILBOX` by default. The echo tool stands in for a
+ * search, so it carries only its text unless a test names the folder.
+ */
+export const INERT_MAILBOX_TOOLS = [INERT_WRITE_TOOL, INERT_UNANNOTATED_TOOL] as const;
 export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
 export const INERT_SEARCH_MEMORY_TOOL = 'search_memory';
 /** Opt-in (`startInertMcpServer({ webSearch: true })`), so the default tool list stays unchanged. */
@@ -365,7 +376,7 @@ function buildMcpServer({
     INERT_ECHO_TOOL,
     {
       description: 'Returns its input unchanged.',
-      inputSchema: { text: z.string() },
+      inputSchema: { text: z.string(), mailbox: z.string().optional() },
       annotations: { readOnlyHint: true },
     },
     ({ text }) => {
@@ -438,7 +449,7 @@ function buildMcpServer({
     INERT_WRITE_TOOL,
     {
       description: 'Records a value. Annotated as a write so the approval gate covers it.',
-      inputSchema: { text: z.string() },
+      inputSchema: { text: z.string(), mailbox: z.string().optional() },
       annotations: { readOnlyHint: false },
     },
     async ({ text }) => {
@@ -458,7 +469,7 @@ function buildMcpServer({
     INERT_UNANNOTATED_TOOL,
     {
       description: 'Carries no annotations, so it matches `@unclassified` and is gated by default.',
-      inputSchema: { text: z.string() },
+      inputSchema: { text: z.string(), mailbox: z.string().optional() },
     },
     ({ text }) => {
       counters.unannotated += 1;
