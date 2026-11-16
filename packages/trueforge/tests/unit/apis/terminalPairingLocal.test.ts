@@ -5,7 +5,9 @@
  * Everyone here is made up.
  */
 import { z } from 'zod';
+import { createLocalUser } from '../../../src/auth/localSignIn';
 import configuration from '../../../src/config';
+import { SqliteLocalUserStore } from '../../../src/db/sqlite/local-user-store/SqliteLocalUserStore';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 
 const EMAIL = 'nora@example.test';
@@ -43,13 +45,21 @@ function sessionCookie(response: Response): string {
 }
 
 async function createSignIn(server: ApprovalTestServer): Promise<string> {
-  const created = await server.request(`${BASE}/api/v1/auth/create-account`, {
+  // The one sign-in is made on the machine itself, the way the terminal command makes
+  // it; the sign-in page only ever signs in with it afterwards.
+  const created = await createLocalUser({
+    store: new SqliteLocalUserStore(server.db()),
+    email: EMAIL,
+    password: PASSWORD,
+  });
+  expect(created.ok).toBe(true);
+  const signedIn = await server.request(`${BASE}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: ORIGIN },
-    body: new URLSearchParams({ email: EMAIL, password: PASSWORD, password_confirm: PASSWORD }).toString(),
+    body: new URLSearchParams({ email: EMAIL, password: PASSWORD }).toString(),
   });
-  expect(created.status).toBe(302);
-  return sessionCookie(created);
+  expect(signedIn.status).toBe(302);
+  return sessionCookie(signedIn);
 }
 
 function postJson(body: unknown, headers?: Record<string, string>): RequestInit {
