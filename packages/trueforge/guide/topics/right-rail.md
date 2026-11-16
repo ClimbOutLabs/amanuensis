@@ -4,14 +4,14 @@ title: The right rail
 covers: route:today, route:recallExclusion
 ---
 
-The right rail is your assistant's desk. On Home it shows what is on today, what is due, and what is waiting for your OK. In a chat it shows what your assistant is using for that chat. The rail reads stored information only. It never starts a model turn and never reads email.
+The right rail is your assistant's desk: on Home it shows what is on today, what is due, and what is waiting for your OK, and in a chat it shows what your assistant is using for that chat. The rail reads stored information only, so it never starts a model turn and never reads email.
 
 ## To see what is on today
 
 1. Open Home.
 2. Look at the right rail. The sections appear in this order: **Today**, **Due**, and **Needs your OK**.
-3. **Today** shows your calendar events for the day, with their times. When the day is over, tomorrow's first event shows too, with "Tomorrow" in front of its time.
-4. A line under the events says when you are next free, or that you are free for the rest of the day.
+3. **Today** shows your calendar events for the day, with their times. When the day has timed events and every one has finished, tomorrow's first event shows too, with "Tomorrow" in front of its time.
+4. A line under the events says when you are next free, or that you are free for the rest of the day. When your events run to the end of the day, there is no such line.
 5. **Due** shows reminders that are due today or overdue, each with the day and time it is due.
 6. **Needs your OK** shows held actions that are waiting for you, each with where it came from.
 
@@ -22,7 +22,7 @@ Note: If your calendar cannot be read just now, **Today** says so. It tells you 
 ## To open something from the rail
 
 1. Choose an event row to open it in place. It shows the event's place and which calendar it came from.
-2. Choose a reminder row to open its chat.
+2. Choose a reminder row to open its chat. When the Reminders chat does not exist, the row is plain text and opens nothing.
 3. Choose a held action row to open the chat it came from. You answer the action there.
 
 Note: The rail performs no new actions. Opening a row takes you to the place where that action already lives.
@@ -32,8 +32,10 @@ Note: The Home desk reads again every two minutes while it is on screen. If what
 ## To see what your assistant is using in a chat
 
 1. Open the chat.
-2. Look at the right rail. The **From memory** fold, with a count after its name, lists the facts your assistant used for your last message, at most six. Under it, **In this chat** lists the items attached to the chat, and **Needs your OK** lists held actions from this chat, each marked "Waiting in this chat".
+2. Look at the right rail. The **From memory** fold, with a count after its name, lists the facts your assistant used for your last message: at most six from pages of your memory, and at most six saved memories. Under it, **In this chat** lists the items attached to the chat, at most eight, with each file name listed once. **Needs your OK** lists held actions from this chat, each marked "Waiting in this chat".
 3. Each fact shows a second line that says where it came from, such as "You said this" or "From a message you sent". A fact that did not come from you says so, such as "From mail, not confirmed" or "From your calendar, not confirmed".
+
+Note: In a chat, **In this chat** and **Needs your OK** appear only when they have something in them.
 
 Note: If no fact was used for your last message, the fold says "Nothing from memory was used for your last message." The fold appears only once memory has been looked up in the chat.
 
