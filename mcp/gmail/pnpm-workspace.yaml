@@ -5,6 +5,7 @@
 # unified so the Docker build typechecks like the pnpm workspace.
 overrides:
   google-auth-library: "^10.9.0"
+  raw-body@3: "4.0.0"
 
 # esbuild's postinstall only fetches its platform binary for tsx/vite/vitest
 # (all devDependencies); the Docker build is plain `tsc`, so never run it.
