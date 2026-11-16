@@ -83,16 +83,22 @@ const READ_PLACE: Record<Exclude<ReadSource, 'memory' | 'reply'>, string> = {
 
 /**
  * Says who a send goes to and where the assistant read that address or link, in plain words and without alarm. `who`
- * is already escaped for display: `Name (address)`, an address, or a link.
+ * is already escaped for display: `Name (address)`, an address, or a link. `site`, also escaped, is the site of the
+ * page a link was read on, when that read named the page; no title for a page is kept, so its site names it.
  */
 export function steeredDestinationSay(input: {
   assistant: string;
-  destinations: readonly { who: string; kind: 'address' | 'link'; source: ReadSource }[];
+  destinations: readonly {
+    who: string;
+    kind: 'address' | 'link';
+    source: ReadSource;
+    site?: string | null | undefined;
+  }[];
 }): string {
   const { assistant } = input;
   // The card already shows every link it sends to, so one link is not named again; several are, to say which.
   const oneLink = input.destinations.filter(({ kind }) => kind === 'link').length === 1;
-  const sentences = input.destinations.map(({ who, kind, source }) => {
+  const sentences = input.destinations.map(({ who, kind, source, site }) => {
     if (source === 'memory') {
       return kind === 'link'
         ? `This goes to ${who}, which ${assistant} read earlier and saved to memory.`
@@ -103,7 +109,8 @@ export function steeredDestinationSay(input: {
       return `This goes to ${who}, ${what} was only in an earlier reply from ${assistant}, not in your own words.`;
     }
     if (kind === 'link') {
-      return `${assistant} found ${oneLink ? 'this link' : who} in ${READ_PLACE[source]} it read, not from you.`;
+      const where = site === undefined || site === null ? '' : ` on ${site}`;
+      return `${assistant} found ${oneLink ? 'this link' : who} in ${READ_PLACE[source]} it read${where}, not from you.`;
     }
     return source === 'email_sender'
       ? `This goes to ${who}, who sent the email ${assistant} just read.`

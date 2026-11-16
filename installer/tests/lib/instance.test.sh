@@ -244,11 +244,12 @@ test_removing_the_last_instance_takes_the_machine_project_with_it() {
   sandbox_new
   install_machine
   assert_file "$SB_STATE/up/aman-machine"
-  assert_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
+  # A speech cache volume left behind by an older install, which uninstall still removes.
+  printf '%s\n' aman_stt_cache >>"$SB_STATE/volumes"
   mkdir -p "$AMAN_HOME/backups/one"
   run_install instance remove main
   assert_rc 0
-  assert_contains "$OUT" "shared speech-to-text service and its downloaded model are kept"
+  assert_contains "$OUT" "The shared speech-to-text service is kept too."
   assert_contains "$OUT" "instance remove main --purge-data"
   assert_file "$SB_STATE/up/aman-machine"
   assert_file "$AMAN_HOME/machine/compose.yaml"
@@ -278,7 +279,6 @@ test_removing_one_of_two_instances_leaves_the_machine_project() {
   assert_rc 0
   assert_not_contains "$OUT" "last instance"
   assert_file "$SB_STATE/up/aman-machine"
-  assert_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
   assert_file "$AMAN_HOME/machine/compose.yaml"
   assert_file "$AMAN_HOME/state/instances/main.conf"
   sandbox_drop

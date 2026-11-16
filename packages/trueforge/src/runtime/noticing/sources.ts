@@ -86,6 +86,12 @@ interface MailReader {
   laterInThread(message: MailRef): Promise<string[]>;
   /** The receiving servers whose Authentication-Results can be believed. Empty when this source passes on none. */
   trustedAuthenticationServers: readonly string[];
+  /**
+   * Whether this source reports sender confirmation: it passes on the receiving server's Authentication-Results,
+   * so a message's sender can be confirmed. The source states this about itself, so a source that gains the
+   * ability corrects every surface that asks, with no other change.
+   */
+  reportsSenderConfirmation: boolean;
 }
 
 /** A source that lists mail by when it arrived, and so resumes at the arrival of the first message it did not reach. */

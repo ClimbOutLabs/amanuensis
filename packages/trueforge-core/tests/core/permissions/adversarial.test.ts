@@ -16,11 +16,12 @@ import {
   InMemoryApprovalTokenStore,
   type ShellApprovalBinding,
 } from '../../../src/core/permissions/approvalTokens';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { verifyPreDispatch, type VerifiableCall } from '../../../src/core/permissions/dispatch';
 import type { ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier, TrackedExecutionBinding } from '../../../src/core/permissions/tier';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { SANDBOX_FILE_WRITE_TOOLS } from '../../../src/core/sandbox/Sandbox';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';

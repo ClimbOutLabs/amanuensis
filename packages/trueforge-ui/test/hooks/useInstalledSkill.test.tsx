@@ -2,7 +2,7 @@
 import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { installedSkillName, useInstalledSkill } from '@/hooks/useInstalledSkill.js';
+import { installedSkillName, removedSkillName, useInstalledSkill, useRemovedSkill } from '@/hooks/useInstalledSkill.js';
 
 const state = vi.hoisted(() => ({
   skills: [{ id: 'web-artifacts-builder', name: 'web-artifacts-builder' }],
@@ -92,6 +92,40 @@ describe('useInstalledSkill', () => {
     rerender(finished);
     state.skills = [...state.skills, NEW_SKILL];
     rerender(finished);
+    expect(state.refresh).toHaveBeenCalledTimes(1);
+    expect(state.updateAgentSpec).not.toHaveBeenCalled();
+  });
+});
+
+describe('useRemovedSkill', () => {
+  const REMOVED = JSON.stringify({ removed: { name: 'web-artifacts-builder' } });
+  const removing: Call = { toolName: 'remove_skill', complete: false, result: undefined };
+  const removed: Call = { toolName: 'remove_skill', complete: true, result: REMOVED };
+
+  it('reads the removed name, and nothing from a refused call', () => {
+    expect(removedSkillName(REMOVED)).toBe('web-artifacts-builder');
+    expect(removedSkillName(JSON.stringify({ error: 'Nothing was removed.' }))).toBeUndefined();
+    expect(removedSkillName(RESULT)).toBeUndefined();
+  });
+
+  it('takes the skill out of this chat and reads the skill lists again', () => {
+    const { rerender } = renderHook(props => useRemovedSkill(props), { initialProps: removing });
+    rerender(removed);
+    expect(state.refresh).toHaveBeenCalledTimes(1);
+    expect(state.updateAgentSpec).toHaveBeenCalledWith({ skills: [] });
+  });
+
+  it('leaves a finished call in an old chat alone', () => {
+    const { rerender } = renderHook(props => useRemovedSkill(props), { initialProps: removed });
+    rerender(removed);
+    expect(state.refresh).not.toHaveBeenCalled();
+    expect(state.updateAgentSpec).not.toHaveBeenCalled();
+  });
+
+  it('does not change a chat whose setup cannot be changed', () => {
+    state.mutable = false;
+    const { rerender } = renderHook(props => useRemovedSkill(props), { initialProps: removing });
+    rerender(removed);
     expect(state.refresh).toHaveBeenCalledTimes(1);
     expect(state.updateAgentSpec).not.toHaveBeenCalled();
   });

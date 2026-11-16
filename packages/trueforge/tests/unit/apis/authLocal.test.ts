@@ -1,7 +1,7 @@
 import winston from 'winston';
 import { createAuthRouter } from '../../../src/apis/auth';
 import { LocalAuthenticator } from '../../../src/auth/localAuthenticator';
-import { LOCAL_SIGN_IN_EXISTS_MESSAGE, LOCAL_WRONG_CREDENTIALS_MESSAGE } from '../../../src/auth/localSignIn';
+import { createLocalUser, LOCAL_WRONG_CREDENTIALS_MESSAGE } from '../../../src/auth/localSignIn';
 import { createAuthMiddleware } from '../../../src/auth/middleware';
 import type { GlobalSettingRecord, IGlobalSettingsStore } from '../../../src/db/globalSettingsStore';
 import {
@@ -119,73 +119,59 @@ function sessionCookie(response: Response): string {
   return pair;
 }
 
-async function createSignIn(router: ReturnType<typeof setup>['router']): Promise<string> {
-  const created = await formPost(router, '/create-account', {
-    email: EMAIL,
-    password: PASSWORD,
-    password_confirm: PASSWORD,
-  });
-  expect(created.status).toBe(302);
-  return sessionCookie(created);
+/** Makes the one sign-in the way the terminal command does, then signs in on the page. */
+async function createSignIn(
+  router: ReturnType<typeof setup>['router'],
+  localUserStore: ILocalUserStore,
+): Promise<string> {
+  const created = await createLocalUser({ store: localUserStore, email: EMAIL, password: PASSWORD });
+  expect(created.ok).toBe(true);
+  const signedIn = await formPost(router, '/login', { email: EMAIL, password: PASSWORD });
+  expect(signedIn.status).toBe(302);
+  return sessionCookie(signedIn);
 }
 
 describe('local sign-in routes', () => {
-  it('offers the create form only while no user exists, then the sign-in form', async () => {
-    const { router } = setup();
+  it('while no user exists, says which terminal command makes the sign-in and offers no form', async () => {
+    const { router, localUserStore } = setup();
 
     const first = await router.request('/login');
     expect(first.status).toBe(200);
-    expect(await first.text()).toContain('Create your sign-in');
+    const firstHtml = await first.text();
+    expect(firstHtml).toContain('npx amanuensis --create-account');
+    expect(firstHtml).not.toContain('<form');
+    expect(firstHtml).not.toContain('type="password"');
 
-    await createSignIn(router);
+    await createSignIn(router, localUserStore);
 
     const after = await router.request('/login');
     expect(after.status).toBe(200);
     const html = await after.text();
-    expect(html).not.toContain('Create your sign-in');
+    expect(html).not.toContain('npx amanuensis --create-account');
     expect(html).toContain('Forgot your password? Stop Aman, run');
     expect(html).toContain('npx amanuensis --reset-password');
   });
 
-  it('refuses a second create and keeps the first sign-in working', async () => {
-    const { router, localUserStore } = setup();
-    await createSignIn(router);
-    const stored = await localUserStore.getUser();
-
-    const second = await formPost(router, '/create-account', {
-      email: 'other@example.com',
-      password: 'another long password',
-      password_confirm: 'another long password',
-    });
-    expect(second.status).toBe(400);
-    expect(await second.text()).toContain(LOCAL_SIGN_IN_EXISTS_MESSAGE);
-    await expect(localUserStore.getUser()).resolves.toEqual(stored);
-  });
-
-  it('refuses a create whose two passwords differ, and a password that is too short', async () => {
+  it('serves no way to create the sign-in from a browser', async () => {
     const { router, localUserStore } = setup();
 
-    const mismatch = await formPost(router, '/create-account', {
+    const posted = await formPost(router, '/create-account', {
       email: EMAIL,
       password: PASSWORD,
-      password_confirm: 'not the same password',
+      password_confirm: PASSWORD,
     });
-    expect(mismatch.status).toBe(400);
-    expect(await mismatch.text()).toContain('The two passwords do not match');
+    expect(posted.status).toBeGreaterThanOrEqual(400);
+    expect(posted.headers.getSetCookie()).toEqual([]);
+    await expect(localUserStore.getUser()).resolves.toBeUndefined();
 
-    const short = await formPost(router, '/create-account', {
-      email: EMAIL,
-      password: 'short',
-      password_confirm: 'short',
-    });
-    expect(short.status).toBe(400);
-    expect(await short.text()).toContain('Use at least 8 characters for the password.');
+    const signIn = await formPost(router, '/login', { email: EMAIL, password: PASSWORD });
+    expect(signIn.headers.getSetCookie().some(header => header.startsWith('id_token='))).toBe(false);
     await expect(localUserStore.getUser()).resolves.toBeUndefined();
   });
 
   it('signs in, reports a local-connected session on /me, and signs out', async () => {
-    const { router } = setup();
-    const createCookie = await createSignIn(router);
+    const { router, localUserStore } = setup();
+    const createCookie = await createSignIn(router, localUserStore);
 
     const me = await router.request('/me', { headers: { Cookie: createCookie } });
     expect(me.status).toBe(200);
@@ -203,14 +189,14 @@ describe('local sign-in routes', () => {
   });
 
   it('answers a wrong password and an unknown email with the same one sentence', async () => {
-    const { router } = setup();
-    await createSignIn(router);
+    const { router, localUserStore } = setup();
+    await createSignIn(router, localUserStore);
 
     const wrongPassword = await formPost(router, '/login', { email: EMAIL, password: 'not the password' });
     expect(wrongPassword.status).toBe(401);
     const wrongText = await wrongPassword.text();
     expect(wrongText).toContain(LOCAL_WRONG_CREDENTIALS_MESSAGE);
-    expect(wrongText).not.toContain('Create your sign-in');
+    expect(wrongText).not.toContain('npx amanuensis --create-account');
 
     const unknownEmail = await formPost(router, '/login', { email: 'nobody@example.com', password: PASSWORD });
     expect(unknownEmail.status).toBe(401);
@@ -218,8 +204,8 @@ describe('local sign-in routes', () => {
   });
 
   it('locks out after the limiter threshold, even for the right password', async () => {
-    const { router } = setup();
-    await createSignIn(router);
+    const { router, localUserStore } = setup();
+    await createSignIn(router, localUserStore);
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const refused = await formPost(router, '/login', { email: EMAIL, password: 'not the password' });
@@ -232,13 +218,10 @@ describe('local sign-in routes', () => {
   });
 
   it('sets the session cookie with the OIDC flags: HttpOnly, SameSite Lax, and no Secure over http on this computer', async () => {
-    const { router } = setup();
-    const created = await formPost(router, '/create-account', {
-      email: EMAIL,
-      password: PASSWORD,
-      password_confirm: PASSWORD,
-    });
-    const setCookie = created.headers.getSetCookie().join('\n');
+    const { router, localUserStore } = setup();
+    await createLocalUser({ store: localUserStore, email: EMAIL, password: PASSWORD });
+    const signedIn = await formPost(router, '/login', { email: EMAIL, password: PASSWORD });
+    const setCookie = signedIn.headers.getSetCookie().join('\n');
     expect(setCookie).toContain('id_token=');
     expect(setCookie).toContain('HttpOnly');
     expect(setCookie).toContain('SameSite=Lax');
@@ -246,8 +229,8 @@ describe('local sign-in routes', () => {
   });
 
   it('changes the password from a live session and ends the other sessions', async () => {
-    const { router } = setup();
-    const firstCookie = await createSignIn(router);
+    const { router, localUserStore } = setup();
+    const firstCookie = await createSignIn(router, localUserStore);
     const secondSignIn = await formPost(router, '/login', { email: EMAIL, password: PASSWORD });
     const secondCookie = sessionCookie(secondSignIn);
 

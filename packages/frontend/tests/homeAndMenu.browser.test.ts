@@ -129,7 +129,12 @@ test(
           await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
           assertFits(await homeFit(page), 'after a first chat');
           await page.screenshot({
-            path: await featureShotPath({ surface: 'screen:home', step: 'after-a-first-chat' }),
+            path: await featureShotPath({
+              surface: 'screen:home',
+              step: 'after-a-first-chat',
+              did: 'Sent a first chat, "Plan my week", then opened Aman again on a 1440 by 900 screen.',
+              expect: 'The everyday home shows and all of it fits the screen without scrolling.',
+            }),
           });
           await context.close();
 
@@ -148,7 +153,12 @@ test(
             await menu.getByRole('button', { name: 'Sign out', exact: true }).waitFor({ timeout: RENDER_TIMEOUT_MS });
             const label = `${theme.preset} ${theme.mode}`;
             await menuPage.screenshot({
-              path: await featureShotPath({ surface: 'screen:home', step: `more-menu-${theme.preset}-${theme.mode}` }),
+              path: await featureShotPath({
+                surface: 'screen:home',
+                step: `more-menu-${theme.preset}-${theme.mode}`,
+                did: `Opened the More menu in the ${theme.preset} look, ${theme.mode} mode, signed in with a connected account.`,
+                expect: 'The menu uses the colours of that look, and every item has a label, down to Sign out.',
+              }),
             });
 
             const look = await menu.evaluate(el => {

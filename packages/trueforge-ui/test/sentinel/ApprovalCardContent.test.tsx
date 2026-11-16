@@ -127,7 +127,7 @@ describe('approval card content', () => {
           location: 'Cafe',
           description: '',
           attendees: ['ana@example.com'],
-          guests_emailed: true,
+          guests_line: 'Google will email every guest about this.',
           one_of_repeating: false,
           before: null,
         },

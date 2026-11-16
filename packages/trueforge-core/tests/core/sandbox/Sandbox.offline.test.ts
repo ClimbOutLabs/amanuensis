@@ -135,7 +135,7 @@ describe('exec on a provider with no network', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it('refuses an inline Python network call without an approval request', async () => {
+  it('asks before inline Python that tries the network: the offline sandbox, not the command text, stops it', async () => {
     const exec = jest.fn<Promise<ExecResult>, [SandboxExecParams]>();
     const sandbox = makeSandbox(makeProvider({ network: 'none', exec }));
     const call = {
@@ -148,10 +148,9 @@ describe('exec on a provider with no network', () => {
     };
 
     const info = await sandbox.toolCallInfo(call);
-    expect(info.is_approval_required).toBe(false);
-    const response = await sandbox.callTool(call);
-    if (!isCallToolResponseResult(response)) throw new Error('Expected a tool result');
-    expect(response.result.isError).toBe(true);
+    expect(info.pre_dispatch_failure).toBeUndefined();
+    expect(info.is_approval_required).toBe(true);
+    await sandbox.callTool(call);
     expect(exec).not.toHaveBeenCalled();
   });
 

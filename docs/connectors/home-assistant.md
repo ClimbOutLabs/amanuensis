@@ -76,6 +76,8 @@ If something Aman read, such as an email, asks for a change to your home, the ch
 
 When a card asks about a change, click **Always allow everywhere** to stop being asked. Aman then remembers your answer for that kind of device (all lights, all switches, all heating or all media players) or for that one device. It works the way mail remembers an address.
 
+Allowing for good covers only the changes your Home Assistant itself lists as changes. Aman reads that list when it checks the connection. If you connected Home Assistant before Aman kept this list, Aman reads it the first time it uses the connection, so what you allowed keeps working. A change your Home Assistant doesn't list that way asks every time.
+
 To see what you allowed, or take it back:
 
 1. Click **More**, then **Settings**, then **Connectors**.

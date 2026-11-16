@@ -1,11 +1,6 @@
-import {
-  approvalCardForGatedCall,
-  classifyHostToolCall,
-  classifyTier,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { approvalCardForGatedCall, classifyHostToolCall, classifyTier } from '../../../src/core/permissions/classifier';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core/permissions/context';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(): ClassifyContext {
@@ -198,7 +193,7 @@ describe('Space tool classification', () => {
     expect(decision.reason_detail).toBe('Unknown space tool.');
   });
 
-  it('still asks for a create_space from another server', async () => {
+  it('refuses a create_space from another server that carries only a name', async () => {
     const action: SentinelAction = {
       ...spaceAction('create_space', { name: 'Home renovation' }),
       tool_type: 'mcp',
@@ -207,6 +202,8 @@ describe('Space tool classification', () => {
     const decision = await classifyTier(action, makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.reason).not.toBe('space_write');
-    expect(decision.card?.plain_what).toBe('Allow this new tool from some-other-server?');
+    // An unclaimed call from another server that carries words and shows no destination the card
+    // can verify is refused under the carried-payload rule, not carded as a new tool.
+    expect(decision).toMatchObject({ auto_deny: 'destination_unverifiable', card: null });
   });
 });

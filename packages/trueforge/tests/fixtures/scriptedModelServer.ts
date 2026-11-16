@@ -13,6 +13,7 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_ADDRESS, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
+import { INERT_MAILBOX, INERT_MAILBOX_TOOLS } from './inertMcpServer';
 
 export const RUN_DIRECTIVE_PREFIX = 'run:';
 export const SERVER_DIRECTIVE_PREFIX = 'server:';
@@ -128,7 +129,8 @@ export interface ChatMessage {
 }
 
 export interface AdvertisedTool {
-  function?: { name?: unknown };
+  /** `strict` and `parameters` are kept as sent, so a test can check what each tool promised the provider. */
+  function?: { name?: unknown; strict?: unknown; parameters?: unknown };
 }
 
 export interface ChatCompletionRequest {
@@ -165,7 +167,8 @@ export function toAdvertisedTools(value: unknown): AdvertisedTool[] {
   const tools: AdvertisedTool[] = [];
   for (const entry of value) {
     if (isRecord(entry) && isRecord(entry['function'])) {
-      tools.push({ function: { name: entry['function']['name'] } });
+      const { name, strict, parameters } = entry['function'];
+      tools.push({ function: { name, strict, parameters } });
     }
   }
   return tools;
@@ -336,7 +339,12 @@ function argumentsJsonForTool({
   if (name.endsWith('create_event')) {
     return JSON.stringify(SCRIPTED_EVENT);
   }
-  return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
+  if (name.includes('ask_memory')) {
+    return '{"question":"inert"}';
+  }
+  return INERT_MAILBOX_TOOLS.some(tool => name.endsWith(tool))
+    ? JSON.stringify({ text, mailbox: INERT_MAILBOX })
+    : JSON.stringify({ text });
 }
 
 /** The `text:<value>` of the latest user message that names one, else the default. */
@@ -575,7 +583,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     } else if (progress.directive === WRITE_THEN_SEARCH_DIRECTIVE && progress.toolResults < 2) {
       requestedTool =
         progress.toolResults === 0
-          ? { match: 'inert_write', argumentsJson: '{"text":"inert"}' }
+          ? { match: 'inert_write', argumentsJson: JSON.stringify({ text: 'inert', mailbox: INERT_MAILBOX }) }
           : { match: 'web_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
     } else if (progress.directive === FIND_PLACES_DIRECTIVE && progress.toolResults < 3) {
       const steps = [
@@ -590,7 +598,10 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     ) {
       requestedTool = { match: 'tavily_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
     } else if (progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults === 0) {
-      requestedTool = { match: 'inert_write', argumentsJson: '{"text":"inert"}' };
+      requestedTool = {
+        match: 'inert_write',
+        argumentsJson: JSON.stringify({ text: 'inert', mailbox: INERT_MAILBOX }),
+      };
     } else if (progress.directive === BRIEF_DIRECTIVE) {
       requestedTool = briefSteps(parsed.messages)[progress.toolResults];
     } else if (pending !== undefined) {
@@ -611,7 +622,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         toolCalls.push({
           name: threeAtOnceName,
           callId: `call_${String(callCounter)}`,
-          argumentsJson: JSON.stringify({ text }),
+          argumentsJson: JSON.stringify({ text, mailbox: INERT_MAILBOX }),
         });
       }
     } else if (toolName !== undefined) {

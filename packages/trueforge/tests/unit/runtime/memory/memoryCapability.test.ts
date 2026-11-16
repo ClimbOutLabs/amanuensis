@@ -1552,6 +1552,7 @@ describe('MemoryProcessor pages layer', () => {
     expect(loadPages).toHaveBeenCalledWith({
       message: 'Is Nora free Saturday?',
       earlierMessages: [],
+      exclusions: new Set(),
       today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       maxPages: 6,
       maxTokens: 1500,

@@ -192,7 +192,7 @@ test('network open lets the ports through the firewall, hands the installer the 
   ]);
 });
 
-test('network open hands over no Tailscale-range address even when it sorts first, and the phone line names the home address', async () => {
+test('network open hands over no VPN address even when it sorts first, and the phone line names the home address', async () => {
   const jobs = jobsWith();
   const runner = new RefreshRunner(OK);
   const { code, lines } = await run({
@@ -220,7 +220,7 @@ test('network open hands over no Tailscale-range address even when it sorts firs
   ]);
 });
 
-test('network open on a Tailscale-only computer completes on the name alone, and the phone line names the computer', async () => {
+test('network open on a computer with only a VPN address completes on the name alone, and the phone line names the computer', async () => {
   const jobs = jobsWith();
   const runner = new RefreshRunner(OK);
   const { code, lines } = await run({
