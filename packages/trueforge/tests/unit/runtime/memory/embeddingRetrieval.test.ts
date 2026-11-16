@@ -491,13 +491,13 @@ describe('EmbeddingSubsystem', () => {
     }
   });
 
-  it('fusedRank never waits for a download: keyword fallback while the model loads', async () => {
+  it('fusedRank never waits for the model: keyword fallback while it loads', async () => {
     const fixture = await makeFixture();
     try {
       await retainTexts(fixture, ['alpha entry', 'beta entry']);
-      // The model is mid-download: ensureReady never resolves. fusedRank must
+      // The model is still loading: ensureReady never resolves. fusedRank must
       // not await it — recall falls back to keywords immediately.
-      fixture.model.phaseOverride = 'downloading';
+      fixture.model.phaseOverride = 'loading';
       fixture.model.blockEnsureReady = true;
       const outcome = await fixture.subsystem.fusedRank({
         query: 'alpha',
