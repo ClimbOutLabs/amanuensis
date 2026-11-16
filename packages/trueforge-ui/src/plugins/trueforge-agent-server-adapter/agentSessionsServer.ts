@@ -1,13 +1,13 @@
-import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
-import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
-import type { AgentSessionsServer, SessionListEntry } from '../../server/types.js';
-import { toListResult, toUiAgentSpec } from './chatServer.js';
 import {
   createTrueForgeClient,
   parseIsoDate,
   resolveTrueForgeBaseUrl,
   type CreateTrueForgeClientOptions,
-} from './client.js';
+} from '@truefoundry/trueforge-chat';
+import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
+import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
+import type { AgentSessionsServer, SessionListEntry } from '../../server/types.js';
+import { toListResult, toUiAgentSpec } from './chatServer.js';
 import { extractRecallTimestamp, toUiEventItem } from './toUiTurnState.js';
 import type { HarnessAgentSpec } from './types.js';
 

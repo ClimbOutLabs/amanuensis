@@ -7,7 +7,7 @@ import {
   isPendingApprovalsError,
   publishBlockedSend,
   subscribeToBlockedSend,
-} from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
+} from '../src/sessionResync.js';
 
 function approvalRequired(createdAt: string): TrueForgeApi.ToolApprovalRequiredEvent {
   return {

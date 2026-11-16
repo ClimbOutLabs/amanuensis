@@ -1,6 +1,8 @@
 /**
  * Built-in Harness → AgentUIServer factory for `<TrueForgeUI server={{ type: "trueforge", … }} />`.
  */
+import { createTrueForgeClient, type CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
+
 import { createTrueFoundryServer } from '../../server/createTrueFoundryServer.js';
 import type { CatalogServer, PermissionsServer } from '../../server/types.js';
 import { createHarnessAgentMetricsServer } from './agentMetricsServer.js';
@@ -23,11 +25,20 @@ import { createSkillCatalog } from './catalogs/skillCatalog.js';
 import { createTokenFactoryUsageCatalog } from './catalogs/tokenFactoryUsageCatalog.js';
 import { createToolOutputScreenCatalog } from './catalogs/toolOutputScreenCatalog.js';
 import { createHarnessChatServer } from './chatServer.js';
-import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { createHarnessPermissionsServer } from './permissionsServer.js';
 import { createScheduleServer } from './schedules/scheduleServer.js';
 import type { HarnessAgentSpec } from './types.js';
 
+export {
+  createTrueForgeClient,
+  isPendingApprovalsError,
+  publishBlockedSend,
+  subscribeToBlockedSend,
+  type CreateTrueForgeClientOptions,
+  type HarnessChatServerExtensions,
+  type PendingApprovalInfo,
+  type SessionTipInfo,
+} from '@truefoundry/trueforge-chat';
 export { createHarnessAgentMetricsServer, type CreateHarnessAgentMetricsServerOptions } from './agentMetricsServer.js';
 export {
   createHarnessAgentSessionsServer,
@@ -78,20 +89,10 @@ export {
   type MemoryTurnContext,
   type ModelUsageTurnContext,
 } from './chatServer.js';
-export { createTrueForgeClient } from './client.js';
-export type { CreateTrueForgeClientOptions } from './client.js';
 export { getCapabilities, listConfiguredMcpServers, listModels, listSkills, memoryStatusReported } from './lists.js';
 export type { BuildIdentity } from './lists.js';
 export { createHarnessPermissionsServer, type CreateHarnessPermissionsServerOptions } from './permissionsServer.js';
 export { createScheduleServer } from './schedules/scheduleServer.js';
-export {
-  isPendingApprovalsError,
-  publishBlockedSend,
-  subscribeToBlockedSend,
-  type HarnessChatServerExtensions,
-  type PendingApprovalInfo,
-  type SessionTipInfo,
-} from './sessionResync.js';
 export type { HarnessAgentSpec, HarnessAuxiliaryModels, HarnessMcpServerMount, HarnessSkillMount } from './types.js';
 
 export type CreateTrueForgeAgentUIServerOptions = CreateTrueForgeClientOptions & {

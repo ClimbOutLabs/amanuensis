@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** What a schedule runs with. `saved_agent`: the tools are set on the agent named in `agentName`. */
 export interface ScheduleTools {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { CreateTrueForgeClientOptions } from '../client.js';
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 
 /** Why an image is not shown; the UI words each one. */
 export const ChatImageRefusalSchema = z.enum([

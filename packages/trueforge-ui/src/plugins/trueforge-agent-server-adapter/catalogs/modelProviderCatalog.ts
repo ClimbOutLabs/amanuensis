@@ -4,6 +4,7 @@
  * UI: flat `apiKey` / model `id`. Harness: `auth.apiKey` / `modelId`.
  * Provider `id` in the UI is the Harness resource `name`.
  */
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import type { TrueForge } from '@truefoundry/trueforge-sdk';
 import { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type {
@@ -15,7 +16,6 @@ import type {
   UpdateModelProviderRequest,
 } from '../../../server/types.js';
 import { catalogLogoSrc, withLogo } from '../../../utils/catalogLogo.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** Custom-form rows omit properties; catalog rows round-trip them. */
 export type UiModelEntry = ModelEntry & {

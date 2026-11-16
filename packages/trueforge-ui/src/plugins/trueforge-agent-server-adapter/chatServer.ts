@@ -11,6 +11,14 @@
  * `reference`/`inline` discriminator, with reference rows already naming their
  * agent. The UI filters with registry `agentId`.
  */
+import {
+  createPrivateChatExtensions,
+  createSessionResyncExtensions,
+  createTrueForgeClient,
+  type CreateTrueForgeClientOptions,
+  type HarnessChatServerExtensions,
+  type PrivateChatServerExtensions,
+} from '@truefoundry/trueforge-chat';
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atoms/lib/sessionAgentDetails.js';
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
@@ -36,9 +44,6 @@ import { publishContextCompaction } from '../../utils/contextCompactionLive.js';
 import { LiveConnectionLostError, ReplyStoppedByRestartError } from '../../utils/liveConnection.js';
 import type { ModelUsageEvent } from '../../utils/modelUsage.js';
 import { isSpokenSend } from '../../utils/voiceTurn.js';
-import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
-import { createPrivateChatExtensions, type PrivateChatServerExtensions } from './privateChats.js';
-import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
 import {
   isCompatibleSessionEvent,
   isCompatibleStreamingEvent,

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { CreateTrueForgeClientOptions } from '../client.js';
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 
 const ErrorSchema = z.object({ error: z.object({ message: z.string() }) });
 

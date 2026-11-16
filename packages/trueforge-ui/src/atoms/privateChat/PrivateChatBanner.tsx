@@ -1,13 +1,13 @@
 'use client';
 
 import { useAui, useAuiState } from '@assistant-ui/react';
+import { hasChatPrivacy } from '@truefoundry/trueforge-chat';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { useEffect, useState } from 'react';
 
 import { useToasterOptional } from '../../containers/ToasterContainer.js';
 import { Icon } from '../../icons/Icon.js';
 import { onPersonaMutationSettled } from '../../personaMutationGate.js';
-import { hasChatPrivacy } from '../../plugins/trueforge-agent-server-adapter/privateChats.js';
 import { forgetPrivateChat } from '../../server/privateChatStore.js';
 import { useOptionalServer } from '../../server/ServerContext.js';
 import { useOptionalShellMode } from '../../server/ShellModeContext.js';

@@ -7,6 +7,7 @@ import {
   type TrueFoundryAgentConfig,
   type UseTrueFoundryAgentRuntimeOptions,
 } from '@truefoundry/assistant-ui-runtime';
+import { isPendingApprovalsError, publishBlockedSend } from '@truefoundry/trueforge-chat';
 import { useCallback, useMemo, type ReactNode } from 'react';
 import { withImageDownscaling } from '../server/imageAttachmentAdapter.js';
 
@@ -22,10 +23,6 @@ import {
 import { createStreamDropChannel, ForegroundEventSync } from '../hooks/useForegroundEventSync.js';
 import { ActiveSessionPermissionsProvider } from '../hooks/useResourcePermissions.js';
 import type { HarnessListSessionsParams } from '../plugins/trueforge-agent-server-adapter/chatServer.js';
-import {
-  isPendingApprovalsError,
-  publishBlockedSend,
-} from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { readPrivateChatState, withOpenPrivateChatOnly } from '../server/privateChatStore.js';
 import type { AgentUIServer } from '../server/types.js';
 import { isNetworkFailureError, LiveConnectionLostError, ReplyStoppedByRestartError } from '../utils/liveConnection.js';

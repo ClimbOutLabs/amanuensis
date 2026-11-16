@@ -62,6 +62,7 @@ COPY packages/trueforge/package.json packages/trueforge/package.json
 COPY packages/trueforge-sdk/package.json packages/trueforge-sdk/package.json
 COPY packages/frontend/package.json packages/frontend/package.json
 COPY packages/trueforge-ui/package.json packages/trueforge-ui/package.json
+COPY packages/trueforge-chat/package.json packages/trueforge-chat/package.json
 COPY packages/trueforge-core/scripts packages/trueforge-core/scripts
 COPY packages/trueforge-core/src/core/sandbox/scripts packages/trueforge-core/src/core/sandbox/scripts
 COPY packages/trueforge/scripts packages/trueforge/scripts
@@ -100,6 +101,7 @@ COPY packages/trueforge-sdk packages/trueforge-sdk
 COPY --from=builder /app/packages/trueforge-core/dist packages/trueforge-core/dist
 COPY packages/trueforge-core/src packages/trueforge-core/src
 COPY packages/trueforge-ui packages/trueforge-ui
+COPY packages/trueforge-chat packages/trueforge-chat
 # Vite alone peaks above 3 GB; the cap trades build time for staying inside a 6 GB Docker VM.
 ENV NODE_OPTIONS=--max-old-space-size=3072
 COPY packages/frontend packages/frontend

@@ -1,0 +1,67 @@
+{
+  "name": "@truefoundry/trueforge-chat",
+  "version": "0.1.0",
+  "description": "Non-visual chat client machinery shared by the TrueForge web UI and the terminal app: the SDK client factory, session resync and held-action answers, and chat privacy.",
+  "author": "TrueFoundry",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/truefoundry/trueforge.git",
+    "directory": "packages/trueforge-chat"
+  },
+  "homepage": "https://trueforge.dev",
+  "bugs": {
+    "url": "https://github.com/truefoundry/trueforge/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "trueforge-dev": {
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "prepack": "node ../../scripts/copy-license-files.mjs",
+    "build": "tsup",
+    "pretest": "pnpm --filter @truefoundry/trueforge-sdk build",
+    "test": "vitest run",
+    "pretypecheck": "pnpm --filter @truefoundry/trueforge-sdk build",
+    "typecheck": "pnpm run typecheck:only",
+    "typecheck:only": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
+    "lint": "eslint src test --ext .ts"
+  },
+  "dependencies": {
+    "@truefoundry/trueforge-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^20",
+    "eslint": "^9.39.0",
+    "globals": "^16.4.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "8.68.0",
+    "vitest": "^4.1.11"
+  }
+}

@@ -1,9 +1,9 @@
+import { createTrueForgeClient } from '@truefoundry/trueforge-chat';
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
 import { createHarnessChatServer } from '@/plugins/trueforge-agent-server-adapter/chatServer.js';
-import { createTrueForgeClient } from '@/plugins/trueforge-agent-server-adapter/client.js';
 import { ReplyStoppedByRestartError } from '@/utils/liveConnection.js';
 
 /** Minimal SSE-shaped stream the adapter consumes via `withMetadata()`. */

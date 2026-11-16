@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { CreateTrueForgeClientOptions } from '../client.js';
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import { createMemoryRequester } from './memoryRequest.js';
 
 const PAGE_KINDS = ['person', 'matter'] as const;

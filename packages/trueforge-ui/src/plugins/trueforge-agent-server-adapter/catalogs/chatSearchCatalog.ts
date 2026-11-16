@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
+import type { CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** The person's past-chat search switch: the assistant may search their own earlier chats when they ask. */
 export interface ChatSearchSetting {

@@ -1,7 +1,7 @@
+import { createTrueForgeClient, type CreateTrueForgeClientOptions } from '@truefoundry/trueforge-chat';
 import type { TrueForge } from '@truefoundry/trueforge-sdk';
 
 import type { PermissionsServer } from '../../server/types.js';
-import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 
 export type CreateHarnessPermissionsServerOptions = CreateTrueForgeClientOptions & {
   client?: TrueForge;

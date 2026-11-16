@@ -248,21 +248,22 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 <details>
 <summary><strong>Repository layout</strong></summary>
 
-| Path                      | Purpose                                                           |
-| ------------------------- | ----------------------------------------------------------------- |
-| `packages/trueforge`      | HTTP server, storage, providers and Aman's host features          |
-| `packages/trueforge-core` | Agent runtime, tool orchestration and session contracts           |
-| `packages/frontend`       | The browser app                                                   |
-| `packages/trueforge-ui`   | UI components and server-facing UI contracts                      |
-| `packages/trueforge-sdk`  | Generated TypeScript SDK                                          |
-| `packages/amanuensis`     | `npx amanuensis`: server and chat UI with one command             |
-| `packages/aman-installer` | Single-file installer program for Windows, Mac and Linux          |
-| `installer`               | The one-command installer and the `aman` command it leaves behind |
-| `charts`                  | Helm chart for Kubernetes                                         |
-| `demo`                    | Maya's demo world: example data, scripts and the runbook          |
-| `mcp`                     | The Gmail MCP connector                                           |
-| `docs`                    | Product, setup, architecture and API docs                         |
-| `ops`                     | Design records, evaluations and runbooks                          |
+| Path                      | Purpose                                                                |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `packages/trueforge`      | HTTP server, storage, providers and Aman's host features               |
+| `packages/trueforge-core` | Agent runtime, tool orchestration and session contracts                |
+| `packages/trueforge-chat` | Non-visual chat client machinery shared by the web UI and terminal app |
+| `packages/frontend`       | The browser app                                                        |
+| `packages/trueforge-ui`   | UI components and server-facing UI contracts                           |
+| `packages/trueforge-sdk`  | Generated TypeScript SDK                                               |
+| `packages/amanuensis`     | `npx amanuensis`: server and chat UI with one command                  |
+| `packages/aman-installer` | Single-file installer program for Windows, Mac and Linux               |
+| `installer`               | The one-command installer and the `aman` command it leaves behind      |
+| `charts`                  | Helm chart for Kubernetes                                              |
+| `demo`                    | Maya's demo world: example data, scripts and the runbook               |
+| `mcp`                     | The Gmail MCP connector                                                |
+| `docs`                    | Product, setup, architecture and API docs                              |
+| `ops`                     | Design records, evaluations and runbooks                               |
 
 </details>
 

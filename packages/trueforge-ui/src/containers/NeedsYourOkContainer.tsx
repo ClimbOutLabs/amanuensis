@@ -3,12 +3,12 @@
 import type { PartState } from '@assistant-ui/core/react';
 import { useAuiState } from '@assistant-ui/react';
 import { ROOT_THREAD_ID, useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
+import { hasSessionResync, type HeldActionDecision } from '@truefoundry/trueforge-chat';
 import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { useState } from 'react';
 
 import { useOptionalPersonalization } from '../components/PersonalizationContext.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
-import { hasSessionResync, type HeldActionDecision } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { offersChangeIt } from '../sentinel/approvalChoices.js';
 import { HeldActionCard, type HeldActionStatus } from '../sentinel/HeldActionCard.js';
 import { describeHeldAnswerFailure } from '../sentinel/heldActionErrors.js';

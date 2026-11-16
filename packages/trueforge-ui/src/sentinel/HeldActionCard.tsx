@@ -1,5 +1,6 @@
 'use client';
 
+import type { HeldActionOutcome } from '@truefoundry/trueforge-chat';
 import { useRef, useState, type FC, type ReactNode } from 'react';
 
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
@@ -26,7 +27,7 @@ import {
 } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
-import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
+import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT } from './heldActionErrors.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
 import type { SentinelApprovalCard } from './types.js';
 
