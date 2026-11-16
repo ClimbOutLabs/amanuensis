@@ -103,13 +103,40 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
       return await request('GET', '/healthz');
     },
     /**
+     * Sets the skills a chat may use, as the app does after a skill is added or removed in that chat. The chat's
+     * setup is replaced, so it is built the same way as when the chat was made, with the sandbox on.
+     * @param {{ sessionId: string, model: string, temperature: number, skills: string[] }} options
+     */
+    async setSessionSkills({ sessionId, model, temperature, skills }) {
+      await request('PATCH', `/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+        agent: {
+          spec: {
+            model: { name: model, params: { temperature } },
+            config: { sandbox: { enabled: true } },
+            skills: skills.map(name => ({ name })),
+          },
+        },
+      });
+    },
+    /** What the server can do, such as whether its sandbox is ready. */
+    async getCapabilities() {
+      const body = await request('GET', '/api/v1/capabilities');
+      return isRecord(body) && isRecord(body.data) ? body.data : body;
+    },
+    /**
      * An incognito chat is neither remembered nor shown remembered facts, which keeps a judge's chats out of memory.
-     * @param {{ model: string, temperature: number, incognito?: boolean }} options
+     * A chat with the sandbox on can run skills and commands, as the app's chats do when the server has one.
+     * @param {{ model: string, temperature: number, incognito?: boolean, sandbox?: boolean }} options
      * @returns {Promise<string>} session id
      */
-    async createSession({ model, temperature, incognito = false }) {
+    async createSession({ model, temperature, incognito = false, sandbox = false }) {
       const body = await request('POST', '/api/v1/sessions', {
-        agent: { spec: { model: { name: model, params: { temperature } } } },
+        agent: {
+          spec: {
+            model: { name: model, params: { temperature } },
+            ...(sandbox ? { config: { sandbox: { enabled: true } } } : {}),
+          },
+        },
         ...(incognito ? { is_incognito: true } : {}),
       });
       return readSessionId(body);
@@ -214,6 +241,26 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
     },
     async deleteProfile() {
       await request('DELETE', '/api/v1/personalization/profile');
+    },
+    /** @returns {Promise<{ name: string, manifest: unknown }[]>} the skills added in Settings */
+    async listSkills() {
+      const body = await request('GET', '/api/v1/settings/skills');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its skills. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @returns {Promise<{ declared_hosts: string[], allowed_hosts: string[] }>} the websites a skill names and may reach */
+    async getSkillNetworkApproval(name) {
+      const body = await request('GET', `/api/v1/settings/skills/${encodeURIComponent(name)}/network-approval`);
+      if (!isRecord(body) || !isRecord(body.data)) {
+        throw new Error("The instance did not return the skill's websites. Is --instance a TrueForge server?");
+      }
+      return body.data;
+    },
+    /** @param {string} name */
+    async deleteSkill(name) {
+      await request('DELETE', `/api/v1/settings/skills/${encodeURIComponent(name)}`);
     },
     /** @param {string} scheduleId */
     async deleteSchedule(scheduleId) {
