@@ -294,7 +294,7 @@ AMAN_SCREENSHOT_DIR=/tmp/aman-shots pnpm test:frontend
 pnpm nightly:gallery /tmp/aman-shots
 ```
 
-The pictures of the last 14 nightly runs are also on the docs website, newest first, at <https://climboutlabs.github.io/amanuensis/test-screenshots/>. The page is not in the docs menu or the help. It is rebuilt after each nightly run by the **Docs site** workflow, which fetches each run's **screenshots** download. The three pages share one look, kept in `scripts/screenshot-pages.mjs`.
+The pictures of the last 14 nightly runs are also on the docs website, newest first, at <https://climboutlabs.github.io/amanuensis/test-screenshots/>. The page is not in the docs menu or the help. It is rebuilt after each nightly run by the **Docs site** workflow, which fetches each run's **screenshots** download. The three pages share one look, kept in `scripts/screenshot-pages.mjs`. Each run's page has a filter bar: search by words, or pick a result, a feature area, a screen size or a screen.
 
 ### The signed-in journey
 

@@ -13,7 +13,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { cardHtml, escapeHtml, galleryHtml, pageHtml, parsedJson, pillHtml, tilesHtml } from './screenshot-pages.mjs';
+import {
+  cardHtml,
+  escapeHtml,
+  filterHtml,
+  galleryHtml,
+  pageHtml,
+  parsedJson,
+  pillHtml,
+  tilesHtml,
+} from './screenshot-pages.mjs';
 
 const run = promisify(execFile);
 
@@ -145,8 +154,18 @@ export function sweepHtml({ title, report, pictures, findings, home }) {
       heading: finding?.surface ?? null,
       rows: [['What was found', found]],
       bad: problems.length > 0,
+      filter: {
+        values: {
+          result: problems.length > 0 ? 'look' : finding === undefined ? 'unknown' : 'fine',
+          size: finding?.size ?? '',
+          screen: finding?.surface ?? '',
+        },
+        search: [finding?.surface ?? file, SIZE_NAMES[finding?.size ?? ''] ?? '', ...problems].join(' '),
+      },
     });
   };
+  const named = (values, label = value => value) =>
+    [...new Set(values)].sort().map(value => ({ value, label: label(value) }));
   const withProblems = pictures.filter(file => (byPicture.get(file)?.problems ?? []).length > 0);
   const fine = pictures.filter(file => !withProblems.includes(file));
   return pageHtml({
@@ -164,6 +183,28 @@ export function sweepHtml({ title, report, pictures, findings, home }) {
       },
       { value: fine.length, label: 'look fine', tone: 'good' },
     ])}
+${filterHtml({
+  placeholder: 'Screen or what was found',
+  choices: [
+    {
+      name: 'result',
+      label: 'Result',
+      options: [
+        { value: 'look', label: 'Something to look at' },
+        { value: 'fine', label: 'Looks fine' },
+      ],
+    },
+    {
+      name: 'size',
+      label: 'Screen size',
+      options: named(
+        findings.map(finding => finding.size),
+        size => SIZE_NAMES[size] ?? size,
+      ),
+    },
+    { name: 'screen', label: 'Screen', options: named(findings.map(finding => finding.surface)) },
+  ],
+})}
 <section><div class="section-head"><h2>Something to look at</h2><p>${pictureCount(withProblems.length)}</p></div>
 ${withProblems.length > 0 ? `<div class="grid">${withProblems.map(card).join('')}</div>` : '<p class="empty">Nothing this week.</p>'}</section>
 <section><div class="section-head"><h2>Looks fine</h2><p>${pictureCount(fine.length)}</p></div>
