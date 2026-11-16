@@ -38,7 +38,6 @@ function card(plain_what: string, outbound_text: string | null = null): Sentinel
     parsed_command: null,
     outbound_text,
     destination_host: null,
-    outbound_truncated: false,
     email: null,
     calendar_event: null,
     schedule: null,

@@ -228,14 +228,12 @@ describe('extractSentinelFromEvent', () => {
             plainWhat: 'Search the web',
             outboundText: 'query: tides',
             destinationHost: 'mcp.exa.ai',
-            outboundTruncated: true,
           },
         },
       ],
     });
     expect(approvals[0]?.card.outbound_text).toBe('query: tides');
     expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
-    expect(approvals[0]?.card.outbound_truncated).toBe(true);
   });
 
   it('parses an approval event after the SDK deserializes it', () => {
@@ -263,7 +261,6 @@ describe('extractSentinelFromEvent', () => {
               why_asked_again: null,
               outbound_text: 'query: tides',
               destination_host: 'mcp.exa.ai',
-              outbound_truncated: true,
             },
           },
         ],
@@ -278,7 +275,26 @@ describe('extractSentinelFromEvent', () => {
     expect(approvals[0]?.card.cannot_be_undone).toBe('Runs once.');
     expect(approvals[0]?.card.outbound_text).toBe('query: tides');
     expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
-    expect(approvals[0]?.card.outbound_truncated).toBe(true);
+  });
+
+  it('still reads a card saved when long values could be cut, which carries a cut flag', () => {
+    const approvals = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          id: 'call-12',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Search the web',
+            outbound_text: 'query: tides ... (5 more characters not shown)',
+            outbound_truncated: true,
+          },
+        },
+      ],
+    });
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]?.card.outbound_text).toBe('query: tides ... (5 more characters not shown)');
+    expect(approvals[0]?.card).not.toHaveProperty('outbound_truncated');
   });
 
   it('reads the whole message of a mail card after the SDK deserializes it', () => {
@@ -305,7 +321,6 @@ describe('extractSentinelFromEvent', () => {
               why_asked_again: null,
               outbound_text: null,
               destination_host: null,
-              outbound_truncated: false,
               email: {
                 action: 'change',
                 to: [{ name: 'Grace Lee', address: 'grace@example.com' }],
@@ -449,7 +464,6 @@ describe('extractSentinelFromEvent', () => {
               why_asked_again: null,
               outbound_text: null,
               destination_host: null,
-              outbound_truncated: false,
               calendar_event: CALENDAR_EVENT,
             },
           },
@@ -733,7 +747,6 @@ describe('held actions', () => {
               parsed_command: null,
               outbound_text: null,
               destination_host: null,
-              outbound_truncated: false,
             },
           },
         ],

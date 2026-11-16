@@ -53,12 +53,12 @@ Aman sorts every action into one of three groups before it runs.
     Nothing runs for these:
 
     - A send whose destination can't be checked.
-    - A send whose card would hide a recipient or cut off its content.
+    - A send whose card would hide a recipient.
     - Anything that needs the internet while offline mode is on.
 
 ### What the card offers
 
-The card shows what will happen, including what will be sent, before anything leaves your computer. In a chat, the card offers **Allow** and **Not now**. A held action in a scheduled run's list offers **Allow** and **Deny**.
+The card shows what will happen, including what will be sent, before anything leaves your computer. Nothing on the card is cut off. A long message or file shows its start first, and **Show all** opens every character of it. Telegram can show about three messages' worth of one text. A longer one is cut there, so you approve or deny it in Aman. In a chat, the card offers **Allow** and **Not now**. A held action in a scheduled run's list offers **Allow** and **Deny**.
 
 These ask every time, so their cards offer only a yes or a no:
 

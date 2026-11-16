@@ -1,6 +1,5 @@
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
-import { OUTBOUND_VALUE_MAX_CHARS, SEND_VALUE_MAX_CHARS } from '../../../src/core/permissions/extractorRegistry';
 import { recordUntrustedText } from '../../../src/core/permissions/provenance';
 import type { TierDecision } from '../../../src/core/permissions/tier';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
@@ -81,26 +80,38 @@ describe('connector send cards', () => {
   });
 
   test('send_email shows the whole body and recipients, and binds them into the token', async () => {
-    const body = `${'a'.repeat(OUTBOUND_VALUE_MAX_CHARS)}END-OF-MESSAGE`;
+    const body = `${'a'.repeat(2000)}END-OF-MESSAGE`;
     const decision = await classify(
       mailCall('send_email', { to: ['friend@example.com'], cc: ['boss@example.com'], subject: 'Hi', body }),
     );
     expect(decision.auto_deny).toBeNull();
     expect(decision.approval_token_id).not.toBeNull();
-    expect(decision.card?.outbound_truncated).toBe(false);
     expect(decision.card?.outbound_text).toContain('END-OF-MESSAGE');
     expect(decision.card?.recipient).toBe('friend@example.com, boss@example.com');
   });
 
-  test('refuses a send_email whose body is too long to show, instead of cutting it', async () => {
-    const body = `${'a'.repeat(SEND_VALUE_MAX_CHARS)}HIDDEN-TAIL`;
-    expectRefused(await classify(mailCall('send_email', { to: ['friend@example.com'], subject: 'Hi', body })));
+  test('offers a very long send_email with every character of it on the card, instead of refusing it', async () => {
+    const body = `${'a'.repeat(50_000)}LAST-WORDS`;
+    const decision = await classify(mailCall('send_email', { to: ['friend@example.com'], subject: 'Hi', body }));
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.approval_token_id).not.toBeNull();
+    expect(decision.card?.outbound_text).toContain(body);
   });
 
-  test('still cuts a long value on a call that sends nothing', async () => {
-    const decision = await classify(mailCall('lookup_note', { text: 'a'.repeat(OUTBOUND_VALUE_MAX_CHARS + 5) }));
+  test('shows a long value on a call that sends nothing whole too', async () => {
+    const text = `${'a'.repeat(5000)}LAST-WORDS`;
+    const decision = await classify(mailCall('lookup_note', { text }));
     expect(decision.auto_deny).toBeNull();
-    expect(decision.card?.outbound_truncated).toBe(true);
+    expect(decision.card?.outbound_text).toContain(text);
+  });
+
+  test('offers a send with a very long argument name, showing the whole name', async () => {
+    const key = `note_${'k'.repeat(300)}`;
+    const decision = await classify(
+      mailCall('send_email', { to: ['friend@example.com'], subject: 'Hi', body: 'ok', [key]: 'x' }),
+    );
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.card?.outbound_text).toContain(key);
   });
 });
 
@@ -188,12 +199,12 @@ describe('sends are never trusted by a hint or a standing grant', () => {
   test.each(['invite_user', 'create_event', 'add_issue_comment'])(
     '%s with attendees is barred from durable scope and shows its whole body',
     async name => {
-      const body = 'b'.repeat(OUTBOUND_VALUE_MAX_CHARS + 50);
+      const body = `${'b'.repeat(2050)}LAST-WORDS`;
       const decision = await classify(mailCall(name, { attendees: ['guest@example.com'], body }));
       expect(decision.tier).toBe(3);
       expect(decision.card?.recipient).toBe('guest@example.com');
       expect(decision.standing_grant_barred).toBe(true);
-      expect(decision.card?.outbound_truncated).toBe(false);
+      expect(decision.card?.outbound_text).toContain(body);
     },
   );
 
@@ -373,15 +384,15 @@ describe('replies must name every recipient in To', () => {
   });
 });
 
-describe('what is shown in full and what is cut', () => {
+describe('content sends show everything they write', () => {
   test.each([
     ['create_or_update_file', { owner: 'o', repo: 'r', path: 'a.md', content: 'x'.repeat(30_000) }],
     ['push_files', { owner: 'o', repo: 'r', files: [{ path: 'a.md', content: 'x'.repeat(25_000) }] }],
     ['create_gist', { files: { 'a.md': { content: 'x'.repeat(25_000) } } }],
-  ])('%s with a long file keeps the cut preview instead of being refused', async (name, params) => {
+  ])('%s with a long file shows the whole file and is not refused', async (name, params) => {
     const decision = await classify(mailCall(name, params));
     expect(decision.auto_deny).toBeNull();
-    expect(decision.card?.outbound_truncated).toBe(true);
+    expect(decision.card?.outbound_text).toContain('x'.repeat(25_000));
     expect(decision.approval_token_id).not.toBeNull();
   });
 });
@@ -413,25 +424,27 @@ describe('attachment file data on the card', () => {
     expect(decision.card?.outbound_text).toContain(note);
   });
 
-  test('plain text in an attachment is shown as it is, and counts toward the cap', async () => {
+  test('plain text in an attachment is shown as it is, however long', async () => {
     const decision = await sendWith({
       attachments: [{ filename: 'notes.txt', mimeType: 'text/plain', content: 'meet me at noon by the old bridge' }],
     });
     expect(decision.card?.outbound_text).toContain('meet me at noon by the old bridge');
-    expectRefused(
-      await sendWith({
-        attachments: [{ filename: 'notes.txt', mimeType: 'text/plain', content: 'word '.repeat(SEND_VALUE_MAX_CHARS) }],
-      }),
-    );
+    const long = `${'word '.repeat(30_000)}LAST-WORD`;
+    const longDecision = await sendWith({
+      attachments: [{ filename: 'notes.txt', mimeType: 'text/plain', content: long }],
+    });
+    expect(longDecision.auto_deny).toBeNull();
+    expect(longDecision.card?.outbound_text).toContain(long);
   });
 
-  test('a long text file becomes one summary line and is not refused', async () => {
-    const text = 'quarterly numbers '.repeat(2000);
+  test('a long text file is shown whole, not summarised, and is not refused', async () => {
+    const text = `${'quarterly numbers '.repeat(2000)}LAST-ROW`;
     const decision = await sendWith({
       attachments: [{ filename: 'q.csv', content: Buffer.from(text).toString('base64') }],
     });
     expect(decision.auto_deny).toBeNull();
-    expect(decision.card?.outbound_text).toContain('text file, about 35 KB, fingerprint');
+    expect(decision.card?.outbound_text).toContain(text.trim());
+    expect(decision.card?.outbound_text).not.toContain('fingerprint');
   });
 
   test('a string that is not valid base64 is left as it is', async () => {
@@ -462,7 +475,9 @@ describe('attachment file data on the card', () => {
 
   test('only file data keys under exact attachment keys are summarised', async () => {
     const hex = 'ab'.repeat(40);
-    expectRefused(await sendWith({ notAttachment: [{ content: blob(4) }] }));
+    const outside = await sendWith({ notAttachment: [{ content: blob(4) }] });
+    expect(outside.card?.outbound_text).toContain(blob(4));
+    expect(outside.card?.outbound_text).not.toContain('fingerprint');
     const decision = await sendWith({ attachments: [{ filename: hex, note: hex }] });
     expect(decision.card?.outbound_text).toContain(hex);
     expect(decision.card?.outbound_text).not.toContain('fingerprint');
@@ -480,7 +495,6 @@ describe('attachment file data on the card', () => {
     const decision = await sendWith(extra);
     expect(decision.auto_deny).toBeNull();
     expect(decision.card?.outbound_text).toContain('file data, about 29 KB, fingerprint');
-    expect(decision.card?.outbound_truncated).toBe(false);
   });
 });
 
@@ -488,9 +502,6 @@ describe('the owner line for a refused send', () => {
   const lines = async () => ({
     replyAll: (await classify(mailCall('reply_all', { messageId: 'm1' }))).owner_message,
     draft: (await classify(mailCall('send_draft', { id: 'd1' }))).owner_message,
-    tooLong: (
-      await classify(mailCall('send_email', { to: 'friend@example.com', body: 'a'.repeat(SEND_VALUE_MAX_CHARS + 1) }))
-    ).owner_message,
     noRecipient: (await classify(mailCall('reply_to_thread', { threadId: 't1', body: 'ok' }))).owner_message,
   });
 
@@ -498,7 +509,6 @@ describe('the owner line for a refused send', () => {
     const found = await lines();
     expect(found.replyAll).toContain('replying to everyone');
     expect(found.draft).toContain('saved draft');
-    expect(found.tooLong).toContain('too long');
     expect(found.noRecipient).toContain('did not say who gets it');
   });
 

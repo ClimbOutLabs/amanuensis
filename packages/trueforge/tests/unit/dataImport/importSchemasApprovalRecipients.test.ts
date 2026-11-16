@@ -23,7 +23,6 @@ const CARD = {
   parsed_command: null,
   outbound_text: null,
   destination_host: null,
-  outbound_truncated: false,
   email: OLDER_EMAIL,
   calendar_event: null,
   schedule: null,
@@ -108,5 +107,22 @@ describe('importing a finished turn whose approval is still pending and was writ
         },
       ],
     });
+  });
+});
+
+describe('importing approval cards written when long values could be cut', () => {
+  it('reads a card that carries the old cut flag, and shows its request text as it was saved', () => {
+    const older = {
+      ...APPROVAL,
+      tool_calls: [
+        {
+          ...CALL,
+          tier3_card: { ...CARD, outbound_text: 'query: a long search', outbound_truncated: true },
+        },
+      ],
+    };
+    const [event] = ImportEventListSchema.parse([structuredClone(older)]);
+    expect(event).toMatchObject({ tool_calls: [{ tier3_card: { outbound_text: 'query: a long search' } }] });
+    expect(event).not.toHaveProperty('tool_calls.0.tier3_card.outbound_truncated');
   });
 });

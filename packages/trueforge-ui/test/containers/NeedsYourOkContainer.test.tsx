@@ -50,7 +50,6 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     parsed_command: null,
     outbound_text: 'body: Lunch at noon?',
     destination_host: null,
-    outbound_truncated: false,
     email: null,
     calendar_event: null,
     schedule: null,

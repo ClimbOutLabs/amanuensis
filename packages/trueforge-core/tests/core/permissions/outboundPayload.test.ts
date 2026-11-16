@@ -8,8 +8,6 @@ import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import {
   extractCardFields,
   hostFromUrl,
-  OUTBOUND_TEXT_MAX_CHARS,
-  OUTBOUND_VALUE_MAX_CHARS,
   renderOutboundArguments,
 } from '../../../src/core/permissions/extractorRegistry';
 import type { Tier3Card, TierDecision } from '../../../src/core/permissions/tier';
@@ -52,22 +50,19 @@ function cardOf(decision: TierDecision): Tier3Card {
   return decision.card;
 }
 
-function rendered(params: Record<string, unknown>): { text: string; truncated: boolean } {
-  const result = renderOutboundArguments(params);
-  if (result.text === null) {
+function rendered(params: Record<string, unknown>): { text: string } {
+  const text = renderOutboundArguments(params);
+  if (text === null) {
     throw new Error('expected rendered text');
   }
-  return { text: result.text, truncated: result.truncated };
+  return { text };
 }
 
 describe('renderOutboundArguments', () => {
   test('lists every argument, one line each, with a type hint on anything that is not a string', () => {
     expect(
       renderOutboundArguments({ query: 'best pizza', num_results: 5, filters: { site: 'a.com' }, tags: ['x', 'y'] }),
-    ).toEqual({
-      text: 'query: best pizza\nnum_results (number): 5\nfilters (object): {"site":"a.com"}\ntags (array): ["x","y"]',
-      truncated: false,
-    });
+    ).toBe('query: best pizza\nnum_results (number): 5\nfilters (object): {"site":"a.com"}\ntags (array): ["x","y"]');
   });
 
   test('a string that looks like a number is told apart from a number', () => {
@@ -77,7 +72,7 @@ describe('renderOutboundArguments', () => {
   });
 
   test('is null when there are no arguments', () => {
-    expect(renderOutboundArguments({})).toEqual({ text: null, truncated: false });
+    expect(renderOutboundArguments({})).toBeNull();
   });
 
   test('a multi-line value cannot start a line that reads like another argument', () => {
@@ -108,46 +103,21 @@ describe('renderOutboundArguments', () => {
     expect(rendered({ body: 'a\r\nb\rc' }).text).toBe('body: a\n  | b\\u{000D}c');
   });
 
-  test('a value over the cap is cut with a marker, and every key still appears', () => {
-    const result = rendered({ body: 'x'.repeat(OUTBOUND_VALUE_MAX_CHARS + 21), bcc: 'evil@x.example', subject: 's' });
-    expect(result.truncated).toBe(true);
-    expect(result.text).toContain('(21 more characters not shown)');
-    expect(result.text).toContain('bcc: evil@x.example');
-    expect(result.text).toContain('subject: s');
-    expect(result.text.startsWith(`body: ${'x'.repeat(OUTBOUND_VALUE_MAX_CHARS)} ...`)).toBe(true);
+  test('every value is shown whole, however long, with every key', () => {
+    const body = `${'x'.repeat(50_000)}LAST-WORDS`;
+    const result = rendered({ body, bcc: 'evil@x.example', subject: 's' });
+    expect(result.text).toBe(`body: ${body}\nbcc: evil@x.example\nsubject: s`);
   });
 
-  test('a value exactly at the cap is not cut', () => {
-    const value = 'y'.repeat(OUTBOUND_VALUE_MAX_CHARS);
-    expect(renderOutboundArguments({ query: value })).toEqual({ text: `query: ${value}`, truncated: false });
-  });
-
-  test('the cut counts code points, so an emoji is never split', () => {
-    const result = rendered({ note: '😀'.repeat(OUTBOUND_VALUE_MAX_CHARS + 1) });
-    expect(result.text).toContain('(1 more characters not shown)');
-    expect(result.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
-  });
-
-  test('recipient values are never cut, however long', () => {
-    const emails = Array.from({ length: 400 }, (_, index) => `person${String(index)}@example.com`);
-    const result = rendered({ bcc: emails, body: 'z'.repeat(OUTBOUND_VALUE_MAX_CHARS + 5) });
-    for (const email of emails) {
-      expect(result.text).toContain(email);
-    }
-    expect(result.truncated).toBe(true);
-  });
-
-  test('an overall cap shrinks values harder but never drops a key or a recipient', () => {
+  test('many long values are all shown whole, so no part of a large call is hidden', () => {
     const params: Record<string, unknown> = { bcc: 'evil@x.example' };
     for (let index = 0; index < 100; index += 1) {
-      params[`field_${String(index)}`] = 'q'.repeat(OUTBOUND_VALUE_MAX_CHARS);
+      params[`field_${String(index)}`] = `${'q'.repeat(2000)}${String(index)}`;
     }
     const result = rendered(params);
-    expect(result.truncated).toBe(true);
-    expect(result.text.length).toBeLessThan(OUTBOUND_TEXT_MAX_CHARS);
     expect(result.text).toContain('bcc: evil@x.example');
     for (let index = 0; index < 100; index += 1) {
-      expect(result.text).toContain(`field_${String(index)}: `);
+      expect(result.text).toContain(`field_${String(index)}: ${'q'.repeat(2000)}${String(index)}`);
     }
   });
 });
@@ -157,13 +127,10 @@ describe('recipients on the card', () => {
     classifyTier(connectorCall({ tool_name: 'send_email', params }), makeCtx());
 
   test('a bcc is on the Recipient row and a long body is shown in full', async () => {
-    const card = cardOf(
-      await send({ to: 'a@x.example', bcc: 'evil@x.example', body: 'x'.repeat(OUTBOUND_VALUE_MAX_CHARS * 3) }),
-    );
+    const card = cardOf(await send({ to: 'a@x.example', bcc: 'evil@x.example', body: 'x'.repeat(6000) }));
     expect(card.recipient).toBe('a@x.example, evil@x.example');
     expect(card.outbound_text).toContain('bcc: evil@x.example');
-    expect(card.outbound_text).toContain('x'.repeat(OUTBOUND_VALUE_MAX_CHARS * 3));
-    expect(card.outbound_truncated).toBe(false);
+    expect(card.outbound_text).toContain('x'.repeat(6000));
   });
 
   test.each(['attendees', 'invitees', 'share_with', 'members', 'emails', 'webhook_url'])(

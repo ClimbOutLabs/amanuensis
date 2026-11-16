@@ -9,7 +9,7 @@ import { calendarCardCopy } from './cardCopy';
 import type { SentinelAction } from './classifier';
 import { CALDAV_PRIVATE_READ_REASON } from './connectorTrust';
 import { escapeDisplayText } from './displayText';
-import { renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
+import { renderOutboundArguments } from './extractorRegistry';
 import {
   autoDenyDecision,
   tier1Decision,
@@ -203,19 +203,12 @@ function cardFor({
   if (written === undefined) {
     return null;
   }
-  // A change or cancellation names every guest it may email, so a list too long to name gives the generic card.
-  if ((tool === 'update_event' || tool === 'delete_event') && guestListTooLong(review)) {
-    return null;
-  }
   // The confirm token is the approval itself, not something the call writes, so it is not listed.
   const args = Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'confirm_token'));
   if (Object.keys(args).some(key => !written.includes(key))) {
     return null;
   }
-  const outbound = renderOutboundArguments(args, { valueMaxChars: SEND_VALUE_MAX_CHARS });
-  if (outbound.truncated) {
-    return null;
-  }
+  const outbound = renderOutboundArguments(args);
   const existing = eventSubject({ review });
   const parts = cardPartsFor({ tool, params, existing, review });
   return cardWith({
@@ -227,7 +220,7 @@ function cardFor({
       reason,
     }),
     cannot_be_undone: parts.undo,
-    outbound_text: outbound.text,
+    outbound_text: outbound,
     safe_choice: tool !== 'create_event',
     destructive: tool === 'delete_event',
   });
@@ -292,9 +285,6 @@ function cardPartsFor({
   };
 }
 
-/** Longest guest list the card names in full. A longer one gives the generic card. */
-const MAX_NAMED_GUESTS = 20;
-
 /**
  * The sentence that names the guests a change would email. Null when the event has no guests.
  * A change whose guest list cannot be read is refused before a card is built, so the list a card
@@ -306,12 +296,6 @@ function emailedGuestsText({ review, lead }: { review: CaldavEventReview | null;
     return null;
   }
   return `${lead} will email: ${guests.map(shown).join(', ')}.`;
-}
-
-/** True when the guest list is too long to name in full on the card. */
-function guestListTooLong(review: CaldavEventReview | null): boolean {
-  const guests = review?.attendees ?? [];
-  return guests.length > MAX_NAMED_GUESTS || guests.join(', ').length > SEND_VALUE_MAX_CHARS;
 }
 
 /**
@@ -378,6 +362,5 @@ function cardWith({
     parsed_command: null,
     outbound_text,
     destination_host: null,
-    outbound_truncated: false,
   };
 }

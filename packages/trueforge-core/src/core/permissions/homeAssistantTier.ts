@@ -18,7 +18,7 @@ import {
 import { simpleCardCopy } from './cardCopy';
 import type { SentinelAction } from './classifier';
 import { escapeDisplayText } from './displayText';
-import { renderOutboundArguments, SEND_VALUE_MAX_CHARS } from './extractorRegistry';
+import { renderOutboundArguments } from './extractorRegistry';
 import { autoDenyDecision, tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
 import { TOOL_GRANT_REASON } from './toolGrants';
 
@@ -169,10 +169,7 @@ function cardFor({
   params: Record<string, unknown>;
   target: HomeAssistantTarget;
 }): Tier3Card | null {
-  const outbound = renderOutboundArguments(params, { valueMaxChars: SEND_VALUE_MAX_CHARS });
-  if (outbound.truncated) {
-    return null;
-  }
+  const outbound = renderOutboundArguments(params);
   const plain_what = plainWhatFor({ tool_name, params, target });
   return {
     plain_what,
@@ -184,9 +181,8 @@ function cardFor({
     recipient: null,
     amount: null,
     parsed_command: null,
-    outbound_text: outbound.text,
+    outbound_text: outbound,
     destination_host: null,
-    outbound_truncated: false,
   };
 }
 

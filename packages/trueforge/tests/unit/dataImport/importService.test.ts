@@ -3367,7 +3367,6 @@ const HONEST_CARD = {
   parsed_command: null,
   outbound_text: 'to: team@example.com',
   destination_host: null,
-  outbound_truncated: false,
 };
 
 async function importedScheduledChat(target: Instance) {

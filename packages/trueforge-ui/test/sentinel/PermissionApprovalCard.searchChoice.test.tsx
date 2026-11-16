@@ -22,7 +22,6 @@ const SEARCH_CARD: SentinelApprovalCard = {
   outbound_text:
     'query: "Find quiet coffee shops in San Francisco"\nsession_id: "sess-123"\nmodel_name: "search-model-1"',
   destination_host: null,
-  outbound_truncated: false,
   outbound_plumbing_text: 'session_id: "sess-123"\nmodel_name: "search-model-1"',
   email: null,
   calendar_event: null,

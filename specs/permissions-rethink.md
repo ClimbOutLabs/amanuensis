@@ -52,7 +52,7 @@ Two cases never reach a card and are denied outright, with the denial recorded i
 
 ## Connector Tools
 
-Connector tools ask by default. A connector call the classifier recognises gets a Tier 3 card showing the exact arguments it would send; an unrecognised one fails closed the same way. The user sees what the agent wants to look up before it runs.
+Connector tools ask by default. A connector call the classifier recognises gets a Tier 3 card showing the exact arguments it would send; an unrecognised one fails closed the same way. Every argument is shown whole: no value is cut, and a long one opens behind Show all. A channel that can show only part of a long value (Telegram) offers no buttons and sends the person to the app. The user sees what the agent wants to look up before it runs.
 
 Three standing trusts run a connector call without a card instead. Each runs as Tier 1, each is recorded in the audit feed, and none applies to a call that reads a sensitive path:
 

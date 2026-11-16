@@ -18,7 +18,6 @@ const MORNING_BRIEF_CARD = {
   parsed_command: null,
   outbound_text: null,
   destination_host: null,
-  outbound_truncated: false,
   email: null,
   calendar_event: null,
   persona: null,

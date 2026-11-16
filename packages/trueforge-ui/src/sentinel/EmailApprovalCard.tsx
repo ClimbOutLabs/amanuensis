@@ -254,13 +254,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
           </p>
         </>
       )}
-      {card.outbound_text !== null && (
-        <OutboundBlock
-          text={card.outbound_text}
-          truncated={card.outbound_truncated}
-          label="Also sent with this email"
-        />
-      )}
+      {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} label="Also sent with this email" />}
 
       {card.plain_why !== null && (
         <p className="text-text-secondary" data-role="approval-intent">

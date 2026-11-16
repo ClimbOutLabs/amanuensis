@@ -20,7 +20,6 @@ function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCa
     parsed_command: null,
     outbound_text: 'to: ana@example.com\nbody: Lunch at noon?',
     destination_host: 'mail.example.com',
-    outbound_truncated: false,
     email: null,
     calendar_event: null,
     schedule: null,
@@ -83,11 +82,6 @@ describe('HeldActionCard', () => {
     );
     expect(await screen.findByText('Mira says: It was on the Monday list.')).toBeInTheDocument();
     expect(screen.queryByText(/Aman says|Agent says/)).not.toBeInTheDocument();
-  });
-
-  it('shows plainly when part of the text is cut off', () => {
-    renderCard({}, { outbound_truncated: true });
-    expect(screen.getByText('Part of this is not shown in full. Check it before you approve.')).toBeInTheDocument();
   });
 
   it('says why the action was held when the server gave a reason', () => {

@@ -327,12 +327,11 @@ export const Tier3CardSchema = z
     outbound_text: z
       .string()
       .nullable()
-      .describe('Exact arguments sent to a connector, one "name: value" line each. Long values are cut with a marker.'),
+      .describe('Exact arguments sent to a connector, one "name: value" line each, every value whole.'),
     destination_host: z
       .string()
       .nullable()
       .describe('Host of the connector server that receives the call, or null when it is not a remote server.'),
-    outbound_truncated: z.boolean().describe('True when part of outbound_text is cut and not shown in full.'),
     outbound_plumbing_text: z
       .string()
       .nullable()

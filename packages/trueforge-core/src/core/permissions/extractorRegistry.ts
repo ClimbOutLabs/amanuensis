@@ -29,8 +29,6 @@ export interface ExtractedCardFields {
   outbound_text: string | null;
   /** Host of the connector server that receives the call; only for connector (MCP) calls. */
   destination_host: string | null;
-  /** True when part of outbound_text was cut and is not shown in full. */
-  outbound_truncated: boolean;
 }
 
 export type CardFieldExtractor = (params: Record<string, unknown>) => ExtractedCardFields;
@@ -210,18 +208,9 @@ export function genericExtractor(params: Record<string, unknown>): ExtractedCard
     amount: firstOrNull(stringValues(params, AMOUNT_KEYS)),
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
   };
 }
 
-/** Longest value shown in full; a longer one is cut with a marker. Recipient values are never cut. */
-export const OUTBOUND_VALUE_MAX_CHARS = 2000;
-/** Longest value of a send shown in full; a send with a longer one is refused instead of cut. */
-export const SEND_VALUE_MAX_CHARS = 20_000;
-/** Longest outbound_text before every non-recipient value is cut harder; keys and recipients always stay. */
-export const OUTBOUND_TEXT_MAX_CHARS = 100_000;
-const OUTBOUND_REDUCED_VALUE_MAX_CHARS = 100;
-const OUTBOUND_KEY_MAX_CHARS = 200;
 const OUTBOUND_GUTTER = '  | ';
 const PLAIN_KEY = /^[A-Za-z0-9_.-]+$/;
 
@@ -244,17 +233,9 @@ function typeHint(value: unknown): string | null {
   return Array.isArray(value) ? 'array' : typeof value;
 }
 
-function leadingCodePoints(text: string, count: number): { head: string; rest: number } {
-  const points = Array.from(text);
-  return { head: points.slice(0, count).join(''), rest: Math.max(0, points.length - count) };
-}
-
-function keyDisplay(key: string): { text: string; cut: boolean } {
-  const { head, rest } = leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS);
-  const shown = `${head}${rest > 0 ? '...' : ''}`;
+function keyDisplay(key: string): string {
   // A key that is not plain is quoted, so it can never pass for a gutter or a separate line.
-  const text = PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
-  return { text, cut: rest > 0 };
+  return PLAIN_KEY.test(key) ? key : `"${escapeDisplayText(key).replace(/"/g, '\\"')}"`;
 }
 
 const DATA_URL = /^data:([^;,]*)[^,]*;base64,/;
@@ -265,8 +246,6 @@ const FILE_DATA_KEY_SET = new Set(
   ['content', 'data', 'bytes', 'content_bytes', 'file_data', 'base64', 'raw'].map(normalizeKey),
 );
 const ATTACHMENT_MAX_DEPTH = 6;
-/** Longest attachment text shown on the card; a longer file is summarised like binary data. */
-const FILE_TEXT_MAX_CHARS = 5000;
 /** Shorter unprefixed strings are more likely plain words than encoded data. */
 const MIN_ENCODED_CHARS = 16;
 
@@ -290,8 +269,8 @@ function sizeLabel(bytes: number): string {
 }
 
 /**
- * File data under an attachment: base64 (standard or URL-safe, padded or not) is decoded and short text is
- * shown; longer text and binary become one line with type, size and a fingerprint of the bytes.
+ * File data under an attachment: base64 (standard or URL-safe, padded or not) is decoded. Text is shown whole,
+ * however long; binary data becomes one line with type, size and a fingerprint of the bytes.
  * Anything that is not valid base64 is returned unchanged.
  */
 function decodeFileData(value: string): string {
@@ -311,16 +290,16 @@ function decodeFileData(value: string): string {
     return value;
   }
   const text = decodeText(bytes);
-  if (text !== null && text.length <= FILE_TEXT_MAX_CHARS) {
+  if (text !== null) {
     return text;
   }
   const fingerprint = createHash('sha256').update(bytes).digest('hex').slice(0, 12);
-  return `(${text === null ? 'file data' : 'text file'}, ${mime === '' ? '' : `${mime}, `}${sizeLabel(bytes.length)}, fingerprint ${fingerprint})`;
+  return `(file data, ${mime === '' ? '' : `${mime}, `}${sizeLabel(bytes.length)}, fingerprint ${fingerprint})`;
 }
 
 /**
- * File data is bound into the approval but shown on the card as text or a one-line summary, so a large
- * attachment never counts against the length a send may have. Attachment keys are found at any depth.
+ * File data is bound into the approval and shown on the card as its text, or as a one-line summary when it is
+ * not text. Attachment keys are found at any depth.
  */
 function summarizeAttachments(value: unknown, inAttachment = false, depth = 0): unknown {
   if (depth > ATTACHMENT_MAX_DEPTH) {
@@ -342,48 +321,26 @@ function summarizeAttachments(value: unknown, inAttachment = false, depth = 0): 
   );
 }
 
-function renderOutboundLines(
-  params: Record<string, unknown>,
-  valueMaxChars: number,
-): { lines: string[]; truncated: boolean } {
-  let truncated = false;
-  const lines = Object.entries(params).map(([key, value]) => {
-    const shownValue = summarizeAttachments(value, ATTACHMENT_KEY_SET.has(normalizeKey(key)));
-    const raw = typeof shownValue === 'string' ? shownValue : argumentJson(shownValue);
-    const { head, rest } = isRecipientKey(key) ? { head: raw, rest: 0 } : leadingCodePoints(raw, valueMaxChars);
-    truncated ||= rest > 0;
-    const shown = escapeDisplayText(head, { keepNewlines: true });
-    const marker = rest > 0 ? ` ... (${String(rest)} more characters not shown)` : '';
-    // Continuation lines carry a fixed gutter, so a value can never begin a line that reads like `key: value`.
-    const [first = '', ...more] = `${shown}${marker}`.split('\n');
-    const hint = typeHint(value);
-    const keyShown = keyDisplay(key);
-    truncated ||= keyShown.cut;
-    const label = `${keyShown.text}${hint === null ? '' : ` (${hint})`}`;
-    return [`${label}: ${first}`, ...more.map(line => `${OUTBOUND_GUTTER}${line}`)].join('\n');
-  });
-  return { lines, truncated };
-}
-
 /**
  * Every argument the connector will receive, one line each, built from the server's canonical params
- * so a model-written description can never stand in for what is sent. Every key is always listed
- * and recipient values are never cut; other values and over-long keys are capped, and `truncated` says whether any was.
+ * so a model-written description can never stand in for what is sent. Every key and every value is shown
+ * whole, however long: the card folds long text behind "Show all", so nothing sent is left off it.
  */
-export function renderOutboundArguments(
-  params: Record<string, unknown>,
-  options?: { valueMaxChars?: number },
-): { text: string | null; truncated: boolean } {
+export function renderOutboundArguments(params: Record<string, unknown>): string | null {
   if (Object.keys(params).length === 0) {
-    return { text: null, truncated: false };
+    return null;
   }
-  let rendered = renderOutboundLines(params, options?.valueMaxChars ?? OUTBOUND_VALUE_MAX_CHARS);
-  let text = rendered.lines.join('\n');
-  if (text.length > OUTBOUND_TEXT_MAX_CHARS) {
-    rendered = renderOutboundLines(params, OUTBOUND_REDUCED_VALUE_MAX_CHARS);
-    text = rendered.lines.join('\n');
-  }
-  return { text, truncated: rendered.truncated };
+  return Object.entries(params)
+    .map(([key, value]) => {
+      const shownValue = summarizeAttachments(value, ATTACHMENT_KEY_SET.has(normalizeKey(key)));
+      const raw = typeof shownValue === 'string' ? shownValue : argumentJson(shownValue);
+      // Continuation lines carry a fixed gutter, so a value can never begin a line that reads like `key: value`.
+      const [first = '', ...more] = escapeDisplayText(raw, { keepNewlines: true }).split('\n');
+      const hint = typeHint(value);
+      const label = `${keyDisplay(key)}${hint === null ? '' : ` (${hint})`}`;
+      return [`${label}: ${first}`, ...more.map(line => `${OUTBOUND_GUTTER}${line}`)].join('\n');
+    })
+    .join('\n');
 }
 
 /** Host (with any port) of an http(s) URL, or null when the value is not one. */
@@ -903,10 +860,7 @@ interface IncompleteSend {
   owner_message: string;
 }
 
-const REFUSALS: Record<
-  HiddenSend | 'hidden_characters' | 'long_key' | 'too_long' | 'no_recipient' | 'draft_no_recipient',
-  IncompleteSend
-> = {
+const REFUSALS: Record<HiddenSend | 'hidden_characters' | 'no_recipient' | 'draft_no_recipient', IncompleteSend> = {
   reply_all: {
     model_message:
       'Replying to everyone fills in the recipients after approval, so it cannot be shown. Reply on the same message with every person who should get it named in `to`.',
@@ -924,17 +878,6 @@ const REFUSALS: Record<
       'This contains hidden characters that would not show on the approval card, so it cannot be approved. Remove them and try again.',
     owner_message:
       'Nothing was sent: it contains hidden characters you could not see. The assistant needs to remove them.',
-  },
-  long_key: {
-    model_message:
-      'An argument name is too long to show in full, so this cannot be approved. Use shorter argument names.',
-    owner_message:
-      'Nothing was sent: a field name was too long to show you in full. The assistant needs to shorten it.',
-  },
-  too_long: {
-    model_message:
-      'This is too long to show in full, so it cannot be approved. Shorten it or split it into smaller messages.',
-    owner_message: 'Nothing was sent: it is too long to show you in full. The assistant needs to shorten it.',
   },
   no_recipient: {
     model_message: 'This does not name who receives it. Name each recipient in `to` and try again.',
@@ -987,10 +930,6 @@ function incompleteSend(input: {
   hidden: HiddenSend | null;
   sends: boolean;
   delivers_message: boolean;
-  /** The card lists every argument, so a key it would cut hides part of the send. */
-  shows_arguments: boolean;
-  message_send: boolean;
-  truncated: boolean;
   needs_recipient: boolean;
   needs_to: boolean;
   /** The host Email connector's own draft: it must name a recipient even though a draft sends nothing. */
@@ -1006,16 +945,6 @@ function incompleteSend(input: {
     (hasHiddenRecipient(input.params) || (input.delivers_message && hasHiddenMessageText(input.params)))
   ) {
     return REFUSALS.hidden_characters;
-  }
-  if (
-    input.sends &&
-    input.shows_arguments &&
-    Object.keys(input.params).some(key => leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS).rest > 0)
-  ) {
-    return REFUSALS.long_key;
-  }
-  if (input.message_send && input.truncated) {
-    return REFUSALS.too_long;
   }
   if (
     (input.needs_recipient && input.fields.recipient === null) ||
@@ -1068,9 +997,6 @@ export function extractCardFields(input: {
         hidden: null,
         sends: externalService,
         delivers_message: entry?.delivers_message === true,
-        shows_arguments: false,
-        message_send: false,
-        truncated: false,
         needs_recipient: false,
         needs_to: false,
         draft_needs_recipient: false,
@@ -1099,18 +1025,12 @@ export function extractCardFields(input: {
     family?.sends !== undefined ||
     hidden !== null ||
     (readOnly ? hasPhrase(words, 'send') : recipients.length > 0);
-  // Repository writes and gists keep the cut preview; their arguments are still bound into the approval.
-  const messageSend = sends && family?.sends !== 'content';
-  const outbound = renderOutboundArguments(input.canonical_params, {
-    valueMaxChars: messageSend ? SEND_VALUE_MAX_CHARS : OUTBOUND_VALUE_MAX_CHARS,
-  });
   const fields: ExtractedCardFields = {
     ...base,
     destination: family?.destination?.(input.canonical_params) ?? base.destination,
     // Includes recipients nested inside other arguments; the unverifiable check above stays top-level.
     recipient: family?.recipient === undefined ? joinOrNull(recipients) : family.recipient(input.canonical_params),
-    outbound_text: outbound.text,
-    outbound_truncated: outbound.truncated,
+    outbound_text: renderOutboundArguments(input.canonical_params),
     // Only the connector's own configured URL: a host read from the arguments is the model's claim.
     destination_host: input.server_host === undefined ? null : escapeDisplayText(input.server_host),
   };
@@ -1125,9 +1045,6 @@ export function extractCardFields(input: {
       hidden,
       sends,
       delivers_message: entry?.delivers_message === true || family?.sends === 'message',
-      shows_arguments: true,
-      message_send: messageSend,
-      truncated: outbound.truncated,
       needs_recipient: family?.needs_recipient === true,
       needs_to: isMailReply({ words: `${words}${nameWords(input.server_name ?? '')}`, params: input.canonical_params }),
       draft_needs_recipient: input.host_mail_draft === true && family?.stages_message === true,
