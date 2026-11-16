@@ -3389,12 +3389,12 @@ export function isOidcConfigured(value: ServerConfiguration): value is ServerCon
 
 /** The refusal shown when local sign-in would be offered over a plain-http address beyond this computer. */
 export const LOCAL_SIGN_IN_ORIGIN_REFUSAL =
-  'Local sign-in works on this computer or behind https. Set PUBLIC_BASE_URL to an https address, or use the Docker install.';
+  'Local sign-in works on this computer or behind https. Change every plain http address in PUBLIC_BASE_URL and ALLOWED_ORIGINS to https, or use the Docker install.';
 
 /**
- * Local sign-in is allowed only when every address the app is opened at is on this computer, or the
- * person has set an https public address. A plain-http address beyond this computer refuses to start:
- * the password would travel unprotected. Runs at load, before the server starts.
+ * Local sign-in is allowed only when every address the app is opened at is on this computer or https.
+ * A plain-http address beyond this computer refuses to start, whatever the public address is: the
+ * password and the session would travel unprotected there. Runs at load, before the server starts.
  */
 export function assertLocalSignInOrigins(
   config: Pick<
@@ -3403,9 +3403,6 @@ export function assertLocalSignInOrigins(
   >,
 ): void {
   if (config.TRUEFORGE_AUTH_MODE !== 'local') {
-    return;
-  }
-  if (config.PUBLIC_BASE_URL.startsWith('https://')) {
     return;
   }
   const origins = [effectivePublicBaseUrl(config), ...config.ALLOWED_ORIGINS].filter(origin => origin !== '');
