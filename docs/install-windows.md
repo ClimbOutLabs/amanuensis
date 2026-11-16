@@ -2,7 +2,7 @@
 
 Aman Setup is one program that installs everything. You don't need a terminal, WSL, Git or a Linux window.
 
-It takes about an hour on a computer with nothing installed yet. Most of that is waiting while Docker Desktop downloads and Aman builds. You answer three questions near the start, and the rest runs on its own.
+The first install may take a while, depending on your internet connection. Most of that time is spent while Docker Desktop downloads and Aman builds. You answer three questions near the start, and the rest runs on its own.
 
 Using another computer? Follow [Install on a Mac](install-mac.md) or [Install on Linux](install-linux.md) instead.
 
