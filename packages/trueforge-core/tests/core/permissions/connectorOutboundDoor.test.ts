@@ -244,3 +244,22 @@ describe("Aman's own Google tools", () => {
     expect(decision).toMatchObject({ tier: 3, reason: CONNECTOR_READ_GUARD_REASON });
   });
 });
+
+describe('a search through the connector the person picked for web searches', () => {
+  it('runs without a card and is remembered once, so the window of earlier text is not used up twice', async () => {
+    const ctx = await ctxFor(undefined);
+    const decision = await classifyTier(
+      {
+        tool_name: 'web_search',
+        canonical_params: { query: 'lunch on friday' },
+        tool_type: 'mcp',
+        mcp_server_name: 'search',
+        mcp_search_provider: true,
+        mcp_hints: { read_only_hint: true },
+      },
+      ctx,
+    );
+    expect(decision).toMatchObject({ auto_deny: null, card: null, approval_token_id: null });
+    expect(ctx.web_search.sentText.split('lunch on friday')).toHaveLength(2);
+  });
+});
