@@ -40,7 +40,7 @@ If that page lists no release, Aman Setup is not out yet. Check again later.
 
 Double-click `Aman-Setup.exe`. Two windows open:
 
-- The **Aman Setup** window, with its steps listed down the left side. This is the one you use.
+- The **Amanuensis Setup** window, with its steps listed down the left side. This is the one you use.
 - A plain black window behind it. Leave it open. It shows the same progress as text, and setup ends when it closes.
 
 Choose **Next** on the Welcome screen.
@@ -94,7 +94,7 @@ Near the end, Windows asks two things in its own boxes. Choose **Yes** both time
 
 ## Step 5: open Aman
 
-When it finishes, Aman opens in your browser, and a short **Getting started** page opens beside it. The Aman Setup window shows **Aman is installed**.
+When it finishes, Aman opens in your browser, and a short **Getting started** page opens beside it. The setup window shows **Amanuensis is ready**.
 
 1. Choose **Close** on the Done screen.
 2. Sign in with the email and password from step 4.

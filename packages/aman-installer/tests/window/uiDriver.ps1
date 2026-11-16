@@ -15,7 +15,7 @@ $window = $null
 function Find-Window {
   $deadline = (Get-Date).AddSeconds(60)
   while ((Get-Date) -lt $deadline) {
-    $condition = [Windows.Automation.PropertyCondition]::new($auto::NameProperty, 'Aman Setup')
+    $condition = [Windows.Automation.PropertyCondition]::new($auto::NameProperty, 'Amanuensis Setup')
     $found = $auto::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $condition)
     if ($null -ne $found) { return $found }
     Start-Sleep -Milliseconds 250

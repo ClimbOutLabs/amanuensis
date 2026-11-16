@@ -1003,9 +1003,9 @@ export const INSTALL_DRY_RUN_LINES: readonly string[] = [
 
 // The setup window's words. The window draws only what it is sent, so
 // every word it shows is here.
-export const WINDOW_TITLE = 'Aman Setup';
+export const WINDOW_TITLE = 'Amanuensis Setup';
 
-export const WINDOW_BRAND = 'Aman';
+export const WINDOW_BRAND = 'Amanuensis';
 
 export const WINDOW_STEPS: readonly string[] = [
   'Welcome',
@@ -1025,31 +1025,29 @@ export const WINDOW_CLOSE = 'Close';
 export const WINDOW_DETAILS = 'Show details';
 
 export const WINDOW_CLOSE_QUESTION =
-  'Aman is still being installed. If you close this window, the install carries on in the other window. Close it?';
+  'Amanuensis is still installing. If you close this window, the setup screens close, but the install keeps going. Close it?';
 
-export const WINDOW_WELCOME_TITLE = 'Welcome to Aman';
+export const WINDOW_WELCOME_TITLE = 'Welcome to Amanuensis';
 
 export const WINDOW_WELCOME_LINES: readonly string[] = [
   'This sets up Aman on this computer. Aman is your own assistant, and everything it keeps stays on this computer.',
-  'First it checks this computer and installs Docker Desktop if it is missing. Docker Desktop is a free program Aman runs inside.',
-  'Then it asks for your email and a password, and installs Aman. The first install builds Aman on this computer, which can take up to an hour.',
-  'Keep the computer on and connected to the internet until it is done.',
+  'Setup installs Amanuensis on this computer. The first install may take a while, depending on your internet connection.',
 ];
 
 export const WINDOW_CHECK_TITLE = 'Checking this computer';
 
 export const WINDOW_CHECK_LINES: readonly string[] = [
-  'If Docker Desktop is missing, it is downloaded and installed now. Windows may ask you to allow it, and Docker Desktop may ask you to accept its terms.',
+  'Setup installs Docker Desktop if it is missing. Windows may ask for permission first.',
 ];
 
-export const WINDOW_CHECK_READY_LINE = 'This computer is ready for Aman.';
+export const WINDOW_CHECK_READY_LINE = 'This computer is ready for Amanuensis.';
 
 export const WINDOW_CHECK_DOCKER_ROW = 'Docker Desktop is installed and running';
-export const WINDOW_CHECK_MEMORY_ROW = 'Docker Desktop has what Aman needs';
+export const WINDOW_CHECK_MEMORY_ROW = 'Docker Desktop has what Amanuensis needs';
 
-export const WINDOW_ABOUT_TITLE = 'About you';
+export const WINDOW_ABOUT_TITLE = 'Create your sign-in';
 
-export const WINDOW_ABOUT_LINES: readonly string[] = ['You sign in to Aman with this email and password.'];
+export const WINDOW_ABOUT_LINES: readonly string[] = ['You sign in to Amanuensis with this email and password.'];
 
 export const WINDOW_EMAIL_LABEL = 'Your email';
 export const WINDOW_PASSWORD_LABEL = 'Choose a password';
@@ -1069,21 +1067,19 @@ export const WINDOW_KEEP_LINE =
 
 export const WINDOW_EMAIL_PROBLEM = 'Type your email address, like name@example.com.';
 
-export const WINDOW_OPTIONS_TITLE = 'Use Aman on your phone?';
+export const WINDOW_OPTIONS_TITLE = 'Use Amanuensis on your phone?';
 
 export const WINDOW_OPTIONS_LINES: readonly string[] = [
-  'Aman can also be opened from your phone and other devices on your home Wi-Fi.',
-  'If you say yes, Windows asks you once to allow it. You can change this later from the Start menu.',
+  'Amanuensis can also open on your phone and other devices on your home Wi-Fi. If you choose yes, Windows asks once for permission.',
 ];
 
-export const WINDOW_PHONE_YES = 'Yes, also use Aman on my phone at home';
-export const WINDOW_PHONE_NO = 'No, only on this computer';
+export const WINDOW_PHONE_YES = 'Yes, on my home Wi-Fi';
+export const WINDOW_PHONE_NO = 'No, only this computer';
 
 export const WINDOW_REVIEW_TITLE = 'Ready to install';
 
 export const WINDOW_REVIEW_LINES: readonly string[] = [
-  'This is what happens when you choose Install.',
-  'Windows asks you to allow one or two of these steps. Each one is named below.',
+  'Choose Install to start. Windows may ask you to allow one or two steps.',
 ];
 
 export function windowReviewEmailRow(email: string): string {
@@ -1091,45 +1087,47 @@ export function windowReviewEmailRow(email: string): string {
 }
 
 export const WINDOW_REVIEW_ROWS: readonly string[] = [
-  'The newest Aman is downloaded and checked',
-  'Aman is built and set up on this computer, with a backup every day',
-  'Aman is added to the Start menu',
-  'Aman opens in your browser. Windows asks you to allow its certificate, so the browser trusts it',
+  'Download and check the newest Amanuensis',
+  'Build and set up Amanuensis, with a daily backup',
+  'Add Amanuensis to the Start menu',
+  'Open Amanuensis in your browser. Windows asks you to allow its security certificate.',
 ];
 
-export const WINDOW_REVIEW_PHONE_ROW = 'Aman is opened to your home Wi-Fi. Windows asks you to allow a firewall change';
+export const WINDOW_REVIEW_PHONE_ROW =
+  'Open Amanuensis to your home Wi-Fi. Windows asks you to allow a firewall change.';
 
-export const WINDOW_INSTALL_TITLE = 'Installing Aman';
+export const WINDOW_INSTALL_TITLE = 'Installing Amanuensis';
 
 export const WINDOW_INSTALL_LINES: readonly string[] = [
-  'This can take up to an hour the first time. You can use the computer for other things meanwhile.',
+  'The first install may take a while, depending on your internet connection. You can keep using this computer meanwhile.',
 ];
 
 export const WINDOW_STAGE_ROWS: Readonly<Record<string, string>> = {
-  download: 'Download and check the newest Aman',
-  install: 'Build and set up Aman',
-  shortcuts: 'Add Aman to the Start menu',
-  update: 'Check for a newer setup program',
-  private: 'Make the Aman folder private to you',
-  open: 'Open Aman in your browser',
-  phone: 'Open Aman to your home Wi-Fi',
+  download: 'Downloading the newest Amanuensis...',
+  install: 'Building and setting up Amanuensis. This takes the longest.',
+  shortcuts: 'Adding Amanuensis to the Start menu...',
+  update: 'Checking for a newer setup program...',
+  private: 'Making the Amanuensis folder private to you...',
+  open: 'Opening Amanuensis in your browser...',
+  phone: 'Opening Amanuensis to your home Wi-Fi...',
 };
 
-export const WINDOW_DONE_TITLE = 'Aman is installed';
+export const WINDOW_DONE_TITLE = 'Amanuensis is ready';
 
 export const WINDOW_DONE_LINES: readonly string[] = [
-  'Aman is open in your browser, with a short getting started page beside it.',
-  'To open Aman again later, choose Aman from the Start menu.',
+  'Amanuensis is open in your browser, with a short getting started page beside it.',
+  'To open it later, choose Amanuensis from the Start menu.',
 ];
 
 export const WINDOW_STOPPED_TITLE = 'Setup stopped';
 
 export const WINDOW_STOPPED_LINES: readonly string[] = [
-  'Aman is not fully set up yet. What went wrong, and what to do next, is below.',
-  'After that, open Aman Setup again. It carries on from what is already done.',
+  "Amanuensis isn't fully set up yet. The problem and the next step are below.",
+  'Open Amanuensis Setup again and choose Try again. It picks up where it stopped.',
 ];
 
-export const WINDOW_OPEN_LINE = 'Aman Setup is open in its own window. Leave this window open until setup is done.';
+export const WINDOW_OPEN_LINE =
+  'Amanuensis Setup is open in its own window. Leave this window open until setup is done.';
 
 export const WINDOW_FALLBACK_LINE =
   'The setup window could not be opened on this computer, so setup asks its questions here.';
@@ -1137,8 +1135,8 @@ export const WINDOW_FALLBACK_LINE =
 export const WINDOW_CLOSED_LINE = 'The setup window was closed. The install carries on here.';
 
 export const WINDOW_CLOSED_EARLY: Problem = {
-  happened: 'The setup window was closed, so nothing was installed.',
-  fix: 'Open Aman Setup again when you are ready.',
+  happened: 'The setup window closed, so nothing was installed.',
+  fix: "Open Amanuensis Setup again when you're ready.",
 };
 
 export function windowMessageLines(): string[] {

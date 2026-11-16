@@ -206,8 +206,8 @@ It asks three questions: your email, a password, and whether to open Aman to you
 It downloads the newest Aman and sets it up with daily backups and an https address on this computer.
 It puts the aman command and the Start menu entries in place, and opens Aman in your browser.
 It opens a short getting started page in your browser at the end.
-Aman Setup
-Aman
+Amanuensis Setup
+Amanuensis
 Welcome
 Check this computer
 About you
@@ -221,19 +221,17 @@ Install
 Try again
 Close
 Show details
-Aman is still being installed. If you close this window, the install carries on in the other window. Close it?
-Welcome to Aman
+Amanuensis is still installing. If you close this window, the setup screens close, but the install keeps going. Close it?
+Welcome to Amanuensis
 This sets up Aman on this computer. Aman is your own assistant, and everything it keeps stays on this computer.
-First it checks this computer and installs Docker Desktop if it is missing. Docker Desktop is a free program Aman runs inside.
-Then it asks for your email and a password, and installs Aman. The first install builds Aman on this computer, which can take up to an hour.
-Keep the computer on and connected to the internet until it is done.
+Setup installs Amanuensis on this computer. The first install may take a while, depending on your internet connection.
 Checking this computer
-If Docker Desktop is missing, it is downloaded and installed now. Windows may ask you to allow it, and Docker Desktop may ask you to accept its terms.
-This computer is ready for Aman.
+Setup installs Docker Desktop if it is missing. Windows may ask for permission first.
+This computer is ready for Amanuensis.
 Docker Desktop is installed and running
-Docker Desktop has what Aman needs
-About you
-You sign in to Aman with this email and password.
+Docker Desktop has what Amanuensis needs
+Create your sign-in
+You sign in to Amanuensis with this email and password.
 Your email
 Choose a password
 Type the password again
@@ -243,39 +241,37 @@ A symbol, like @ # $ %
 The two passwords match
 Keep this password somewhere safe. Aman does not show it again, and nobody else can look it up for you.
 Type your email address, like name@example.com.
-Use Aman on your phone?
-Aman can also be opened from your phone and other devices on your home Wi-Fi.
-If you say yes, Windows asks you once to allow it. You can change this later from the Start menu.
-Yes, also use Aman on my phone at home
-No, only on this computer
+Use Amanuensis on your phone?
+Amanuensis can also open on your phone and other devices on your home Wi-Fi. If you choose yes, Windows asks once for permission.
+Yes, on my home Wi-Fi
+No, only this computer
 Ready to install
-This is what happens when you choose Install.
-Windows asks you to allow one or two of these steps. Each one is named below.
+Choose Install to start. Windows may ask you to allow one or two steps.
 You sign in as friend@example.com
-The newest Aman is downloaded and checked
-Aman is built and set up on this computer, with a backup every day
-Aman is added to the Start menu
-Aman opens in your browser. Windows asks you to allow its certificate, so the browser trusts it
-Aman is opened to your home Wi-Fi. Windows asks you to allow a firewall change
-Installing Aman
-This can take up to an hour the first time. You can use the computer for other things meanwhile.
-Download and check the newest Aman
-Build and set up Aman
-Add Aman to the Start menu
-Check for a newer setup program
-Make the Aman folder private to you
-Open Aman in your browser
-Open Aman to your home Wi-Fi
-Aman is installed
-Aman is open in your browser, with a short getting started page beside it.
-To open Aman again later, choose Aman from the Start menu.
+Download and check the newest Amanuensis
+Build and set up Amanuensis, with a daily backup
+Add Amanuensis to the Start menu
+Open Amanuensis in your browser. Windows asks you to allow its security certificate.
+Open Amanuensis to your home Wi-Fi. Windows asks you to allow a firewall change.
+Installing Amanuensis
+The first install may take a while, depending on your internet connection. You can keep using this computer meanwhile.
+Downloading the newest Amanuensis...
+Building and setting up Amanuensis. This takes the longest.
+Adding Amanuensis to the Start menu...
+Checking for a newer setup program...
+Making the Amanuensis folder private to you...
+Opening Amanuensis in your browser...
+Opening Amanuensis to your home Wi-Fi...
+Amanuensis is ready
+Amanuensis is open in your browser, with a short getting started page beside it.
+To open it later, choose Amanuensis from the Start menu.
 Setup stopped
-Aman is not fully set up yet. What went wrong, and what to do next, is below.
-After that, open Aman Setup again. It carries on from what is already done.
-Aman Setup is open in its own window. Leave this window open until setup is done.
+Amanuensis isn't fully set up yet. The problem and the next step are below.
+Open Amanuensis Setup again and choose Try again. It picks up where it stopped.
+Amanuensis Setup is open in its own window. Leave this window open until setup is done.
 The setup window could not be opened on this computer, so setup asks its questions here.
 The setup window was closed. The install carries on here.
-The setup window was closed, so nothing was installed. Open Aman Setup again when you are ready.
+The setup window closed, so nothing was installed. Open Amanuensis Setup again when you're ready.
 Press Enter to close this window.
 aman uninstall removes an Aman set up with the Aman Setup download, and this is not a Windows computer. Run installer/install.sh instance remove with the name of each instance and --purge-data instead.
 Docker is not answering, so Aman cannot be removed from it. Open Docker Desktop from the Start menu, wait until it says it is running, then run aman uninstall again.
