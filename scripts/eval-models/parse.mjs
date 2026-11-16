@@ -2,10 +2,13 @@
 import { readFile } from 'node:fs/promises';
 import { APPROVAL_POLICIES } from '../eval-tokens/parse.mjs';
 import { JOURNEYS } from './journey.mjs';
+import { SHARED_VAULT } from './personas.mjs';
 
 /** Must match the `group` values in packages/trueforge/evals/model-set.json. */
-export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety', 'brief']);
-export const MODEL_SET_VERSION = 3;
+export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety', 'brief', 'persona']);
+export const MODEL_SET_VERSION = 4;
+/** The Personalization page fields a set may fill in for the run. */
+const PROFILE_FIELDS = Object.freeze(['user_name', 'address_as']);
 export const CHECK_TYPES = Object.freeze([
   'reply_includes',
   'reply_excludes',
@@ -20,10 +23,12 @@ export const CHECK_TYPES = Object.freeze([
  *   | { type: 'tool_called', tools: string[] }
  *   | { type: 'no_tool', tools: string[] }
  *   | { type: 'no_tool_args_include', any: string[] }} Check
- * @typedef {{ type: 'scheduled_run', cron: string, timezone: string }} Journey
- * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[], client_timezone?: string, journey?: Journey }} ModelCase
+ * @typedef {{ type: 'scheduled_run', cron: string, timezone: string }
+ *   | { type: 'memory_saved', words: string[], saved_in: string[], not_saved_in: string[] }} Journey
+ * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[], client_timezone?: string, journey?: Journey, persona?: string, incognito?: boolean }} ModelCase
  * @typedef {{ text: string, timestamp: string }} SeedMemory
- * @typedef {{ version: 3, memories: SeedMemory[], cases: ModelCase[] }} ModelSet
+ * @typedef {{ name: string, instructions: string, memories: SeedMemory[] }} SetPersona
+ * @typedef {{ version: 4, memories: SeedMemory[], profile?: Record<string, string>, personas: SetPersona[], cases: ModelCase[] }} ModelSet
  */
 
 export class ModelSetError extends Error {
@@ -78,6 +83,98 @@ function parseCheck(check, where, problems) {
   return { type: check.type, [field]: [...check[field]] };
 }
 
+/** @returns {SeedMemory[]} */
+function parseMemories(value, where, problems) {
+  if (!Array.isArray(value)) {
+    problems.push(`${where} must be a list`);
+    return [];
+  }
+  const memories = [];
+  value.forEach((entry, index) => {
+    if (!isPlainObject(entry) || !isNonEmptyString(entry.text) || Number.isNaN(Date.parse(entry.timestamp))) {
+      problems.push(`${where}[${String(index)}] needs text and a timestamp such as 2026-08-04T09:10:00Z`);
+      return;
+    }
+    memories.push({ text: entry.text, timestamp: entry.timestamp });
+  });
+  return memories;
+}
+
+/** @returns {Record<string, string> | undefined} */
+function parseProfile(value, problems) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    !isPlainObject(value) ||
+    Object.keys(value).length === 0 ||
+    !Object.entries(value).every(([key, text]) => PROFILE_FIELDS.includes(key) && isNonEmptyString(text))
+  ) {
+    problems.push(`profile may only fill in ${PROFILE_FIELDS.join(', ')}, each with text`);
+    return undefined;
+  }
+  return { ...value };
+}
+
+/** @returns {SetPersona[]} */
+function parsePersonas(value, problems) {
+  if (!Array.isArray(value)) {
+    problems.push('personas must be a list');
+    return [];
+  }
+  const personas = [];
+  value.forEach((entry, index) => {
+    const where = `personas[${String(index)}]`;
+    if (!isPlainObject(entry) || !isNonEmptyString(entry.name) || !isNonEmptyString(entry.instructions)) {
+      problems.push(`${where} needs a name and instructions`);
+      return;
+    }
+    if (entry.name === SHARED_VAULT || personas.some(persona => persona.name === entry.name)) {
+      problems.push(`${where}.name must be unique and not "${SHARED_VAULT}"`);
+      return;
+    }
+    personas.push({
+      name: entry.name,
+      instructions: entry.instructions,
+      memories: parseMemories(entry.memories ?? [], `${where}.memories`, problems),
+    });
+  });
+  return personas;
+}
+
+/** @returns {Journey | undefined} */
+function parseJourney(journey, label, { vaults, problems }) {
+  if (isPlainObject(journey) && journey.type === 'scheduled_run') {
+    if (isNonEmptyString(journey.cron) && isNonEmptyString(journey.timezone)) {
+      return { type: journey.type, cron: journey.cron, timezone: journey.timezone };
+    }
+    problems.push(`${label}.journey of type scheduled_run needs a cron and a timezone`);
+    return undefined;
+  }
+  if (isPlainObject(journey) && journey.type === 'memory_saved') {
+    const isVaultList = list => Array.isArray(list) && list.every(vault => vaults.includes(vault));
+    if (
+      isTextList(journey.words) &&
+      isVaultList(journey.saved_in) &&
+      isVaultList(journey.not_saved_in) &&
+      journey.not_saved_in.length > 0
+    ) {
+      return {
+        type: journey.type,
+        words: [...journey.words],
+        saved_in: [...journey.saved_in],
+        not_saved_in: [...journey.not_saved_in],
+      };
+    }
+    problems.push(
+      `${label}.journey of type memory_saved needs words, saved_in and a non-empty not_saved_in, naming only ${vaults.join(', ')}`,
+    );
+    return undefined;
+  }
+  problems.push(`${label}.journey needs a type (${JOURNEYS.join(', ')})`);
+  return undefined;
+}
+
 /**
  * Checks the set's shape and returns a normalized copy. Throws ModelSetError listing every problem.
  * @param {unknown} value
@@ -91,19 +188,14 @@ export function parseModelSet(value) {
   if (value.version !== MODEL_SET_VERSION) {
     problems.push(`version must be ${String(MODEL_SET_VERSION)}`);
   }
-  if (!Array.isArray(value.memories) || !Array.isArray(value.cases)) {
-    throw new ModelSetError([...problems, 'memories and cases must be arrays']);
+  if (!Array.isArray(value.cases)) {
+    throw new ModelSetError([...problems, 'cases must be a list']);
   }
 
-  /** @type {SeedMemory[]} */
-  const memories = [];
-  value.memories.forEach((entry, index) => {
-    if (!isPlainObject(entry) || !isNonEmptyString(entry.text) || Number.isNaN(Date.parse(entry.timestamp))) {
-      problems.push(`memories[${String(index)}] needs text and a timestamp such as 2026-08-04T09:10:00Z`);
-      return;
-    }
-    memories.push({ text: entry.text, timestamp: entry.timestamp });
-  });
+  const memories = parseMemories(value.memories, 'memories', problems);
+  const profile = parseProfile(value.profile, problems);
+  const personas = parsePersonas(value.personas ?? [], problems);
+  const vaults = [SHARED_VAULT, ...personas.map(persona => persona.name)];
 
   const seenIds = new Set();
   /** @type {ModelCase[]} */
@@ -141,22 +233,26 @@ export function parseModelSet(value) {
     if (!Array.isArray(rawChecklist) || !rawChecklist.every(isNonEmptyString)) {
       problems.push(`${label}.checklist must be a list of strings`);
     }
-    if (Array.isArray(rawChecks) && Array.isArray(rawChecklist) && rawChecks.length + rawChecklist.length === 0) {
-      problems.push(`${label} needs at least one check or checklist item, or it can never fail`);
+    if (
+      Array.isArray(rawChecks) &&
+      Array.isArray(rawChecklist) &&
+      rawChecks.length + rawChecklist.length === 0 &&
+      entry.journey === undefined
+    ) {
+      problems.push(`${label} needs at least one check, checklist item or journey, or it can never fail`);
     }
     const zone = entry.client_timezone;
     if (zone !== undefined && !isNonEmptyString(zone)) {
       problems.push(`${label}.client_timezone must be a time zone name such as Europe/London`);
     }
-    const journey = entry.journey;
-    if (
-      journey !== undefined &&
-      (!isPlainObject(journey) ||
-        !JOURNEYS.includes(journey.type) ||
-        !isNonEmptyString(journey.cron) ||
-        !isNonEmptyString(journey.timezone))
-    ) {
-      problems.push(`${label}.journey needs a type (${JOURNEYS.join(', ')}), a cron and a timezone`);
+    const journey = entry.journey === undefined ? undefined : parseJourney(entry.journey, label, { vaults, problems });
+    const persona = entry.persona;
+    if (persona !== undefined && !personas.some(item => item.name === persona)) {
+      problems.push(`${label}.persona must name one of the set's personas`);
+    }
+    const incognito = entry.incognito;
+    if (incognito !== undefined && typeof incognito !== 'boolean') {
+      problems.push(`${label}.incognito must be true or false`);
     }
     const checks = Array.isArray(rawChecks)
       ? rawChecks.map((check, checkIndex) => parseCheck(check, `${label}.checks[${String(checkIndex)}]`, problems))
@@ -170,9 +266,9 @@ export function parseModelSet(value) {
         checks: checks.filter(check => check !== undefined),
         checklist: [...rawChecklist],
         ...(zone === undefined ? {} : { client_timezone: zone }),
-        ...(journey === undefined
-          ? {}
-          : { journey: { type: journey.type, cron: journey.cron, timezone: journey.timezone } }),
+        ...(journey === undefined ? {} : { journey }),
+        ...(persona === undefined ? {} : { persona }),
+        ...(incognito === true ? { incognito } : {}),
       });
     }
   });
@@ -180,7 +276,7 @@ export function parseModelSet(value) {
   if (problems.length > 0) {
     throw new ModelSetError(problems);
   }
-  return { version: MODEL_SET_VERSION, memories, cases };
+  return { version: MODEL_SET_VERSION, memories, ...(profile === undefined ? {} : { profile }), personas, cases };
 }
 
 /**

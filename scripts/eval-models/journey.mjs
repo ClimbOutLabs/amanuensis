@@ -1,8 +1,13 @@
-// A case that goes past the chat: the schedule the model made is run once, and its run is checked the way a
-// person would see it. Everything the case made is removed afterwards, so the next model starts the same.
+// A case that goes past the chat. A scheduled run: the schedule the model made is run once, and its run is checked
+// the way a person would see it. A saved memory: the fact the chat was told lands only in the vault it belongs to.
+// Everything a case made is removed afterwards, so the next model starts the same.
 import { isRunStopping, replyTextOf } from '../eval-tokens/run.mjs';
+import { vaultNamespace } from './personas.mjs';
 
-export const JOURNEYS = Object.freeze(['scheduled_run']);
+export const JOURNEYS = Object.freeze(['scheduled_run', 'memory_saved']);
+
+/** How many times a vault is read while waiting for the instance to save a finished chat. */
+const MEMORY_SAVE_POLLS = 10;
 
 /** The start of the task a morning brief schedule carries, so the check knows the model asked for a brief. */
 const MORNING_BRIEF_TASK_START = 'Give me my morning brief.';
@@ -49,6 +54,64 @@ export function readBrief(reply) {
 export async function snapshotJourney({ client }) {
   const [schedules, agents] = await Promise.all([client.listSchedules(), client.listAgents()]);
   return { scheduleIds: new Set(schedules.map(item => item.id)), agentIds: new Set(agents.map(item => item.id)) };
+}
+
+/** The ids already in each vault a memory case looks at, so only what the case's chat saved is read. */
+export async function snapshotVaults({ client, vaults }) {
+  const entries = await Promise.all(
+    vaults.map(async vault => {
+      const list = await client.listMemoryEntries({ namespace: vaultNamespace(vault) });
+      return [vault, new Set(list.map(entry => entry.id))];
+    }),
+  );
+  return Object.fromEntries(entries);
+}
+
+async function newEntriesIn({ client, before, vault }) {
+  const list = await client.listMemoryEntries({ namespace: vaultNamespace(vault) });
+  return list.filter(entry => !before[vault].has(entry.id));
+}
+
+function mentions(entries, words) {
+  const lower = words.map(word => word.toLowerCase());
+  return entries.some(
+    entry => typeof entry.text === 'string' && lower.some(word => entry.text.toLowerCase().includes(word)),
+  );
+}
+
+/**
+ * Checks where a chat's fact was saved: in every vault it belongs to, and in none of the others. The instance saves
+ * a chat after it replies, so a vault that should hold the fact is read until it does, and the others are read
+ * once that is settled.
+ * @param {{ client: any, before: Record<string, Set<string>>, expect: { words: string[], saved_in: string[], not_saved_in: string[] }, settleMs: number }} options
+ * @returns {Promise<import('./checks.mjs').CheckResult[]>}
+ */
+export async function checkMemorySaved({ client, before, expect, settleMs }) {
+  const results = [];
+  const named = expect.words.join(' or ');
+  for (const vault of expect.saved_in) {
+    let saved = false;
+    for (let poll = 0; poll < MEMORY_SAVE_POLLS && !saved; poll += 1) {
+      saved = mentions(await newEntriesIn({ client, before, vault }), expect.words);
+      if (!saved) {
+        await sleep(settleMs);
+      }
+    }
+    results.push(
+      result({ check: `${named} was saved in ${vault}`, pass: saved, detail: `nothing new in ${vault} names it` }),
+    );
+  }
+  if (expect.saved_in.length === 0) {
+    // Nothing should be saved anywhere, so there is no save to wait for: give the instance the same time instead.
+    await sleep(settleMs * 2);
+  }
+  for (const vault of expect.not_saved_in) {
+    const leaked = mentions(await newEntriesIn({ client, before, vault }), expect.words);
+    results.push(
+      result({ check: `${named} was not saved in ${vault}`, pass: !leaked, detail: `${vault} now holds it` }),
+    );
+  }
+  return results;
 }
 
 async function waitForRunChat({ client, runId, pollIntervalMs, timeoutMs }) {
