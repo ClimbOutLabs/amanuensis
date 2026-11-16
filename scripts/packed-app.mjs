@@ -80,10 +80,12 @@ async function stopApp(child) {
 
 /**
  * Starts one tarball on a data folder and waits until it answers. The launch carries no sign-in
- * configuration, so the app uses local sign-in. `stop` returns once every process it started has
- * stopped, so the data folder is safe to reuse or remove after it.
+ * configuration, so the app uses local sign-in. When `account` is given, its email and password are
+ * typed into the first-start prompt; a start that finds the sign-in already made reads nothing.
+ * `stop` returns once every process it started has stopped, so the data folder is safe to reuse
+ * or remove after it.
  */
-export async function startPackedApp({ tarballPath, dataDir, port }) {
+export async function startPackedApp({ tarballPath, dataDir, port, account }) {
   const origin = `http://${host}:${String(port)}`;
   const consumerDir = await mkdtemp(path.join(tmpdir(), 'amanuensis-npx-'));
   const tarballName = path.basename(tarballPath);
@@ -113,11 +115,12 @@ export async function startPackedApp({ tarballPath, dataDir, port }) {
       // name would run the first one's code. Each start gets a cache of its own.
       npm_config_cache: path.join(consumerDir, 'npm-cache'),
     },
-    stdio: 'inherit',
+    stdio: ['pipe', 'inherit', 'inherit'],
     // Its own process group, so cleanup can stop npx and the app it starts together.
     detached: !win32,
     ...shell,
   });
+  child.stdin.end(account === undefined ? '' : `${account.email}\n${account.password}\n${account.password}\n`);
   const stop = async () => {
     await stopApp(child);
     await rm(consumerDir, { recursive: true, force: true });

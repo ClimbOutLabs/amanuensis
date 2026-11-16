@@ -22,8 +22,9 @@ test_dry_run_changes_nothing() {
   run_install --dry-run --verbose
   assert_rc 0
   assert_contains "$OUT" "First-run downloads (approximate)"
-  assert_contains "$OUT" "Whisper small speech model weights"
-  assert_contains "$OUT" "Search embedding model"
+  # The speech and memory search models ship inside the images, so they are not first-run downloads.
+  assert_not_contains "$OUT" "Whisper small speech model weights" "the speech model is built into its image"
+  assert_not_contains "$OUT" "Search embedding model" "the memory search model is built into the app image"
   assert_contains "$OUT" "total: about"
   assert_log_lacks "docker build"
   assert_log_lacks "docker pull"
@@ -45,7 +46,7 @@ test_dry_run_without_docker_reports_blocker() {
   assert_contains "$OUT" "Install Docker Engine"
   run_install --dry-run --verbose
   assert_contains "$OUT" "Docker Engine, Compose and Buildx packages"
-  assert_eq "$(printf '%s\n' "$OUT" | grep -c 'Whisper small speech model weights')" 1 "each download is listed once"
+  assert_eq "$(printf '%s\n' "$OUT" | grep -c 'Docker Engine, Compose and Buildx packages')" 1 "each download is listed once"
   assert_log_lacks "sudo "
   sandbox_drop
 }

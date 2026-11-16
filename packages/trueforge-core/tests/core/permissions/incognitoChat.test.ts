@@ -66,6 +66,7 @@ describe('an incognito chat makes or changes nothing that outlives it', () => {
     ['a cancelled reminder', ownTool(SCHEDULE_SERVER_ID, 'cancel_reminder', { id: 'r1' })],
     ['a new persona', ownTool(PERSONA_SERVER_ID, 'create_persona', { name: 'Planner' })],
     ['a new skill', ownTool(SKILL_SERVER_ID, 'install_skill', { url: 'https://github.com/acme/skills' })],
+    ['a removed skill', ownTool(SKILL_SERVER_ID, 'remove_skill', { name: 'release-notes' })],
     ['an entry in the notes inbox', ownTool(NOTES_FOLDER_SERVER_ID, 'append_to_inbox', { text: 'Buy milk' })],
     ['a new note', ownTool(NOTES_FOLDER_SERVER_ID, 'create_note', { path: 'ideas.md', text: 'An idea' })],
     [
@@ -142,9 +143,11 @@ describe('a connector in an incognito chat may only read', () => {
     expect(await classifyTier(action, incognitoChat())).toMatchObject({ tier: 1, auto_deny: null });
   });
 
-  it('gives a write in a normal chat its card, as before', async () => {
+  it('refuses a write in a normal chat under the carried-payload rule, not the incognito one', async () => {
     const decision = await classifyTier(connectorTool('create_page', {}, { title: 'Trip' }), normalChat());
-    expect(decision.auto_deny).toBeNull();
+    // The call carries words and shows no destination the card can verify, so the refusal is the
+    // unverifiable-destination one. The incognito refusal above is a separate, wider bar.
+    expect(decision.auto_deny).toBe('destination_unverifiable');
     expect(decision.tier).toBe(3);
   });
 });

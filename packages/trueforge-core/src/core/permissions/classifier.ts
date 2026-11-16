@@ -58,7 +58,12 @@ import {
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import { isSkillWriteToolName, LIST_SKILLS_TOOL_NAME, SKILL_SERVER_ID } from '../skills/toolContract';
+import {
+  isSkillRemoveToolName,
+  isSkillWriteToolName,
+  LIST_SKILLS_TOOL_NAME,
+  SKILL_SERVER_ID,
+} from '../skills/toolContract';
 import {
   isSpaceReadToolName,
   isSpaceWriteToolName,
@@ -111,7 +116,7 @@ import {
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
 } from './mapsToolNames';
-import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { requiresNetwork } from './networkRequirements';
 import { classifyNotesFolderTool } from './notesTier';
 import {
   appendOutboundTrace,
@@ -149,6 +154,7 @@ import {
 } from './searchHoldText';
 import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
 import { DEMO_CONNECTOR_REFUSAL } from './sendAllowlist';
+import { externalServiceWhat, externalServiceWhatSpecific, namedSendWhat } from './sendWording';
 import {
   hashArgv,
   matchAllowlist,
@@ -1712,47 +1718,6 @@ function sendCardCopy(input: {
   return input.notice === null ? base : { ...base, consequence: joinLine([input.notice, base.consequence]) };
 }
 
-function externalServiceWhat(input: {
-  tool_name: string;
-  destination: string | null;
-  recipient: string | null;
-  amount: string | null;
-}): string {
-  const name = input.tool_name.toLowerCase();
-  const where = input.recipient ?? input.destination ?? 'an external destination';
-  if (name.includes('email') || name.includes('mail')) {
-    if (name.includes('draft')) {
-      return `Save an email draft for ${where}?`;
-    }
-    if (name.includes('forward')) {
-      return `Forward an email to ${where}?`;
-    }
-    if (name.includes('reply')) {
-      return `Reply to an email, sending it to ${where}?`;
-    }
-    return `Send an email to ${where}?`;
-  }
-  if (name.includes('sms') || name.includes('message') || name.includes('notify')) {
-    return `Send a message to ${where}?`;
-  }
-  if (name.includes('post') || name.includes('publish') || name.includes('tweet')) {
-    return `Publish a post${input.destination === null ? '' : ` to ${input.destination}`}?`;
-  }
-  if (name.includes('share') || name.includes('webhook')) {
-    return `Share data with ${where}?`;
-  }
-  if (
-    name.includes('pay') ||
-    name.includes('spend') ||
-    name.includes('charge') ||
-    name.includes('transfer') ||
-    name.includes('invoice')
-  ) {
-    return `Spend ${input.amount ?? 'money'}${input.destination === null ? '' : ` via ${input.destination}`}?`;
-  }
-  return `Perform an external action affecting ${where}?`;
-}
-
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
 const INSTALL_FRAGMENTS = ['install'];
 
@@ -2696,12 +2661,15 @@ function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_
 }
 
 /**
- * Adding a skill always asks, with where it comes from and the exact version. Reading the list runs without
- * asking. Any other skill tool name fails closed.
+ * Adding a skill always asks, with where it comes from and the exact version, and removing one always asks too.
+ * Reading the list runs without asking. Any other skill tool name fails closed.
  */
 async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (action.tool_name === LIST_SKILLS_TOOL_NAME) {
     return tier1Decision({ reason: 'skill_read', reason_detail: 'Read your skills.', sensitive_read: false });
+  }
+  if (isSkillRemoveToolName(action.tool_name)) {
+    return classifySkillRemove(action, ctx);
   }
   if (!isSkillWriteToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown skill tool.' });
@@ -2721,6 +2689,37 @@ async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): 
     }),
     reason: 'skill_install',
     reason_detail: 'Adding a skill always asks.',
+    sensitive_read: false,
+    standing_grant_barred: true,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
+/**
+ * Removing a skill always asks, naming the skill and the websites it loses. A skill the host could not find is
+ * never offered.
+ */
+async function classifySkillRemove(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const review = action.skill_remove;
+  if (review === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The skill could not be found, so removing it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  const websites =
+    review.websites.length === 0
+      ? ''
+      : ` It will no longer reach ${review.websites.map(site => escapeDisplayText(site)).join(', ')}.`;
+  return tier3Decision({
+    card: sentenceCard({
+      plain_what: `Remove the skill ${cardSubject(review.name)}? It is taken out of every chat.${websites}`,
+      cannot_be_undone: 'To use it again, you add it again and approve its websites again.',
+      agent_intent: ctx.agent_intent,
+    }),
+    reason: 'skill_remove',
+    reason_detail: 'Removing a skill always asks.',
     sensitive_read: false,
     standing_grant_barred: true,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
@@ -3085,6 +3084,11 @@ async function cardArguments(action: SentinelAction, ctx: ClassifyContext): Prom
   return masked ?? { details: HIDDEN_QUERY };
 }
 
+/** The tool declares itself read-only and closed-world: it says it does not reach outside its own service. */
+function declaresReadOnlyClosedWorld(action: SentinelAction): boolean {
+  return action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false;
+}
+
 /** What a connector call's card says about it, read from its arguments with any held key masked. */
 async function connectorExtraction(action: SentinelAction, ctx: ClassifyContext): Promise<ExtractionResult> {
   return extractCardFields({
@@ -3093,7 +3097,7 @@ async function connectorExtraction(action: SentinelAction, ctx: ClassifyContext)
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
-    read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
+    read_only_closed_world: declaresReadOnlyClosedWorld(action),
     host_mail_draft: isHostMailDraft(action),
   });
 }
@@ -3125,8 +3129,23 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   ) {
     return incognitoRefusal();
   }
-  // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
-  const namedSend = extraction.external_service && !extraction.connector_read;
+  // Name-ranked Tier 3 classes, judged on the name alone: destructive, install.
+  const isDestructive = DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment));
+  const isInstall = INSTALL_FRAGMENTS.some(fragment => name.includes(fragment));
+  // A read is not a send by what it carries, so it is not carded as an external-service send; its annotations still decide.
+  // A connector calendar change keeps its own card below, so it is never reworded as a send either, and a call a
+  // connector family claims as its own send keeps that family's reason: the external-service class is for the rest.
+  // A tool declared read-only and closed-world whose name ranks it destructive or install keeps that rank: its
+  // declaration says it does not reach out, so what its arguments carry does not promote it into a send.
+  const namedSend =
+    extraction.external_service &&
+    !extraction.connector_read &&
+    !extraction.family_send &&
+    !isCalendarChangeToolName(action.tool_name) &&
+    !(declaresReadOnlyClosedWorld(action) && (isDestructive || isInstall));
+  // The same carried send, for wording only: a hint-escalated family send still gets the send sentence.
+  const carriedSend =
+    extraction.external_service && !extraction.connector_read && !isCalendarChangeToolName(action.tool_name);
   // A connector read is private data, so a search in the same chat asks afterwards.
   const readsPrivateData = extraction.connector_read || containsSecretPath(action.canonical_params);
   // Any argument with a path shape is a private read whatever its name, so it never gets a grant.
@@ -3149,7 +3168,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         sensitive_read: false,
       });
     }
-    if (requiresNetwork({ tool_name: action.tool_name, provenance: provenanceForToolType(action.tool_type) })) {
+    if (requiresNetwork({ declared: action.requires_network })) {
       return autoDenyDecision({
         reason: 'offline_mode',
         reason_detail: 'This tool needs network access, which is disabled while offline.',
@@ -3363,16 +3382,32 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const destructiveHint = action.mcp_hints.destructive_hint === true;
   const openWorldHint = action.mcp_hints.open_world_hint === true;
   const readOnlyHint = action.mcp_hints.read_only_hint === true;
+  // A call no connector family claims, which carries words or an id and shows no destination the
+  // card can verify, is a send to an unseen place: refused, and an open-world hint never turns that
+  // into a card. A tool declared read-only is not a send, so it keeps its card; what it carries out
+  // is the outbound guard's to check. A destructive hint alone, or a name ranked destructive,
+  // install or calendar change, keeps its own card below, which shows the arguments in full.
+  if (
+    extraction.payload_unverifiable &&
+    !readOnlyHint &&
+    !(destructiveHint && !openWorldHint) &&
+    !isDestructive &&
+    !isInstall &&
+    !isCalendarChangeToolName(action.tool_name)
+  ) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail:
+        'A connector call that carries words or an id and shows no verifiable destination is never carded.',
+      sensitive_read: false,
+    });
+  }
+
   if (destructiveHint || (openWorldHint && !readOnlyHint)) {
     const { fields } = extraction;
     // The external-service sentence wins: it is the more specific warning about where this goes.
-    const plain_what = namedSend
-      ? externalServiceWhat({
-          tool_name: action.tool_name,
-          destination: fields.destination,
-          recipient: fields.recipient,
-          amount: fields.amount,
-        })
+    const plain_what = carriedSend
+      ? namedSendWhat({ tool_name: action.tool_name, extraction })
       : destructiveHint || extraction.connector_what === null
         ? destructiveHint
           ? 'Run this action, even though it might change or delete something for good?'
@@ -3426,18 +3461,11 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // Name-based Tier 3 classes: external-service (non-fallback), destructive, install.
-  const isDestructive = DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment));
-  const isInstall = INSTALL_FRAGMENTS.some(fragment => name.includes(fragment));
+  // Name-based Tier 3 classes: external-service (non-fallback), destructive, install (computed above).
   if (namedSend || isDestructive || isInstall) {
     const { fields } = extraction;
     const what = namedSend
-      ? externalServiceWhat({
-          tool_name: action.tool_name,
-          destination: fields.destination,
-          recipient: fields.recipient,
-          amount: fields.amount,
-        })
+      ? namedSendWhat({ tool_name: action.tool_name, extraction })
       : isInstall
         ? 'Install software or dependencies?'
         : `Delete or remove ${fields.destination ?? fields.recipient ?? 'data'}?`;
@@ -3757,6 +3785,15 @@ function connectorApprovalCard(input: {
   const hostCalendarRead = isHostCalendarRead(action);
   const plain_what =
     spaceToolLine(action) ??
+    // A send the tool's name names gets that sentence even on the family card, as it did on the send card.
+    (extraction.sends
+      ? externalServiceWhatSpecific({
+          tool_name: action.tool_name,
+          destination: fields.destination,
+          recipient: fields.recipient,
+          amount: fields.amount,
+        })
+      : null) ??
     extraction.connector_what ??
     (hostCalendarRead
       ? 'Allow looking at your calendar?'

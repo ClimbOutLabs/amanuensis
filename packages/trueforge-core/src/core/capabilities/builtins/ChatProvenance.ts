@@ -56,7 +56,12 @@ function calledTool(call: RawToolCall): {
 }
 
 const StampedCallSchema = z.object({
-  tool_info: InternalToolCallInfoSchema.pick({ type: true, search_provider_call: true }),
+  tool_info: InternalToolCallInfoSchema.pick({
+    type: true,
+    search_provider_call: true,
+    search_result_call: true,
+    page_read_call: true,
+  }),
 });
 
 /** The host's stamp on a stored call. A call stored without one, or with one that does not parse, earns no standing. */
@@ -97,7 +102,11 @@ const TOOL_RESULT_SOURCE_OF_READ: Record<ReadSource, ToolResultSource> = {
 
 /** Where the result of a tool call came from; a call that is not known counts as `other`. */
 export function callResultSource(call: RawToolCall | undefined): ToolResultSource {
-  return call === undefined ? 'other' : TOOL_RESULT_SOURCE_OF_READ[readSourceOf(calledTool(call).tool_name)];
+  if (call === undefined) {
+    return 'other';
+  }
+  const called = calledTool(call);
+  return TOOL_RESULT_SOURCE_OF_READ[readSourceOf(called.tool_name, called.stamp)];
 }
 
 /**

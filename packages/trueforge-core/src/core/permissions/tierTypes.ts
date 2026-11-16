@@ -11,6 +11,12 @@ import type { FileDigest, PathMissing, PathResolution } from './trackedExecutabl
 import type { WebSearchTurnState } from './webSearch';
 
 /** The call the classifier judges, with every fact the host settled before asking. */
+/** A saved skill a removal would take away, and the websites it may reach now that would go with it. */
+export interface SkillRemoveReview {
+  name: string;
+  websites: readonly string[];
+}
+
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
   tool_name: string;
@@ -36,10 +42,19 @@ export interface SentinelAction {
   mail_forward?: MailForwardReview | null | undefined;
   /** The user designated this connector as their search provider. Set by the host from the connector record only. */
   mcp_search_provider?: boolean | undefined;
-  /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
+  /** The designated provider's record names this tool as one of its search or page-read tools. Never from tool metadata. */
   mcp_search_tool?: boolean | undefined;
-  /** Top-level argument names the catalog declares as the designated provider's plumbing (session id, model name). Never from tool metadata. */
+  /** Top-level argument names the designated provider's record declares as its plumbing (session id, model name). Never from tool metadata. */
   mcp_search_plumbing_fields?: readonly string[] | undefined;
+  /** Bare names of the tools this server itself declared as changing things, from the connector record the host stored at connect time. Never from this call's tool metadata. */
+  mcp_declared_change_tools?: readonly string[] | undefined;
+  /**
+   * Whether this tool needs the network, as its own registration declares. Set by the host from
+   * the registration, never from tool arguments. Absent when no registration declared it (a tool
+   * another server serves, or a registration error the registry test forbids), and offline mode
+   * reads absence as needing the network.
+   */
+  requires_network?: boolean | undefined;
   mcp_hints: {
     read_only_hint?: boolean | undefined;
     destructive_hint?: boolean | undefined;
@@ -81,6 +96,8 @@ export interface SentinelAction {
   persona_write?: Tier3Persona | undefined;
   /** The skill an install would add, settled by the skill tool set from the place the skill comes from. */
   skill_install?: Tier3Skill | undefined;
+  /** The skill a removal would take away, settled by the skill tool set from the saved skill. */
+  skill_remove?: SkillRemoveReview | undefined;
   /** The schedule a pause or resume would change, settled by the schedule tool set from the store. */
   schedule_status?: ScheduleStatusReview | undefined;
   /**

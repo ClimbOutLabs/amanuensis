@@ -8,8 +8,10 @@
  * Reading `process.env` directly is the documented bootstrap exception: this
  * runs before the server config module exists.
  */
+import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { PACKAGE_VERSION } from './packageVersion';
@@ -23,12 +25,13 @@ function printUsage(): void {
   console.log(`Usage:
   npx amanuensis
   npx amanuensis --port <n>
+  npx amanuensis --create-account
   npx amanuensis --reset-password
 
 Amanuensis v${PACKAGE_VERSION}. Start the agent server and chat UI.
 Runs in standalone mode (SQLite, no Redis), local use only, not production-safe.
-Sign-in is a local email and password that Aman keeps itself: the first time you open
-Aman it asks you to create it, and there is only ever one. Setting the OIDC variables
+Sign-in is a local email and password that Aman keeps itself: the first time you start
+Aman here it asks for them in this terminal, and there is only ever one. Setting the OIDC variables
 (OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_ALLOWED_EMAILS with exactly
 one email address) uses your own sign-in service instead. Optional: PUBLIC_BASE_URL
 (origin, no path), AUTH_COOKIE_SUFFIX.
@@ -36,6 +39,7 @@ Set STANDALONE=false with Postgres and Redis for multi-replica peering.
 
 Options:
   --port <n>         HTTP port (default: ${String(DEFAULT_PORT)}, or PORT env)
+  --create-account   Create the local sign-in without starting Aman
   --reset-password   Set a new password for the local sign-in (Aman must be stopped).
                      If you start Aman with --port, pass the same --port here too
   -h, --help         Show this help
@@ -71,6 +75,14 @@ function applyDefaults(): void {
   }
 }
 
+/** Runs one server CLI command in its own process, with this terminal attached, and returns its exit code. */
+function runServerCommand(args: readonly string[]): number {
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('./aman.js', import.meta.url)), ...args], {
+    stdio: 'inherit',
+  });
+  return result.status ?? 1;
+}
+
 function listeningUrl(): string {
   const host = process.env['HOST'] ?? DEFAULT_HOST;
   const port = process.env['PORT'] ?? String(DEFAULT_PORT);
@@ -82,6 +94,7 @@ try {
     args: process.argv.slice(2),
     options: {
       port: { type: 'string' },
+      'create-account': { type: 'boolean', default: false },
       'reset-password': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -94,12 +107,18 @@ try {
   } else {
     applyPort(values.port);
     applyDefaults();
-    if (values['reset-password']) {
-      // The server's own command dispatcher does the work under its command name;
-      // it exits the process itself, so nothing after this import runs.
-      process.argv = [process.argv[0] ?? 'node', 'amanuensis', 'reset-password'];
-      await import(new URL('./aman.js', import.meta.url).href);
+    if (values['create-account']) {
+      process.exit(runServerCommand(['create-account']));
+    } else if (values['reset-password']) {
+      process.exit(runServerCommand(['reset-password']));
     } else {
+      // Local sign-in is only ever made here, at the computer that runs Aman, before the server listens.
+      if (process.env['TRUEFORGE_AUTH_MODE'] === 'local') {
+        const code = runServerCommand(['create-account', '--if-missing']);
+        if (code !== 0) {
+          process.exit(code);
+        }
+      }
       // Not a static specifier: `main.js` is vendored into dist/ at build time and has no src/ twin.
       await import(new URL('./main.js', import.meta.url).href);
       console.log(`Amanuensis is listening on ${listeningUrl()}`);

@@ -52,9 +52,11 @@ function makeSandbox(input: {
   execCalls: SandboxExecParams[];
   granted: () => boolean;
   runCodeService?: RunCodeBackend | undefined;
+  webConnectorAttached?: boolean | undefined;
 }): TestSandbox {
   return new TestSandbox({
     provider: makeProvider(input.execCalls),
+    webConnectorAttached: input.webConnectorAttached,
     loadSkillNetworkGrant: async () => (input.granted() ? GRANT : undefined),
     runCodeService: input.runCodeService,
     blockDestructiveToolsInCodeMode: true,
@@ -115,6 +117,22 @@ describe('exec preflight with a skill network grant', () => {
     const curlExec = execCalls.find(params => params.command === 'curl https://github.com');
     expect(curlExec?.skillNetworkToken).toBe(GRANT.token);
     expect(curlExec?.skillNetworkHosts).toEqual(['api.github.com', 'github.com']);
+  });
+
+  it('lets curl reach an approved site in a chat with a web search connector, and still refuses it without a grant', async () => {
+    const granted = makeSandbox({ execCalls: [], granted: () => true, webConnectorAttached: true });
+    await granted.listTools();
+    const allowed = await granted.toolCallInfo(CURL_CALL);
+    expect(allowed.pre_dispatch_failure).toBeUndefined();
+    expect(allowed.is_approval_required).toBe(true);
+
+    const notGranted = makeSandbox({ execCalls: [], granted: () => false, webConnectorAttached: true });
+    await notGranted.listTools();
+    const response = await notGranted.callTool(CURL_CALL);
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a tool result');
+    }
+    expect(response.result.isError).toBe(true);
   });
 
   it('refuses the same command as offline when the grant is gone, and never runs it', async () => {

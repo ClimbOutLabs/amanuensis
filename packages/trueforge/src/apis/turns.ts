@@ -81,6 +81,7 @@ import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { gateEvalApprovals } from '../eval/approvalGate';
 import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { storeHomeAssistantDeclaredChangeTools } from '../mcp/homeAssistant';
 import { setUpConnectorNamesOf } from '../mcp/hostConnectors';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import { personalizationFactLines, type PersonalizationProfile } from '../personalization/profile';
@@ -685,12 +686,15 @@ function createTurnResolver(deps: {
           }),
           first_party: connection.first_party,
           grant_binding: connection.grant_binding,
+          declared_change_tools: connection.declared_change_tools,
           search_provider:
             connection.search_provider === undefined
               ? undefined
-              : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
+              : mcpCatalog.searchProviderGrant({ manifest: connection.search_provider }),
         };
       },
+      storeDeclaredChangeTools: ({ name, url, declared_change_tools }) =>
+        storeHomeAssistantDeclaredChangeTools({ store: mcpServerStore, tenant_id, name, url, declared_change_tools }),
       setUpConnectorNames: async () =>
         setUpConnectorNamesOf(await mcpServerStore.listServers({ tenant_id, names: undefined })),
       mailAccounts: mailAccountDirectory,
@@ -2716,6 +2720,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             session,
             previous_turn_id: previousTurnId,
             input: submitted.input,
+            allowSkills: configuration.AMAN_EVAL_SKILLS,
           }),
         }
       : submitted;
@@ -3032,7 +3037,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               sandboxReady: serverSandboxAvailable,
               lookup: { fetchImpl: undefined, resolveAddresses: undefined },
               readFiles: readSkillFilesFromGit,
-              turnOnForChat: chatSkillSwitch({
+              chatSkills: chatSkillSwitch({
                 sessionStore: deps.sessionStore,
                 tenant_id: requestContext.tenant_id,
                 session_id: session.session_id,

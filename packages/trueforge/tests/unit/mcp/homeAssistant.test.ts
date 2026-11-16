@@ -1,10 +1,14 @@
 import { McpConnectionError } from '@truefoundry/trueforge-core/core';
+import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { createSqliteDb } from '../../../src/db/sqlite/client';
+import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import {
   buildHomeAssistantEndpoint,
   checkHomeAssistant,
   classifyHomeAssistantFailure,
   countHomeAssistantEntities,
   homeAssistantUrlProblem,
+  storeHomeAssistantDeclaredChangeTools,
   type HomeAssistantProbeClient,
 } from '../../../src/mcp/homeAssistant';
 
@@ -168,5 +172,57 @@ describe('classifyHomeAssistantFailure', () => {
       502,
     );
     expect(classifyHomeAssistantFailure(wrapped401).code).toBe('token_refused');
+  });
+});
+
+describe('storeHomeAssistantDeclaredChangeTools', () => {
+  const HA_URL = 'https://homeassistant.example/mcp_server/sse';
+
+  async function storeWithRecordSavedBeforeDeclarations() {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqliteMcpServerStore(db);
+    await store.upsertServer({
+      tenant_id: 'default',
+      name: 'home-assistant',
+      manifest: {
+        type: 'remote',
+        name: 'home-assistant',
+        url: HA_URL,
+        description: 'Invented home.',
+        auth: { type: 'header', headers: { Authorization: 'Bearer invented-token' } },
+      },
+      first_party: false,
+    });
+    const declared = async () => {
+      const record = await store.getServer({ tenant_id: 'default', name: 'home-assistant' });
+      return record?.manifest.type === 'remote' ? record.manifest.declared_change_tools : undefined;
+    };
+    return { store, declared };
+  }
+
+  it('gives an existing record with no declaration the one its server listed', async () => {
+    const { store, declared } = await storeWithRecordSavedBeforeDeclarations();
+    expect(await declared()).toBeUndefined();
+    await storeHomeAssistantDeclaredChangeTools({
+      store,
+      tenant_id: 'default',
+      name: 'home-assistant',
+      url: HA_URL,
+      declared_change_tools: ['HassGlowLamp'],
+    });
+    expect(await declared()).toEqual(['HassGlowLamp']);
+  });
+
+  it('writes nothing when the record moved to another address after the list was read', async () => {
+    const { store, declared } = await storeWithRecordSavedBeforeDeclarations();
+    await storeHomeAssistantDeclaredChangeTools({
+      store,
+      tenant_id: 'default',
+      name: 'home-assistant',
+      url: 'https://elsewhere.example/mcp_server/sse',
+      declared_change_tools: ['HassGlowLamp'],
+    });
+    expect(await declared()).toBeUndefined();
   });
 });
