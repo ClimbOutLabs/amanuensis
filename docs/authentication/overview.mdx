@@ -10,16 +10,16 @@ Aman uses its own sign-in. Outside sign-in services are not supported. Login is 
 | Mode | When to use | What users see |
 | --- | --- | --- |
 | **No login** (hosted default) | Hosted evaluation on a network you fully trust; not available in standalone | No login screen; everyone is a single shared local admin |
-| **Local sign-in** | The `npx amanuensis` install, or any standalone run with `TRUEFORGE_AUTH_MODE=local` | A sign-in form Aman serves itself; the first run asks you to create the sign-in |
+| **Local sign-in** | The `npx amanuensis` install, or any standalone run with `TRUEFORGE_AUTH_MODE=local` | A sign-in form Aman serves itself; the sign-in is created in a terminal on the first run |
 | **Login** | The installer, or any shared deployment | Sign-in with Aman's sign-in service |
 
 ## Local sign-in
 
 Set `TRUEFORGE_AUTH_MODE=local` and Aman owns the sign-in. Any `OIDC_*` variables are ignored in this mode, and one line at startup says so. The rules:
 
-- **One person.** There is exactly one sign-in, stored as an email and a scrambled (bcrypt) password hash. A second one cannot be created: once the sign-in exists, the create page is gone and the create address refuses. That one person is the admin and can change every setting.
-- **Create it on the first page.** While no sign-in exists, opening Aman shows "Create your sign-in": your email and a password of at least 8 characters, typed twice. Creating it signs you in. After that, the page is a plain sign-in form. A wrong email or password gets one answer, "That email or password is not right", whichever of the two was wrong, and guessing is slowed by the same lockouts that guard the sign-in service's form.
-- **On a public address, create it straight away.** Local sign-in can be opened through a public https address. Until the sign-in exists, that address is open to claim: the first person to open the page creates the one sign-in and owns the install. Create yours as soon as the address can be reached, before telling anyone else the address.
+- **One person.** There is exactly one sign-in, stored as an email and a scrambled (bcrypt) password hash. A second one cannot be created. That one person is the admin and can change every setting.
+- **Create it in a terminal on this computer.** The first time you run `npx amanuensis`, it asks in the terminal for your email and a password of at least 8 characters, typed twice, before Aman starts. It does not show the password while you type. You can also run `npx amanuensis --create-account` on its own (from a checkout, `pnpm create-account`); piped in, it reads three lines: the email, the password and the password again. No web page can create the sign-in, so nobody who reaches the address before you can claim the install. While no sign-in exists, the page only says which command to run.
+- **Then sign in on the page.** A wrong email or password gets one answer, "That email or password is not right", whichever of the two was wrong, and guessing is slowed by the same lockouts that guard the sign-in service's form.
 - **Change it in Settings, Account.** Type the current password and the new one twice. Changing it signs out every other device; the device you changed it on stays signed in.
 - **Forgot it?** There is no reset by email. Stop Aman and run `npx amanuensis --reset-password` (from a checkout, `aman reset-password`). It asks for a new password twice on the terminal, without showing what you type, and replaces the stored hash. It refuses while Aman is running; stop Aman first. The sign-in page carries the same instruction in one line.
 - **It needs a private connection.** Local sign-in works on this computer (a loopback address) or behind an https address set as `PUBLIC_BASE_URL`. If any address in `PUBLIC_BASE_URL` or `ALLOWED_ORIGINS` is plain http on another computer, Aman refuses to start, even when the public address is https: "Local sign-in works on this computer or behind https. Change every plain http address in PUBLIC_BASE_URL and ALLOWED_ORIGINS to https, or use the Docker install."
