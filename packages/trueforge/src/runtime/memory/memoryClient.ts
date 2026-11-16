@@ -159,6 +159,8 @@ export interface MemoryClient {
     maxTokens: number;
     /** The meaning gate of this message, worked out once by `meaningGate`; left out, it is worked out here. */
     gate?: MeaningGate | undefined;
+    /** The words of the facts this chat left out; a page line with those words is not shown. */
+    exclusions?: ReadonlySet<string> | undefined;
   }): Promise<PageLoadResult>;
 
   /**

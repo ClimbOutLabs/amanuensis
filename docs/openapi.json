@@ -3071,7 +3071,7 @@
       "DeleteShownMemoryResult": {
         "properties": {
           "deleted": {
-            "description": "How many stored copies were deleted.",
+            "description": "How many stored copies and page lines were deleted.",
             "minimum": 1,
             "type": "integer"
           }
@@ -21728,7 +21728,7 @@
     },
     "/api/v1/memory/vault/delete-shown": {
       "post": {
-        "description": "Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.",
+        "description": "Delete every memory and every page line that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when nothing, or more than one different text, fits the words.",
         "requestBody": {
           "content": {
             "application/json": {

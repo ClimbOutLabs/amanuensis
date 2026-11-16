@@ -9600,7 +9600,7 @@ await client.memory.vault.list();
 <dl>
 <dd>
 
-Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.
+Delete every memory and every page line that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when nothing, or more than one different text, fits the words.
 </dd>
 </dl>
 </dd>
