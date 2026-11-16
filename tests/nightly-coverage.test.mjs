@@ -141,22 +141,60 @@ test('the contact sheet groups pictures by feature set and puts failures first',
     const layout = surfaceFileName('screen:chat-layout');
     await writeFile(path.join(folder, 'chat', `${session}--reply-shown.png`), '');
     await writeFile(path.join(folder, 'chat', `${layout}--FAILED-page-1.png`), '');
+    await writeFile(
+      path.join(folder, 'chat', `${session}--reply-shown.json`),
+      JSON.stringify({ test: 'a reply <shows>', did: 'Typed "Hello".', expect: 'The reply shows.', passed: true }),
+    );
+    await writeFile(path.join(folder, 'chat', `${session}--cut-off.png`), '');
+    await writeFile(
+      path.join(folder, 'chat', `${session}--cut-off.json`),
+      JSON.stringify({ test: 'a slow reply', did: 'Waited.', expect: 'A reply.', passed: null }),
+    );
     await writeFile(path.join(folder, 'chat', 'stray.png'), '');
 
     const run = await buildGallery({ folder, repoRoot: dir, title: 'Run <1>' });
-    assert.deepEqual(run.totals, { features: 3, features_with_a_test: 2, pictures: 2, failed_pictures: 1 });
+    assert.deepEqual(run.totals, { features: 3, features_with_a_test: 2, pictures: 3, failed_pictures: 1 });
     assert.deepEqual(run.unknown_files, ['chat/stray.png']);
     const chat = run.feature_sets.find(set => set.id === 'chat');
     assert.deepEqual(chat.features, [
       {
         id: 'route:session',
         has_test: true,
-        pictures: [{ file: `chat/${session}--reply-shown.png`, step: 'reply-shown', failed: false }],
+        pictures: [
+          {
+            file: `chat/${session}--cut-off.png`,
+            step: 'cut-off',
+            failed: false,
+            test: 'a slow reply',
+            did: 'Waited.',
+            expect: 'A reply.',
+            passed: null,
+          },
+          {
+            file: `chat/${session}--reply-shown.png`,
+            step: 'reply-shown',
+            failed: false,
+            test: 'a reply <shows>',
+            did: 'Typed "Hello".',
+            expect: 'The reply shows.',
+            passed: true,
+          },
+        ],
       },
       {
         id: 'screen:chat-layout',
         has_test: true,
-        pictures: [{ file: `chat/${layout}--FAILED-page-1.png`, step: 'page-1', failed: true }],
+        pictures: [
+          {
+            file: `chat/${layout}--FAILED-page-1.png`,
+            step: 'page-1',
+            failed: true,
+            test: null,
+            did: null,
+            expect: null,
+            passed: null,
+          },
+        ],
       },
     ]);
 
@@ -164,6 +202,11 @@ test('the contact sheet groups pictures by feature set and puts failures first',
     assert.ok(html.includes('<title>Run &lt;1&gt;</title>'), 'the title is escaped');
     assert.ok(html.indexOf('>Failed<') < html.indexOf('<section id="chat">'), 'failures come first');
     assert.ok(html.includes('No test yet: settings:models'), 'features with no test are listed');
+    assert.ok(html.includes('<h3>a reply &lt;shows&gt;</h3>'), 'a picture names its test, escaped');
+    assert.ok(html.includes('<dt>What the test did</dt><dd>Typed &quot;Hello&quot;.</dd>'), 'and what the test did');
+    assert.ok(html.includes('<dt>What it should show</dt><dd>The reply shows.</dd>'), 'and what it should show');
+    assert.ok(html.includes('>Test passed<'), 'and that its test passed');
+    assert.ok(html.includes('>Test did not finish<'), 'a test that never ended is not shown as passed');
     assert.ok(!html.includes('http'), 'the page loads nothing from outside');
     const results = JSON.parse(await readFile(path.join(folder, 'results.json'), 'utf8'));
     assert.equal(results.title, 'Run <1>');

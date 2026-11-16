@@ -33,6 +33,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const REVIEWED_PATH = join(here, 'dependency-licenses-reviewed.txt');
 const PYPI = 'https://pypi.org/pypi';
+// Hundreds of lookups opened at once exhaust the runner's connections and time out, so a few
+// at a time share the registries.
+const REGISTRY_LOOKUPS_AT_ONCE = 8;
 const NPM_REGISTRY = 'https://registry.npmjs.org';
 
 class CheckError extends Error {}
@@ -77,6 +80,29 @@ function readReviewed() {
   return reviewed;
 }
 
+/** Maps items through an async step, running at most `limit` steps at a time, in input order. */
+async function mapPooled({ items, limit, step }) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await step(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/** Fetches one registry URL, turning a network failure into a check error that says what to do. */
+async function registryFetch({ url, what }) {
+  try {
+    return await fetch(url);
+  } catch (caught) {
+    throw new CheckError(`Could not reach ${what}. Check the network, then run this check again.`, { cause: caught });
+  }
+}
 function pnpmPackages() {
   const out = run('pnpm', ['licenses', 'list', '--recursive', '--json'], {
     what: 'list the pnpm workspace packages',
@@ -106,9 +132,14 @@ async function lockedPlatformPackages(installedKeys) {
     .filter(([, , , body]) => /^ {4}(?:os|cpu|libc):/m.test(body))
     .map(([, name, version]) => ({ name, version, key: `npm:${name}@${version}` }))
     .filter(({ key }) => !installedKeys.has(key));
-  return Promise.all(
-    missing.map(async ({ name, version, key }) => {
-      const response = await fetch(`${NPM_REGISTRY}/${name.replace('/', '%2F')}/${encodeURIComponent(version)}`);
+  return mapPooled({
+    items: missing,
+    limit: REGISTRY_LOOKUPS_AT_ONCE,
+    step: async ({ name, version, key }) => {
+      const response = await registryFetch({
+        url: `${NPM_REGISTRY}/${name.replace('/', '%2F')}/${encodeURIComponent(version)}`,
+        what: `the npm registry for ${name} ${version}`,
+      });
       if (!response.ok) {
         throw new CheckError(
           `Could not read ${name} ${version} from the npm registry (HTTP ${response.status}). Check the network, then run this check again.`,
@@ -117,8 +148,8 @@ async function lockedPlatformPackages(installedKeys) {
       const manifest = await response.json();
       const license = typeof manifest.license === 'string' ? manifest.license : manifest.license?.type;
       return { key, source: 'pnpm-lock.yaml (other platforms)', statements: license ? [license] : [] };
-    }),
-  );
+    },
+  });
 }
 
 function npmLockPackages(lockPath) {
@@ -155,7 +186,10 @@ function pythonPins(requirementsPath) {
 
 /** License statements of one PyPI release, most authoritative first. */
 async function pypiStatements({ name, version }) {
-  const response = await fetch(`${PYPI}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/json`);
+  const response = await registryFetch({
+    url: `${PYPI}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/json`,
+    what: `PyPI for ${name} ${version}`,
+  });
   if (!response.ok) {
     throw new CheckError(
       `Could not read ${name} ${version} from PyPI (HTTP ${response.status}). Check the network and the pinned version, then run this check again.`,
@@ -192,13 +226,11 @@ async function pythonPackages({ requirementsPaths, problems }) {
       }
     }
   }
-  return Promise.all(
-    [...releases.values()].map(async ({ key, source, pin }) => ({
-      key,
-      source,
-      statements: await pypiStatements(pin),
-    })),
-  );
+  return mapPooled({
+    items: [...releases.values()],
+    limit: REGISTRY_LOOKUPS_AT_ONCE,
+    step: async ({ key, source, pin }) => ({ key, source, statements: await pypiStatements(pin) }),
+  });
 }
 
 /** Go modules carry no license metadata, so each one needs a reviewed entry. */

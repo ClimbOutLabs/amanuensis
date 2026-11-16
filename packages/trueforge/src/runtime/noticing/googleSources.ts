@@ -177,6 +177,8 @@ export function gmailMailSource(
 ): TimedMailSource {
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
+    // Gmail writes an Authentication-Results header into every message it receives, and this source passes it on.
+    reportsSenderConfirmation: true,
     fetchesEachListed: true,
     async listNewMessages(input) {
       try {

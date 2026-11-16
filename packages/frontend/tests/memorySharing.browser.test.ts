@@ -173,6 +173,9 @@ test(
             path: await featureShotPath({
               surface: 'screen:memory-sharing',
               step: `${viewport.name}-${theme}`,
+              did: `Opened Memory sharing with a list of people and opened one row, on a ${viewport.name} screen in the ${theme} theme.`,
+              expect:
+                "The list stays inside the panel, the open row's choices are clear of the name and of each other, the last row ends above the footer, and nothing scrolls sideways.",
             }),
           });
           await context.close();

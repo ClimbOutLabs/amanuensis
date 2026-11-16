@@ -2,7 +2,11 @@
  * Backend-agnostic behavioural contract for ITelegramStore.
  * Runs under jest against a fresh store per test (see backend test files).
  */
-import type { ITelegramStore, SaveTelegramConnectionInput } from '../../src/db/telegramStore';
+import type {
+  AddTelegramPendingReplyInput,
+  ITelegramStore,
+  SaveTelegramConnectionInput,
+} from '../../src/db/telegramStore';
 
 const ALICE = { tenant_id: 't1', created_by: 'alice' };
 const BOB = { tenant_id: 't1', created_by: 'bob' };
@@ -113,6 +117,7 @@ export function runTelegramStoreContractSuite(getStore: () => ITelegramStore): v
       session_id: 's1',
       turn_id: 'turn-1',
       chat_id: '777',
+      origin: 'telegram',
     });
     const second = await store.saveConnection(bot(ALICE, '999:other'));
     expect(second.id).not.toBe(first.id);
@@ -123,11 +128,19 @@ export function runTelegramStoreContractSuite(getStore: () => ITelegramStore): v
   it('keeps one pending reply per turn and clears it by id', async () => {
     const store = getStore();
     const saved = await store.saveConnection(bot(ALICE));
-    const input = { ...ALICE, connection_id: saved.id, session_id: 's1', turn_id: 'turn-1', chat_id: '777' };
+    const input: AddTelegramPendingReplyInput = {
+      ...ALICE,
+      connection_id: saved.id,
+      session_id: 's1',
+      turn_id: 'turn-1',
+      chat_id: '777',
+      origin: 'app',
+    };
     await store.addPendingReply(input);
     await store.addPendingReply(input);
     const rows = await store.listPendingReplies({ limit: 10 });
     expect(rows).toHaveLength(1);
+    expect(rows[0]?.origin).toBe('app');
     await store.deletePendingReply({ id: rows[0]?.id ?? '' });
     await expect(store.listPendingReplies({ limit: 10 })).resolves.toEqual([]);
   });
@@ -177,6 +190,7 @@ export function runTelegramStoreContractSuite(getStore: () => ITelegramStore): v
       session_id: 's1',
       turn_id: 'turn-1',
       chat_id: '777',
+      origin: 'telegram',
     });
     await expect(store.deleteConnection(ALICE)).resolves.toBe(true);
     await expect(store.deleteConnection(ALICE)).resolves.toBe(false);

@@ -8,6 +8,7 @@ import {
   cardConsequence,
   cardHeadline,
   cardReason,
+  chatGrantLabel,
   declineVerb,
   GENERIC_CARD_HEADLINE,
   outboundRepeatsFacts,
@@ -59,6 +60,14 @@ describe('approval copy', () => {
     expect(approvalQuestion(card)).toBe('Send this reply to Rui?');
     expect(approveVerb(card)).toBe('Allow');
     expect(declineVerb(card)).toBe('Not now');
+  });
+
+  it('names the site on the standing grant when the server marked the grant as covering it', () => {
+    expect(chatGrantLabel('site')).toBe('Always allow this site');
+  });
+
+  it('keeps the shared grant words when the server set no wider scope', () => {
+    expect(chatGrantLabel(undefined)).toBe('Always allow in this chat');
   });
 
   it('names a held search by its provider, never by a connector id', () => {
@@ -144,7 +153,7 @@ describe('approval copy', () => {
         location: '',
         description: '',
         attendees: [],
-        guests_emailed: false,
+        guests_line: '',
         one_of_repeating: false,
         before: null,
       },

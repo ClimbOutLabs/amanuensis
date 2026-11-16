@@ -11,6 +11,7 @@ export const Today: core.serialization.ObjectSchema<serializers.Today.Raw, TrueF
     {
         asOf: core.serialization.property("as_of", core.serialization.string()),
         calendar: core.serialization.list(TodayCalendarEvent).nullable(),
+        calendarUnread: core.serialization.property("calendar_unread", core.serialization.boolean()),
         due: core.serialization.list(TodayDueReminder),
         freeAfter: core.serialization.property("free_after", core.serialization.string().nullable()),
         needsOk: core.serialization.property("needs_ok", core.serialization.list(TodayNeedsOkItem)),
@@ -22,6 +23,7 @@ export declare namespace Today {
     export interface Raw {
         as_of: string;
         calendar?: TodayCalendarEvent.Raw[] | null;
+        calendar_unread: boolean;
         due: TodayDueReminder.Raw[];
         free_after?: string | null;
         needs_ok: TodayNeedsOkItem.Raw[];

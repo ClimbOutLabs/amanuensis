@@ -2,11 +2,10 @@
 name: aman-@@NAME@@
 
 services:
-  # Idle holder of the network namespace that app, login and the https front end share and that publishes their ports.
-  # They are on 127.0.0.1 and on each private address of this computer an instance opened on the local network lists,
-  # never on a wildcard; the login port is always on 127.0.0.1 (other devices reach sign-in through the app). Either
-  # container can restart without stranding the other, and the login issuer name is the same URL for the browser and
-  # for the app.
+  # Idle holder of the network namespace that app, login and the https front end share and that publishes their ports on
+  # 127.0.0.1 only; the login port is always there too (other devices reach sign-in through the app). Either container
+  # can restart without stranding the other, and the login issuer name is the same URL for the browser and for the app.
+  # Other devices come in through the lan service below, so an address this computer no longer has never stops these.
   loopback:
     container_name: @@CONTAINER_PREFIX@@-loopback
     image: @@APP_IMAGE@@
@@ -26,11 +25,44 @@ services:
     networks:
       - default
       - link
+@@IF_LAN@@      - front
 @@IF_CALENDAR@@      - calendar
 @@IF_EMAIL@@      - mail
 @@IF_BROWSER@@      - browser-control
 @@IF_LOCAL_MODEL@@      - local-model
     restart: unless-stopped
+
+@@IF_LAN@@  # Listens for other devices on this computer's private addresses and passes each connection unchanged to the https
+@@IF_LAN@@  # front end, prefixed with the visitor's address so sign-in limits guessing per visitor. It is a container of its own,
+@@IF_LAN@@  # so when this computer loses one of these addresses only this one fails to start, and Aman still answers on
+@@IF_LAN@@  # 127.0.0.1. Never a wildcard.
+@@IF_LAN@@  lan:
+@@IF_LAN@@    container_name: @@CONTAINER_PREFIX@@-lan
+@@IF_LAN@@    image: @@APP_IMAGE@@
+@@IF_LAN@@    pull_policy: never
+@@IF_LAN@@    init: true
+@@IF_LAN@@    user: '10001:10001'
+@@IF_LAN@@    entrypoint:
+@@IF_LAN@@      - node
+@@IF_LAN@@      - --input-type=module
+@@IF_LAN@@      - -e
+@@IF_LAN@@      - "import n from 'node:net';const v=a=>(a||'').replace(/^::ffff:/,'');const r=(p,q)=>n.createServer(c=>{const u=n.connect(q,'loopback');const x=()=>{c.destroy();u.destroy()};c.on('error',x);u.on('error',x);const s=v(c.remoteAddress),d=v(c.localAddress);if(@@LAN_PROXY@@)u.write(n.isIPv4(s)&&n.isIPv4(d)?'PROXY TCP4 '+s+' '+d+' '+c.remotePort+' '+c.localPort+'\\r\\n':'PROXY UNKNOWN\\r\\n');c.pipe(u).pipe(c)}).listen(p);@@LAN_FORWARDS@@"
+@@IF_LAN@@    ports:
+@@LAN_PORTS@@
+@@IF_LAN@@    networks:
+@@IF_LAN@@      - lan-out
+@@IF_LAN@@      - front
+@@IF_LAN@@    depends_on:
+@@IF_LAN@@      loopback:
+@@IF_LAN@@        condition: service_started
+@@IF_LAN@@    cap_drop:
+@@IF_LAN@@      - ALL
+@@IF_LAN@@    security_opt:
+@@IF_LAN@@      - no-new-privileges:true
+@@IF_LAN@@    read_only: true
+@@IF_LAN@@    mem_limit: 64m
+@@IF_LAN@@    pids_limit: 64
+@@IF_LAN@@    restart: unless-stopped
 
   # Carries the app's speech requests to the shared speech services and nothing else: speech-to-text on 8001, the voice
   # on 8002. The services are on a network of their own with this relay alone, so they have no route to the app, the
@@ -190,6 +222,8 @@ services:
 @@IF_TLS@@    network_mode: 'service:loopback'
 @@IF_TLS@@    user: '@@TLS_USER@@'
 @@IF_TLS@@    command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile']
+@@IF_TLS@@    labels:
+@@IF_TLS@@      aman.tls-config: '@@TLS_CONFIG@@'
 @@IF_TLS@@    volumes:
 @@IF_TLS@@      - ./tls.Caddyfile:/etc/caddy/Caddyfile:ro
 @@IF_TLS_HOST@@      - @@TLS_LEAF_DIR@@:/certs:ro
@@ -463,6 +497,11 @@ volumes:
 @@IF_SANDBOX@@    external: true
 
 networks:
+@@IF_LAN@@  # Between the app's network holder and the lan service only.
+@@IF_LAN@@  front:
+@@IF_LAN@@    internal: true
+@@IF_LAN@@  # The lan service's own network, which Docker publishes its ports from. Nothing else is on it.
+@@IF_LAN@@  lan-out: {}
   # Between the app and the relay only.
   link:
     internal: true

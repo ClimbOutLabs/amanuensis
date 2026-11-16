@@ -13,6 +13,7 @@ describe("SessionsClient", () => {
             data: {
                 agent: { spec: { model: { name: "name" } }, type: "inline" },
                 approval_grants: ["approval_grants"],
+                approval_refusals: ["approval_refusals"],
                 created_at: "created_at",
                 created_by_subject: {
                     subject_display_name: "subject_display_name",
@@ -57,6 +58,7 @@ describe("SessionsClient", () => {
                     type: "inline",
                 },
                 approvalGrants: ["approval_grants"],
+                approvalRefusals: ["approval_refusals"],
                 createdAt: "created_at",
                 createdBySubject: {
                     subjectDisplayName: "subject_display_name",

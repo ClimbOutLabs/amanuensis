@@ -65,7 +65,13 @@ test(
         for (const summary of await panel.locator('summary').all()) await summary.click();
         await panel.getByText('Sent an email').waitFor({ timeout: RENDER_TIMEOUT_MS });
         await page.screenshot({
-          path: await featureShotPath({ surface: 'screen:chat-layout', step: `status-panel-${theme}` }),
+          path: await featureShotPath({
+            surface: 'screen:chat-layout',
+            step: `status-panel-${theme}`,
+            did: `Opened the right-hand status panel in the ${theme} theme and opened every fold.`,
+            expect:
+              'The panel uses one body font, has no Settings link, lists Activity above Rules, and nothing lies over the picture.',
+          }),
         });
         await page.waitForFunction(() => {
           const img = document.querySelector<HTMLImageElement>('.aman-runtime-rail__picture');
@@ -124,7 +130,12 @@ test(
         await live.hover();
         await page.waitForTimeout(250);
         await page.screenshot({
-          path: await featureShotPath({ surface: 'screen:chat-layout', step: `status-panel-live-hover-${theme}` }),
+          path: await featureShotPath({
+            surface: 'screen:chat-layout',
+            step: `status-panel-live-hover-${theme}`,
+            did: `In the ${theme} theme, with a web page open in Aman's browser, moved the pointer over the "Watch Live or Take Control" card.`,
+            expect: 'The card has a pulsing dot you can see and an open arrow, and it lifts under the pointer.',
+          }),
         });
         assert.notEqual(
           await live.evaluate(el => getComputedStyle(el).boxShadow),

@@ -285,7 +285,9 @@ export class RemoteMCP implements ToolSource {
           this.name,
           this.logger,
         );
-        this.cachedTools = tools.map(t => ({ ...t, preload: true }));
+        // A remote server never declares its own network need: only a first-party registration
+        // may say a tool runs offline, so any such key in the listing is dropped here.
+        this.cachedTools = tools.map(t => ({ ...t, preload: true, requires_network: undefined }));
         span.setNumberOfTools(this.cachedTools.length);
         return { tools: this.cachedTools };
       },

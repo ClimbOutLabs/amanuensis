@@ -8,9 +8,10 @@ import {
   sandboxCardCopy,
   simpleCardCopy,
 } from '../../../src/core/permissions/cardCopy';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import type { Tier3Email } from '../../../src/core/permissions/tier';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 /** An invented id-shaped token. No card copy may ever carry one, whatever slot it is offered in. */
@@ -290,6 +291,7 @@ describe('no card copy carries an internal id', () => {
         inReplyTo: '',
         references: '',
         fromName: '',
+        fromAddress: 'ada@example.test',
         nameLeftOff: false,
         replyTo: null,
       },

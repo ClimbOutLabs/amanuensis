@@ -390,9 +390,6 @@ plan_build() {
   else
     plan_add todo "Start the speech-to-text service"
   fi
-  if ! docker_available_for_probes || ! docker_volume_exists aman_stt_cache; then
-    dl_add stt-weights
-  fi
 
   if [ -n "$(reg_names)" ]; then
     for name in $(reg_names); do
@@ -422,7 +419,6 @@ plan_build() {
     if [ "$I_TF" = 1 ]; then
       plan_add todo "Use Token Factory (model $I_TF_MODEL) as the default model" "$(tf_plan_detail)"
     fi
-    dl_add embed
   fi
   if [ "$OPT_DEMO" = 1 ]; then
     name=$(demo_target)
@@ -642,8 +638,6 @@ install_execute() {
   ensure_private_dir "$MACHINE_DIR"
   ensure_private_dir "$INSTANCES_DIR"
   install_doctor_shim
-  # Before the build and the backup, so a port Tailscale would take stops the run with nothing changed.
-  for name in $(reg_names); do instance_tailscale_port_check "$name"; done
   if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
     if [ -t 0 ]; then ui_ask_begin; fi
     UI_IN_PROMPT=1 ui_hint "Asked now so the rest of the setup runs on its own."

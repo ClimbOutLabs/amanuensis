@@ -205,12 +205,11 @@ function calendarLines(event: TrueForgeApi.Tier3CalendarEvent): string[] {
     lines.push('Repeats: Only this one event of the series changes');
   }
   lines.push(`Guests: ${event.attendees.length === 0 ? 'None' : event.attendees.join(', ')}`);
-  if (event.attendees.length > 0) {
-    lines.push(
-      event.guestsEmailed
-        ? 'Google will email every guest about this.'
-        : 'Google will not email the guests about this.',
-    );
+  // The card carries the guest line in the finished words of the review that built it, so the
+  // terminal prints those words instead of naming a provider itself. An empty line means no guests.
+  const guestsLine = event.guestsLine ?? '';
+  if (guestsLine !== '') {
+    lines.push(guestsLine);
   }
   if (event.description !== '') {
     lines.push('Description');

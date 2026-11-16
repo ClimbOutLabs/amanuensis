@@ -127,6 +127,13 @@ Build the single executable with `pnpm build:aman-installer` from the
 repository root. The bundle is made with esbuild and turned into one file
 with Node's single executable support and postject.
 
+`pnpm check:aman-installer-launch` starts the built file the way a person
+does, as Aman-Setup with no command and nobody at the keyboard, and fails if
+it crashes, prints nothing, or stops on the "did not expect" line. On Windows
+it must stop on one of its own sentences (a CI machine has no Docker Desktop,
+so the setup stops at a Docker or setup step); elsewhere it must say Aman
+Setup is for Windows. CI runs it on Windows, Mac and Linux after each build.
+
 ## Releases
 
 Each release publishes the program for every system: `Aman-Setup.exe` and

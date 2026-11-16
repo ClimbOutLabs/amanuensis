@@ -45,7 +45,12 @@ test(
         });
         await page.locator('[data-card="connector"] h3').waitFor({ timeout: RENDER_TIMEOUT_MS });
         await page.screenshot({
-          path: await featureShotPath({ surface: 'screen:approval-card', step: `every-kind-${theme}` }),
+          path: await featureShotPath({
+            surface: 'screen:approval-card',
+            step: `every-kind-${theme}`,
+            did: `Opened one of every kind of approval card in the ${theme} theme.`,
+            expect: 'Every card uses the body font. Only the question and an email body are as large as chat text.',
+          }),
           fullPage: true,
         });
 

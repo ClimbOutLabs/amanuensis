@@ -1,12 +1,15 @@
 import { existsSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { StringDecoder } from 'node:string_decoder';
 
 import { LOCAL_NO_SIGN_IN_MESSAGE } from '../auth/localSignIn';
 import type { ILocalUserStore } from '../db/localUserStore';
 
 /**
- * The real wiring for `aman reset-password`: the server probe, the instance's
- * SQLite database, and the terminal prompt. Loaded lazily by the command, so
+ * The real wiring for `aman create-account` and `aman reset-password`: the server probe, the
+ * instance's SQLite database, and the terminal prompts. Loaded lazily by the commands, so
  * importing the dispatcher never loads the server config.
  */
 
@@ -24,16 +27,26 @@ export async function serverRunning(): Promise<boolean> {
   }
 }
 
-/** Opens the standalone SQLite database the npx install uses, at the latest schema. */
-export async function openLocalUserStore(): Promise<{ store: ILocalUserStore; close(): Promise<void> }> {
+/**
+ * Opens the standalone SQLite database the npx install uses, at the latest schema. With `create`,
+ * a first run makes the database; otherwise a missing one means there is no sign-in to change.
+ */
+export async function openLocalUserStore({
+  create,
+}: {
+  create: boolean;
+}): Promise<{ store: ILocalUserStore; close(): Promise<void> }> {
   const { default: configuration } = await import('../config');
   if (!configuration.STANDALONE) {
     throw new Error(
       'This reset works on the install that runs on its own, on this computer. Run it there, where Aman keeps its SQLite database.',
     );
   }
-  if (!existsSync(configuration.SQLITE_PATH)) {
+  if (!create && !existsSync(configuration.SQLITE_PATH)) {
     throw new Error(LOCAL_NO_SIGN_IN_MESSAGE);
+  }
+  if (create) {
+    await mkdir(path.dirname(configuration.SQLITE_PATH), { recursive: true });
   }
   const [{ createSqliteDb }, { migrateSqliteToLatest }, { SqliteLocalUserStore }] = await Promise.all([
     import('../db/sqlite/client'),
@@ -89,16 +102,19 @@ async function readHiddenLine(prompt: string): Promise<string> {
   });
 }
 
-/**
- * The new password typed twice. On a terminal both are hidden; piped in, the
- * first two lines are the password and its repeat, so the command stays scriptable.
- */
-export async function readPasswordPair(): Promise<{ password: string; confirm: string }> {
-  if (process.stdin.isTTY) {
-    const password = await readHiddenLine('New password: ');
-    const confirm = await readHiddenLine('Type the new password again: ');
-    return { password, confirm };
-  }
+/** One visible line from a terminal, for answers that are not secret. */
+function readVisibleLine(prompt: string): Promise<string> {
+  const lines = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  return new Promise<string>(resolve => {
+    lines.question(prompt, answer => {
+      lines.close();
+      resolve(answer);
+    });
+  });
+}
+
+/** Every line piped in on stdin. */
+async function readPipedLines(): Promise<string[]> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
     const piece: unknown = chunk;
@@ -108,6 +124,30 @@ export async function readPasswordPair(): Promise<{ password: string; confirm: s
       chunks.push(Buffer.from(piece));
     }
   }
-  const lines = Buffer.concat(chunks).toString('utf8').split(/\r?\n/);
-  return { password: lines[0] ?? '', confirm: lines[1] ?? '' };
+  return Buffer.concat(chunks).toString('utf8').split(/\r?\n/);
+}
+
+/**
+ * One answer per question. On a terminal each is asked in turn, and hidden ones are not shown;
+ * piped in, the first lines are the answers in order, so the commands stay scriptable.
+ */
+export async function readAnswers(questions: readonly { prompt: string; hidden: boolean }[]): Promise<string[]> {
+  if (process.stdin.isTTY) {
+    const answers: string[] = [];
+    for (const question of questions) {
+      answers.push(question.hidden ? await readHiddenLine(question.prompt) : await readVisibleLine(question.prompt));
+    }
+    return answers;
+  }
+  const lines = await readPipedLines();
+  return questions.map((_, index) => lines[index] ?? '');
+}
+
+/** The new password typed twice. */
+export async function readPasswordPair(): Promise<{ password: string; confirm: string }> {
+  const [password = '', confirm = ''] = await readAnswers([
+    { prompt: 'New password: ', hidden: true },
+    { prompt: 'Type the new password again: ', hidden: true },
+  ]);
+  return { password, confirm };
 }

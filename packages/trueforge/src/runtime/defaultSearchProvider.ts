@@ -1,7 +1,7 @@
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
-import { defaultSearchConnector } from '../catalog/defaultSearchConnector';
+import { defaultSearchConnector, designatedPresetManifest } from '../catalog/defaultSearchConnector';
 import type { McpCatalog } from '../catalog/McpCatalog';
 import type { SearchProviderChoice } from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
@@ -98,12 +98,7 @@ export async function designateTavilyAtBoot({
     throw new Error('The connector catalog has no Tavily entry, so Tavily cannot be the search provider.');
   }
   const manifest: RemoteMcpServerManifest = {
-    type: 'remote',
-    name: preset.name,
-    url: preset.url,
-    description: preset.description,
-    search_provider: true,
-    search_tools: [...catalog.searchToolsForUrl(preset.url)],
+    ...designatedPresetManifest({ catalog, preset }),
     auth: { type: 'header', headers: { Authorization: `Bearer ${tavilyApiKey}` } },
   };
   await mcpServerStore.upsertServer({ tenant_id, name: preset.name, manifest, first_party: false });

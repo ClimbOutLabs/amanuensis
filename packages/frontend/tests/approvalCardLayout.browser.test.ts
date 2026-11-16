@@ -83,7 +83,12 @@ test(
       const allow = page.getByRole('button', { name: ALLOW, exact: true }).first();
       await allow.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-card', step: 'waiting-card-at-rest' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-card',
+          step: 'waiting-card-at-rest',
+          did: 'Opened a chat that is waiting on an approval card, on a computer screen.',
+          expect: 'The card shows with its Allow button, and no fade lies over the messages above the box you type in.',
+        }),
       });
 
       // No gradient fade hangs over the messages above the composer.
@@ -111,7 +116,12 @@ test(
       const deny = page.getByRole('button', { name: DENY, exact: true }).first();
       await deny.waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-card', step: 'scrolled-up-arrow-clear-of-the-card' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-card',
+          step: 'scrolled-up-arrow-clear-of-the-card',
+          did: 'Scrolled the chat up a little so the scroll-to-bottom arrow appears while the card is on screen.',
+          expect: 'The arrow sits clear of the card: it does not cover Allow or Not now.',
+        }),
       });
 
       const arrowBox = await arrow.boundingBox();

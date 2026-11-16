@@ -473,9 +473,6 @@ function resolveEnvironmentCommand(tokens: string[]): ResolvedEnvironmentCommand
   return { commandTokens, hadEnvironmentPrefix, unsafe: false };
 }
 
-const EVALUATOR_WRAPPERS = new Set(['eval', 'exec', 'command', 'sudo', 'doas']);
-const SHELL_EVALUATORS = new Set(['sh', 'bash', 'dash', 'zsh', 'fish']);
-const POWERSHELL_EVALUATORS = new Set(['pwsh', 'pwsh.exe', 'powershell', 'powershell.exe']);
 const PYTHON_EXECUTABLE = /^(?:py|python(?:\d+(?:\.\d+)*)?)(?:\.exe)?$/u;
 const PYTHON_TERMINATING_OPTIONS = new Set([
   '-?',
@@ -782,66 +779,6 @@ function commandInvokesPythonFromStdin(tokens: string[], depth = 0): boolean {
     return nextDepth === undefined || nested.some(candidate => commandInvokesPythonFromStdin(candidate, nextDepth));
   }
   return false;
-}
-
-/**
- * Reject indirection that hides the command admission class. The sandbox
- * already executes through a shell, so nested evaluators are unnecessary and
- * would let consequential operations evade commit/push separation.
- */
-export function sandboxCommandUsesEvaluatorWrapper(command: string): boolean {
-  const commandStartsEvaluatorWrapper = (commandTokens: string[]): boolean => {
-    const first = commandName(commandTokens);
-    if (EVALUATOR_WRAPPERS.has(first) && !(first === 'command' && commandTokens[1] === '-v')) {
-      return true;
-    }
-    const argumentsTokens = commandTokens.slice(1).map(token => token.toLowerCase());
-    if (
-      SHELL_EVALUATORS.has(first) &&
-      argumentsTokens.some(token => token.startsWith('-c') || token.startsWith('--command'))
-    ) {
-      return true;
-    }
-    if (
-      POWERSHELL_EVALUATORS.has(first) &&
-      argumentsTokens.some(token =>
-        ['-command', '-commandwithargs', '-encodedcommand', '-encodedarguments'].some(option =>
-          option.startsWith(token),
-        ),
-      )
-    ) {
-      return true;
-    }
-    return first === 'cmd' && argumentsTokens.some(token => token === '/c' || token === '/k');
-  };
-
-  const commandUsesEvaluatorWrapper = (tokens: string[], depth = 0): boolean => {
-    const resolved = resolveEnvironmentCommand(tokens);
-    if (resolved.unsafe) {
-      return true;
-    }
-    const commandTokens = resolved.commandTokens;
-    if (commandStartsEvaluatorWrapper(commandTokens)) {
-      return true;
-    }
-    const nested = nestedCommandTokens(commandTokens);
-    if (nested === undefined) {
-      return hasNestedCommandSyntax(commandTokens);
-    }
-    if (nested.length > 0) {
-      const nextDepth = nextIndirectDepth(depth);
-      return nextDepth === undefined || nested.some(candidate => commandUsesEvaluatorWrapper(candidate, nextDepth));
-    }
-    if (singleCommandEffect({ tokens: commandTokens, unsafe: false }) === 'inspect') {
-      return false;
-    }
-    // An unknown executable may itself launch the command represented by its
-    // remaining arguments. Fail closed when those arguments contain an
-    // evaluator signature; otherwise commit/push could be approved merely as
-    // a generic execute call through an unrecognised launcher.
-    return commandTokens.slice(1).some((_, index) => commandStartsEvaluatorWrapper(commandTokens.slice(index + 1)));
-  };
-  return tokenize(commandForTokenizing(command)).some(candidate => commandUsesEvaluatorWrapper(candidate.tokens));
 }
 
 function commandUsesUnstructuredOperation(tokens: string[]): boolean {
@@ -1540,6 +1477,12 @@ export function sandboxInvocationPolicy(input: {
 }): SandboxInvocationPolicy {
   const safetyEffect = sandboxCommandEffect(input.command);
   const safetyEffects = sandboxCommandSafetyEffects(input.command);
+  // A check whose result the host cannot read honestly (redirects, substitution, inline code) still runs,
+  // behind its card, but as ordinary execution: it is never counted as a verification, so it cannot
+  // authorize a later commit.
+  if (input.purpose === 'verify' && verifyResultIsUnreadable(input.command)) {
+    return { effect: safetyEffect === 'inspect' ? 'execute' : safetyEffect, rejection: undefined };
+  }
   if (input.purpose === 'verify') {
     const prohibitedEffect = (['edit', 'commit', 'push'] as const).find(effect => safetyEffects.has(effect));
     if (prohibitedEffect !== undefined) {
@@ -1569,6 +1512,14 @@ export function sandboxInvocationPolicy(input: {
     return { effect: safetyEffect === 'inspect' ? 'execute' : safetyEffect, rejection: undefined };
   }
   return { effect: input.purpose, rejection: undefined };
+}
+
+function verifyResultIsUnreadable(command: string): boolean {
+  return (
+    sandboxVerifyCommandUsesUnsafeSyntax(command) ||
+    sandboxCommandUsesUnstructuredOperation(command) ||
+    sandboxVerifyCommandUsesInlineEval(command)
+  );
 }
 
 export function sandboxCommandRequiresApproval(effect: SandboxCommandEffect): boolean {

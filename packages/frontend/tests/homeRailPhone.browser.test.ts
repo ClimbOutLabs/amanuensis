@@ -96,7 +96,14 @@ test('on a phone the open panel lists what is due and what needs your OK', { tim
     const needsOk = panel.getByRole('region', { name: 'Needs your OK' });
     await dueList.waitFor({ state: 'visible', timeout: FIRST_LOAD_TIMEOUT_MS });
     await needsOk.waitFor({ state: 'visible', timeout: FIRST_LOAD_TIMEOUT_MS });
-    await page.screenshot({ path: await featureShotPath({ surface: SURFACE, step: 'phone-panel-lists' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: SURFACE,
+        step: 'phone-panel-lists',
+        did: 'Set a reminder that is due and left one approval waiting, then opened Aman on a 390 px wide phone.',
+        expect: 'The open panel lists the reminder under "Due" and the waiting approval under "Needs your OK".',
+      }),
+    });
 
     assert.ok(await onScreen(dueList.getByText(REMINDER)), 'the due reminder can be reached on a phone');
     const waitingRow = needsOk.getByRole('button').first();

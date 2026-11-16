@@ -126,6 +126,8 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
           path: await featureShotPath({
             surface: 'screen:help-chat',
             step: testCase.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+            did: `Pressed "Help, I'm stuck" in this case: ${testCase.name}.`,
+            expect: 'The help chat opens with exactly one place to type. The page is never blank and throws no error.',
           }),
           fullPage: true,
         });
@@ -135,7 +137,12 @@ test("Help, I'm stuck opens the help chat in every case, never a blank page", { 
             .getByRole('heading', { name: 'Connectors', exact: true })
             .waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
           await page.screenshot({
-            path: await featureShotPath({ surface: 'screen:help-chat', step: 'step-opens-settings' }),
+            path: await featureShotPath({
+              surface: 'screen:help-chat',
+              step: 'step-opens-settings',
+              did: 'In the help chat, pressed the step that offers to open Settings.',
+              expect: 'Settings opens on Connectors.',
+            }),
             fullPage: true,
           });
         }

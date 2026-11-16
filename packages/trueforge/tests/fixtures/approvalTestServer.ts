@@ -77,6 +77,11 @@ import { uncappedTokenFactoryBudget } from './uncappedTokenFactoryBudget';
 
 export const MODEL_PROVIDER_NAME = 'scripted';
 export const MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-model`;
+/**
+ * The scripted model provider's key: a secret of this computer that must never leave it in a call.
+ * It looks like a page id, so a test can offer it where a lookup would otherwise run without a card.
+ */
+export const SCRIPTED_PROVIDER_KEY = '5e2b8d1f9c3a4b7e8f0a1c2d3e4f5a6b';
 /** A second configured model, so a test can prove which one a turn actually used. */
 export const ALT_MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-alt-model`;
 
@@ -317,7 +322,7 @@ export async function startApprovalTestServer(options?: {
       type: 'custom',
       name: MODEL_PROVIDER_NAME,
       base_url: model.baseUrl,
-      auth: { api_key: 'scripted-key' },
+      auth: { api_key: SCRIPTED_PROVIDER_KEY },
       models: [
         {
           model_id: 'scripted-model',

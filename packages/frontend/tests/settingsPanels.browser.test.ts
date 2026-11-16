@@ -63,7 +63,15 @@ const PANELS: readonly PanelCheck[] = [
         true,
         'nothing can be sent until a token is typed',
       );
-      await page.screenshot({ path: await featureShotPath({ surface: 'route:telegram', step: 'setup' }) });
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: 'route:telegram',
+          step: 'setup',
+          did: 'In Settings, Connectors, pressed Connect on Telegram.',
+          expect:
+            'The Telegram setup opens and asks for the bot token. Its Connect button is off until a token is typed.',
+        }),
+      });
       await setup.getByRole('button', { name: 'Close', exact: true }).click();
       await setup.waitFor({ state: 'hidden', timeout: RENDER_TIMEOUT_MS });
     },
@@ -220,7 +228,14 @@ test(
         current = panel.surface;
         await tablist.getByRole('tab', { name: panel.tab, exact: true }).click();
         await panel.check({ page, panel: page.getByRole('tabpanel') });
-        await page.screenshot({ path: await featureShotPath({ surface: panel.surface, step: 'panel' }) });
+        await page.screenshot({
+          path: await featureShotPath({
+            surface: panel.surface,
+            step: 'panel',
+            did: `Opened Settings against the real server and chose the "${panel.tab}" tab.`,
+            expect: 'The panel opens, shows what it holds, and no request fails.',
+          }),
+        });
       }
 
       // What Personalization saved is still there after the app loads again.
@@ -234,7 +249,14 @@ test(
         SAVED_NAME,
         { timeout: RENDER_TIMEOUT_MS },
       );
-      await page.screenshot({ path: await featureShotPath({ surface: current, step: 'name-kept-after-reload' }) });
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: current,
+          step: 'name-kept-after-reload',
+          did: 'Saved a name in Personalization, reloaded the app and opened Personalization again.',
+          expect: 'The saved name is still in the box.',
+        }),
+      });
       // Saving the second section did not undo the first, and the second is kept too.
       await page.getByRole('tabpanel').getByRole('tab', { name: 'Assistant profile', exact: true }).click();
       await page.waitForFunction(
@@ -242,7 +264,14 @@ test(
         SAVED_ASSISTANT_NAME,
         { timeout: RENDER_TIMEOUT_MS },
       );
-      await page.screenshot({ path: await featureShotPath({ surface: current, step: 'assistant-kept-after-reload' }) });
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: current,
+          step: 'assistant-kept-after-reload',
+          did: 'After the reload, opened "Assistant profile" inside Personalization.',
+          expect: 'The saved assistant name is still there, so saving one section did not undo the other.',
+        }),
+      });
 
       // The read-aloud choice is kept in this browser.
       current = 'settings:themes';
@@ -251,7 +280,12 @@ test(
       await readWhole.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
       assert.equal(await readWhole.getAttribute('aria-checked'), 'true', 'the read-aloud choice is still on');
       await page.screenshot({
-        path: await featureShotPath({ surface: current, step: 'read-whole-kept-after-reload' }),
+        path: await featureShotPath({
+          surface: current,
+          step: 'read-whole-kept-after-reload',
+          did: 'Turned on reading whole messages aloud in Appearance, reloaded the app and opened Appearance again.',
+          expect: 'The switch is still on.',
+        }),
       });
 
       assert.deepEqual(failures, [], 'no request failed and no page error was raised on any panel');

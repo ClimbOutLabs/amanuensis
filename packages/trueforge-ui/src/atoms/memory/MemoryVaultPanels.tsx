@@ -47,7 +47,7 @@ function summaryFailedTime(failedAt: string | null): string | null {
 /** Why a summary failed, in plain words, and the one thing to do about that cause. */
 const SUMMARY_FAILURE_WORDS: Record<MemoryVaultSummaryFailureCause, string> = {
   model_too_slow:
-    'The model took too long to answer. If this keeps happening, choose a faster Background model in Settings.',
+    'The model took too long to answer. If this keeps happening, check that the model is not busy with other work, or choose a faster Background model in Settings.',
   model_error: 'The model gave an error instead of an answer. Check that the model is running.',
   model_not_found: 'The model that makes summaries could not be found. Choose a Background model in Settings.',
   answer_unusable:
