@@ -1770,6 +1770,34 @@ describe('a skill that reaches a site on the internet', () => {
   }
 
   it(
+    'a loop a skill writes asks every time with its exact text, and runs exactly that once allowed',
+    async () => {
+      const chatId = await startChat();
+      const loop = `for day in mon tue; do ${SKILL_FETCH_COMMAND} ${SKILL_SITE}; done > notes.txt`;
+      const askToRun = () => {
+        server.model.next({ toolArguments: { command: loop, purpose: 'inspect', intent: 'Fetch the notes.' } });
+        return runTurn({ server, chatId, input: ask('exec') });
+      };
+      const runsBefore = sandbox.commands.filter(command => command === loop).length;
+
+      const card = onlyCard(await askToRun());
+      expect(card.tier3_card?.parsed_command).toBe(loop);
+      expect(card.can_always_allow).toBe(false);
+      expect(card.can_chat_allow).toBe(false);
+      const refused = await sendTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
+      expect(refused.status).toBe(422);
+      expect(sandbox.commands.filter(command => command === loop).length).toBe(runsBefore);
+
+      await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
+      expect(sandbox.commands.filter(command => command === loop).length).toBe(runsBefore + 1);
+
+      // Allowing it once is not a standing grant: the same loop asks again.
+      expect(onlyCard(await askToRun()).can_always_allow).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
     'asks before the skill reaches its site for the first time, and reaches nothing until then',
     async () => {
       const chatId = await startChat();
