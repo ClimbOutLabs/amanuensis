@@ -635,6 +635,72 @@ describe('a page Aman opens in its browser', () => {
     TURN_TIMEOUT_MS,
   );
 
+  /** A chat where Aman has read the open page, so a page it opens next was not given by the person. */
+  async function chatThatReadAPage(): Promise<string> {
+    const chatId = await createChat(server);
+    server.model.next({ toolArguments: {} });
+    expect(cards(await runTurn({ server, chatId, input: ask('browser_read') }))).toEqual([]);
+    return chatId;
+  }
+
+  it(
+    'a "no" to opening a page refuses that site for the rest of the chat, even after Aman restarts, and a new chat asks again',
+    async () => {
+      const chatId = await chatThatReadAPage();
+      const [card, ...others] = await open({ chatId, url: 'https://news.example/first-story' });
+      expect(others).toEqual([]);
+      if (card === undefined) {
+        throw new Error('the first open asked nothing');
+      }
+      await runTurn({
+        server,
+        chatId,
+        input: [
+          {
+            type: 'user.tool_approval',
+            thread_id: card.thread_id,
+            tool_call_id: card.id,
+            approval: { status: 'deny', reason: 'Not now' },
+          },
+        ],
+      });
+      expect(opened).toEqual([]);
+
+      await server.restart();
+      expect(await open({ chatId, url: 'https://news.example/second-story' })).toEqual([]);
+      expect(opened).toEqual([]);
+
+      const fresh = await chatThatReadAPage();
+      expect(await open({ chatId: fresh, url: 'https://news.example/first-story' })).toHaveLength(1);
+      expect(opened).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    '"Always allow this site" opens other pages on that site in this chat with no card, and another site or another chat still asks',
+    async () => {
+      const chatId = await chatThatReadAPage();
+      const [card, ...others] = await open({ chatId, url: 'https://shop.example/opening-hours' });
+      expect(others).toEqual([]);
+      expect(card?.chat_grant_scope).toBe('site');
+      if (card === undefined) {
+        throw new Error('the first open asked nothing');
+      }
+      expect(cards(await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) }))).toEqual([]);
+      expect(opened).toEqual(['https://shop.example/opening-hours']);
+
+      expect(await open({ chatId, url: 'https://shop.example/delivery' })).toEqual([]);
+      expect(opened).toEqual(['https://shop.example/opening-hours', 'https://shop.example/delivery']);
+
+      expect(await open({ chatId, url: 'https://market.example/stalls' })).toHaveLength(1);
+      const other = await chatThatReadAPage();
+      expect(await open({ chatId: other, url: 'https://shop.example/delivery' })).toHaveLength(1);
+      expect(opened).toHaveLength(2);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
   describe('the note Aman keeps of its own reply', () => {
     const summarize = configuration.MEMORY_SUMMARIZE;
 

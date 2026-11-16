@@ -344,7 +344,7 @@
     },
     "route:memoryVault": {
       "set": "memory",
-      "tests": []
+      "tests": ["packages/frontend/tests/memoryPanelPageLines.browser.test.ts"]
     },
     "route:model": {
       "set": "models",
@@ -384,7 +384,7 @@
     },
     "route:recallExclusion": {
       "set": "memory",
-      "tests": []
+      "tests": ["packages/frontend/tests/memoryPanelPageLines.browser.test.ts"]
     },
     "route:reminder": {
       "set": "reminders",
@@ -843,7 +843,6 @@
     "route:memoryRecall",
     "route:memoryScreen",
     "route:memorySummarize",
-    "route:memoryVault",
     "route:model",
     "route:notesFolder",
     "route:permission",
@@ -852,7 +851,6 @@
     "route:personalization",
     "route:privateChat",
     "route:reach",
-    "route:recallExclusion",
     "route:reminder",
     "route:repository",
     "route:runCode",
