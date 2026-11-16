@@ -4069,11 +4069,23 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // MCP hints: destructive or open-world escalate to Tier 3, never lower.
+  const destructiveHint = action.mcp_hints.destructive_hint === true;
+  const openWorldHint = action.mcp_hints.open_world_hint === true;
+  const readOnlyHint = action.mcp_hints.read_only_hint === true;
   // A call no connector family claims, which carries words or an id and shows no destination the
-  // card can verify, is refused before the hints: a hint only escalates, so an open-world or
-  // destructive hint never turns this refusal into a card. A name ranked destructive, install or
-  // calendar change keeps its own card below, which shows the arguments in full.
-  if (extraction.payload_unverifiable && !isDestructive && !isInstall && !isCalendarChangeToolName(action.tool_name)) {
+  // card can verify, is a send to an unseen place: refused, and an open-world hint never turns that
+  // into a card. A tool declared read-only is not a send, so it keeps its card; what it carries out
+  // is the outbound guard's to check. A destructive hint alone, or a name ranked destructive,
+  // install or calendar change, keeps its own card below, which shows the arguments in full.
+  if (
+    extraction.payload_unverifiable &&
+    !readOnlyHint &&
+    !(destructiveHint && !openWorldHint) &&
+    !isDestructive &&
+    !isInstall &&
+    !isCalendarChangeToolName(action.tool_name)
+  ) {
     return autoDenyDecision({
       reason: 'destination_unverifiable',
       reason_detail:
@@ -4082,10 +4094,6 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // MCP hints: destructive or open-world escalate to Tier 3, never lower.
-  const destructiveHint = action.mcp_hints.destructive_hint === true;
-  const openWorldHint = action.mcp_hints.open_world_hint === true;
-  const readOnlyHint = action.mcp_hints.read_only_hint === true;
   if (destructiveHint || (openWorldHint && !readOnlyHint)) {
     const { fields } = extraction;
     // The external-service sentence wins: it is the more specific warning about where this goes.

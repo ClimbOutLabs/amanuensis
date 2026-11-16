@@ -291,6 +291,14 @@ describe('an open-world hint does not turn the refusal into a card', () => {
     expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
   });
 
+  it('refuses an open-world call that is not read-only and carries words with no destination', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'forecast', params: { city: 'Paris' }, hints: { open_world_hint: true } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
   it('still asks when the same hinted text message names the number it goes to', async () => {
     const decision = await classifyTier(
       connectorCall({
@@ -302,6 +310,58 @@ describe('an open-world hint does not turn the refusal into a card', () => {
     );
     expect(decision).toMatchObject({ tier: 3, auto_deny: null });
     expect(decision.card?.recipient).toBe('+15551234567');
+  });
+});
+
+describe('a tool declared read-only is not a send, so it cards, not refused', () => {
+  // What a read-only tool carries out is the outbound guard's to check, not this rule's.
+  it('cards a read-only open-world forecast that carries a city', async () => {
+    const decision = await classifyTier(
+      connectorCall({
+        tool_name: 'forecast',
+        params: { city: 'Paris' },
+        hints: { read_only_hint: true, open_world_hint: true },
+      }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  it('cards a read-only open-world lookup that carries a query', async () => {
+    const decision = await classifyTier(
+      connectorCall({
+        tool_name: 'web_lookup',
+        params: { query: 'tallest building in Lisbon' },
+        hints: { read_only_hint: true, open_world_hint: true },
+      }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+});
+
+describe('a destructive hint alone keeps its own card', () => {
+  it('cards a workflow run hinted destructive that carries a query', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'run_workflow', params: { query: 'oslo' }, hints: { destructive_hint: true } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+});
+
+describe('decision: an unhinted call that carries words and shows no destination is refused', () => {
+  // The base rule of this change, kept as decided: with no hints, nothing says the call stays
+  // inside the connector, so words with nowhere the card can show are refused, not asked about.
+  it('refuses translate carrying text with no hints', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'translate', params: { text: 'Bonjour tout le monde.' } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
   });
 });
 

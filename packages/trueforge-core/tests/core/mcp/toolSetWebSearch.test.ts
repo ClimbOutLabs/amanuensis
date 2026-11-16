@@ -142,12 +142,7 @@ function harness(options: {
     sentinel: host,
     searchProvider:
       options.searchProvider === true
-        ? {
-            tools: options.searchTools ?? [],
-            page_read_tools: options.pageReadTools ?? [],
-            plumbing_fields: options.plumbingFields ?? [],
-            served_in_process: false,
-          }
+        ? { tools: options.searchTools ?? [], page_read_tools: options.pageReadTools ?? [], plumbing_fields: options.plumbingFields ?? [], served_in_process: false }
         : undefined,
   });
   return { toolSet, host, audit, dispatched };
@@ -216,15 +211,14 @@ describe('the designated search provider', () => {
     expect((await h.toolSet.toolCallInfo({ name: 'lookup_and_log', arguments: { query: 'weather' } })).tier).toBe(3);
   });
 
-  it('refuses the same tool on a connector that is not designated, since its query has no verifiable destination', async () => {
+  it('leaves the same tool on a connector that is not designated asking', async () => {
     const h = harness({ searchProvider: false, serverName: 'web_search' });
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'weather in Oslo' } });
     expect(info.tier).toBe(3);
-    expect(info.is_approval_required).toBe(false);
-    expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
+    expect(info.is_approval_required).toBe(true);
     expect(info.silent_search_query).toBeUndefined();
     const response = await runSearch(h, 'weather in Oslo');
-    expect(isApprovalRequiredResponse(response)).toBe(false);
+    expect(isApprovalRequiredResponse(response)).toBe(true);
     expect(h.dispatched).toEqual([]);
   });
 
@@ -825,8 +819,9 @@ describe('a write-capable connector designated as the search provider', () => {
 
   it('keeps every unannotated or write tool off the silent path on the designated provider', async () => {
     const h = harness({ serverName: 'github', searchProvider: true, tools });
-    // Writes a connector family claims keep the approval path: they ask, with a card that shows the arguments.
-    for (const name of ['push_files', 'create_or_update_file']) {
+    // Writes a connector family claims, and a write escalated by its own destructive hint,
+    // keep the approval path: they ask, with a card that shows the arguments.
+    for (const name of ['push_files', 'create_or_update_file', 'run_workflow']) {
       const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
       expect(info.tier).toBe(3);
       expect(info.is_approval_required).toBe(true);
@@ -835,9 +830,8 @@ describe('a write-capable connector designated as the search provider', () => {
       expect(isApprovalRequiredResponse(response)).toBe(true);
     }
     // An unclaimed write that carries words and names no destination is refused outright
-    // under the unverifiable-destination rule, even one with its own destructive hint: a hint
-    // only escalates. Either way, nothing here ever runs silently.
-    for (const name of ['create_issue', 'add_issue_comment', 'merge_pull_request', 'fork_repository', 'run_workflow']) {
+    // under the unverifiable-destination rule. Either way, nothing here ever runs silently.
+    for (const name of ['create_issue', 'add_issue_comment', 'merge_pull_request', 'fork_repository']) {
       const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
       expect(info.tier).toBe(3);
       expect(info.is_approval_required).toBe(false);
@@ -849,7 +843,7 @@ describe('a write-capable connector designated as the search provider', () => {
     expect(h.dispatched).toEqual([]);
     // The carded writes were never run, so they leave no audit row. Each refusal is audited
     // as an auto-denied call, once when the call is classified and once at dispatch.
-    expect(h.audit).toHaveLength(10);
+    expect(h.audit).toHaveLength(8);
     for (const row of h.audit) {
       expect(row).toMatchObject({ outcome: 'auto_denied', auto_deny_reason: 'destination_unverifiable', tier: 3 });
     }
@@ -863,8 +857,6 @@ describe('a write-capable connector designated as the search provider', () => {
         'fork_repository',
         'merge_pull_request',
         'merge_pull_request',
-        'run_workflow',
-        'run_workflow',
       ].sort(),
     );
   });
@@ -1021,17 +1013,17 @@ describe('approval cards beside the designated provider', () => {
     expect(h.audit).toEqual([expect.objectContaining({ tier: 1, outcome: 'logged' })]);
   });
 
-  it('refuses the same call on a connector that is not designated, since the query has no verifiable destination', async () => {
-    // The held designated search below shows the card half: the same payload, carded and
-    // bound to its connector, when the host's own search flow owns the call. On an ordinary
-    // connector nothing owns it, and a query with nowhere verifiable to go is refused.
+  it('cards the same call on a connector that is not designated, with where it goes and what it sends', async () => {
     const h = harness({ searchProvider: false });
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
     expect(info.tier).toBe(3);
-    expect(info.tier3_card ?? null).toBeNull();
-    expect(info.is_approval_required).toBe(false);
-    expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
-    expect(info.approval_token_id).toBeNull();
+    expect(info.tier3_card?.destination_host).toBe('search.example.com');
+    expect(info.tier3_card?.outbound_text).toContain(`query: ${query}`);
+
+    const connector = h.toolSet.resolveConnector();
+    expect(await boundTokenAction(h, info.approval_token_id)).toBe(
+      actionIdFor({ tool_name: 'lookup', canonical_params: { query }, connector }),
+    );
   });
 
   it('cards a held designated search with the same payload, bound to the connector it will run on', async () => {
