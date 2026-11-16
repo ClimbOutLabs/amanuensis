@@ -7,6 +7,7 @@
 import { McpConnectionError } from '@truefoundry/trueforge-core/core';
 import { isHomeAssistantLiveContextTool } from '@truefoundry/trueforge-core/core/homeassistant/toolContract';
 import { isPrivateNetworkHost } from '../config';
+import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { HomeAssistantCheckResult } from '../schemas/homeAssistant';
 
 /** The path Home Assistant's Model Context Protocol Server integration serves its SSE endpoint on. */
@@ -156,4 +157,38 @@ export async function checkHomeAssistant(client: HomeAssistantProbeClient): Prom
   } catch (error) {
     return { status: 'failed', ...classifyHomeAssistantFailure(error) };
   }
+}
+
+/**
+ * Stores the change tools a Home Assistant server declared in its own tool list on its
+ * connector record, where standing-grant eligibility reads them. Nothing is written when the
+ * record has moved to another address since the list was read, or already holds this list.
+ */
+export async function storeHomeAssistantDeclaredChangeTools({
+  store,
+  tenant_id,
+  name,
+  url,
+  declared_change_tools,
+}: {
+  store: Pick<IMcpServerStore, 'getServer' | 'upsertServer'>;
+  tenant_id: string;
+  name: string;
+  url: string;
+  declared_change_tools: readonly string[];
+}): Promise<void> {
+  const record = await store.getServer({ tenant_id, name });
+  if (record?.manifest.type !== 'remote' || record.manifest.url !== url) {
+    return;
+  }
+  const stored = record.manifest.declared_change_tools;
+  if (stored !== undefined && JSON.stringify(stored) === JSON.stringify(declared_change_tools)) {
+    return;
+  }
+  await store.upsertServer({
+    tenant_id,
+    name: record.name,
+    manifest: { ...record.manifest, declared_change_tools: [...declared_change_tools] },
+    first_party: record.first_party,
+  });
 }

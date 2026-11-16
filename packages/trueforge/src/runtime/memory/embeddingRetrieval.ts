@@ -1,6 +1,6 @@
 /**
  * Meaning-based recall for the markdown memory backend. When the vector leg
- * cannot contribute — model still downloading, backfill incomplete, no peaked
+ * cannot contribute — model missing or still loading, backfill incomplete, no peaked
  * signal, or any error — it degrades to "not available" and recall behaves
  * exactly as it did before embeddings existed. A peak gate (top-1 similarity
  * minus the corpus mean) rejects flat score distributions; peaked vector hits
@@ -150,7 +150,7 @@ export function orderVectorFirst({
   return ordered;
 }
 
-export type EmbeddingSubsystemState = 'starting' | 'downloading' | 'backfilling' | 'ready' | 'unavailable';
+export type EmbeddingSubsystemState = 'starting' | 'backfilling' | 'ready' | 'unavailable';
 
 export interface EmbeddingStatus {
   state: EmbeddingSubsystemState;
@@ -255,14 +255,6 @@ export class EmbeddingSubsystem {
       return {
         state: 'ready',
         detail: 'Smart search is on — memories are found by meaning as well as keywords.',
-        indexedEntries,
-      };
-    }
-    if (phase === 'downloading') {
-      return {
-        state: 'downloading',
-        detail:
-          'Downloading the memory search model once (about 120 MB) in the background. Memory search keeps working with keywords until it finishes.',
         indexedEntries,
       };
     }

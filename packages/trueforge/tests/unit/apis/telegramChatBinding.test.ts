@@ -7,7 +7,12 @@ import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { TelegramStore } from '../../../src/db/telegramStore';
 import { telegramChoiceKey } from '../../../src/runtime/telegram/telegramChatControls';
-import { ALT_MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import {
+  ALT_MODEL_FQN,
+  MODEL_FQN,
+  startApprovalTestServer,
+  type ApprovalTestServer,
+} from '../../fixtures/approvalTestServer';
 
 const TIMEOUT_MS = 60_000;
 const TENANT = 'default';
@@ -167,6 +172,54 @@ describe('the Telegram chat', () => {
       await send('Thanks');
       expect(await chatInUse()).toBe(fresh);
       expect(botTexts.filter(text => text === TELEGRAM_EARLIER_CHAT_DELETED)).toHaveLength(1);
+    },
+    TIMEOUT_MS,
+  );
+
+  /** Types a message in the app, the way the chat screen does, and waits for the answer. */
+  const typeInApp = async (sessionId: string, content: string) => {
+    const response = await server.request(`/api/v1/sessions/${sessionId}/turns`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: [{ type: 'user.message', content }], stream: true }),
+    });
+    expect(response.status).toBe(200);
+    await response.text();
+  };
+  const owedFromApp = async () =>
+    (await new TelegramStore(server.db()).listPendingReplies({ limit: 50 })).filter(reply => reply.origin === 'app');
+
+  it(
+    "owes Telegram a copy of what is typed in the app's Telegram chat, and nothing from any other chat",
+    async () => {
+      // A fresh chat, so no answer to an earlier Telegram message is still running in it.
+      await send('/new');
+      const telegramChat = await chatInUse();
+      await typeInApp(telegramChat, 'Typed in the browser');
+      expect(await owedFromApp()).toMatchObject([
+        { session_id: telegramChat, chat_id: String(TELEGRAM_USER_ID), origin: 'app' },
+      ]);
+
+      const created = await server.request('/api/v1/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agent: { spec: { model: { name: MODEL_FQN } } } }),
+      });
+      expect(created.status).toBe(201);
+      const body: unknown = await created.json();
+      const otherChat =
+        typeof body === 'object' &&
+        body !== null &&
+        'data' in body &&
+        typeof body.data === 'object' &&
+        body.data !== null &&
+        'id' in body.data &&
+        typeof body.data.id === 'string'
+          ? body.data.id
+          : '';
+      expect(otherChat).not.toBe('');
+      await typeInApp(otherChat, 'A chat that stays in the app');
+      expect((await owedFromApp()).map(reply => reply.session_id)).toEqual([telegramChat]);
     },
     TIMEOUT_MS,
   );

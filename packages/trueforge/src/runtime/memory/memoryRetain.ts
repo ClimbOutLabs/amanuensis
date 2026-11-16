@@ -311,7 +311,10 @@ async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory>
   if (summarize === undefined) {
     return decidePersonFacts(params);
   }
-  const [person, notes] = await Promise.all([decidePersonFacts(params), decideNotes({ params, summarize })]);
+  // One after the other: both ask the same model, and a model server that shares its speed between
+  // requests would run each at half speed, so both could run out of time together.
+  const person = await decidePersonFacts(params);
+  const notes = await decideNotes({ params, summarize });
   if (notes.length === 0) {
     return person;
   }

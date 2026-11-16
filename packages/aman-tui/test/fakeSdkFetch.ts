@@ -124,7 +124,7 @@ function parseBody(init: RequestInit | undefined): unknown {
 
 export function makeFakeSdkFetch(script: FakeSdkScript): { fetcher: typeof fetch; calls: RecordedSdkCall[] } {
   const calls: RecordedSdkCall[] = [];
-  const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     const method = init?.method ?? 'GET';
     const path = url.pathname;
@@ -173,5 +173,5 @@ export function makeFakeSdkFetch(script: FakeSdkScript): { fetcher: typeof fetch
       headers: { 'Content-Type': 'application/json' },
     });
   };
-  return { fetcher: fetcher as typeof fetch, calls };
+  return { fetcher, calls };
 }

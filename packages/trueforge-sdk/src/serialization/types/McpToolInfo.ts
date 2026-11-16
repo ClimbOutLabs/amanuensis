@@ -17,6 +17,7 @@ export const McpToolInfo: core.serialization.ObjectSchema<serializers.McpToolInf
         name: core.serialization.string(),
         openWorldHint: core.serialization.property("open_world_hint", core.serialization.boolean().optional()),
         readOnlyHint: core.serialization.property("read_only_hint", core.serialization.boolean().optional()),
+        requiresNetwork: core.serialization.property("requires_network", core.serialization.boolean().optional()),
         serverId: core.serialization.property("server_id", core.serialization.string()),
         serverName: core.serialization.property("server_name", core.serialization.string()),
         silentSearchQuery: core.serialization.property("silent_search_query", core.serialization.string().optional()),
@@ -32,6 +33,7 @@ export declare namespace McpToolInfo {
         name: string;
         open_world_hint?: boolean | null;
         read_only_hint?: boolean | null;
+        requires_network?: boolean | null;
         server_id: string;
         server_name: string;
         silent_search_query?: string | null;

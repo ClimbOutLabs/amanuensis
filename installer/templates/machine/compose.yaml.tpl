@@ -23,12 +23,9 @@ services:
     pids_limit: 256
     environment:
       AMAN_STT_CPU_THREADS: ${AMAN_STT_CPU_THREADS:-4}
-      AMAN_STT_MODEL_DIR: /data/stt-cache
       # The shared secret every call must carry, from the machine settings file; each instance's app
       # holds a copy of the same value.
       SPEECH_SECRET: ${SPEECH_SECRET:?missing from .env}
-    volumes:
-      - stt-cache:/data/stt-cache
     networks:
       - machine
     restart: unless-stopped
@@ -57,10 +54,6 @@ services:
 @@IF_TTS@@    networks:
 @@IF_TTS@@      - voice
 @@IF_TTS@@    restart: unless-stopped
-
-volumes:
-  stt-cache:
-    name: aman_stt_cache
 
 networks:
   machine:

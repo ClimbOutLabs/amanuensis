@@ -50,6 +50,8 @@ A provider marked **Managed by server environment** is written by the server fro
 
 Use a custom provider for vLLM, Ollama, a company gateway, or any other OpenAI-compatible API. Custom providers are not in the catalog, so you add them yourself.
 
+Some providers, such as Meta's Muse models, check tool definitions strictly. Aman can work with them: a built-in tool is marked strict only when every one of its fields is required, so a tool with optional fields is sent as a normal tool and the request is not refused.
+
 1. Open **Settings, Models**, and click **Add custom provider**.
 2. Give it a name. You can't change the name later.
 3. Fill in the base URL. It is usually the address that ends in `/v1`, such as `http://localhost:11434/v1`.

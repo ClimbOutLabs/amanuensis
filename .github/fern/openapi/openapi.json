@@ -483,6 +483,17 @@
             "description": "Whether the user may approve this tool for the rest of the chat.",
             "type": "boolean"
           },
+          "chat_grant_scope": {
+            "description": "What a chat approval on this call covers when it reaches past the one call: the whole site, for a browser open the user vouched for. Null when a chat approval binds the call itself.",
+            "enum": [
+              "site",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "expires_at": {
             "description": "ISO 8601 time after which a held action can no longer be approved.",
             "type": "string"
@@ -1622,6 +1633,16 @@
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
+          },
+          "page_read_tools": {
+            "description": "Page-read tools of this server that run without asking when it is the web search provider.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
           },
           "search_provider": {
             "description": "When true, adding this preset offers to make it the web search provider.",
@@ -3061,7 +3082,7 @@
       "DeleteShownMemoryResult": {
         "properties": {
           "deleted": {
-            "description": "How many stored copies were deleted.",
+            "description": "How many stored copies and page lines were deleted.",
             "minimum": 1,
             "type": "integer"
           }
@@ -7249,6 +7270,10 @@
             "description": "MCP readOnlyHint: the tool does not modify anything in its environment.",
             "type": "boolean"
           },
+          "requires_network": {
+            "description": "The tool needs the network, as its own registration declares. Set by the host from the registration, never from tool arguments.",
+            "type": "boolean"
+          },
           "server_id": {
             "description": "Internal MCP server id.",
             "type": "string"
@@ -10578,6 +10603,13 @@
           "mail_problem": {
             "$ref": "#/components/schemas/MailProblem"
           },
+          "mail_sender_confirmation": {
+            "description": "Whether the mail source read from reports sender confirmation, as the source states about itself. Null until mail has been checked once, or when the last checks predate the fact being recorded.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "mail_source": {
             "$ref": "#/components/schemas/MailSourceKind"
           },
@@ -10617,7 +10649,8 @@
           "max_levels",
           "mail_problem",
           "calendar_problem",
-          "mail_source"
+          "mail_source",
+          "mail_sender_confirmation"
         ],
         "type": "object"
       },
@@ -10848,6 +10881,16 @@
           "auth": {
             "$ref": "#/components/schemas/MCPServerManifestAuth"
           },
+          "declared_change_tools": {
+            "description": "Bare names of the tools this server itself declared as changing things, captured from its own tool list at connect time. Standing grants may cover only these. Set by the server; a value sent is replaced.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
           "description": {
             "description": "Concise summary of what this MCP server provides.",
             "minLength": 1,
@@ -10856,12 +10899,36 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "page_read_tools": {
+            "description": "The page-read tools of the web search provider, captured from the server’s own tool list when the person designated it. What they return is recorded as page text. Set by the server; a value sent is replaced.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "search_in_process": {
+            "description": "When true, the host serves this connector’s search itself, in process. Set by the server when the person designates the provider the host serves that way; a value sent is replaced.",
+            "type": "boolean"
+          },
+          "search_plumbing_fields": {
+            "description": "Argument names that are the search provider’s own bookkeeping, not the person’s text. Set by the server; a value sent is replaced.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "search_provider": {
             "description": "When true, this connector is the web search provider: its read-only tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it.",
             "type": "boolean"
           },
           "search_tools": {
-            "description": "Tools that run without asking as the web search provider even when the server does not declare them read-only. Set by the server for a known provider; a value sent is replaced.",
+            "description": "The search tools of the web search provider, captured from the server’s own tool list when the person designated it. Their results are recorded as search hits. Set by the server; a value sent is replaced.",
             "items": {
               "maxLength": 128,
               "minLength": 1,
@@ -12233,6 +12300,13 @@
             },
             "type": "array"
           },
+          "approval_refusals": {
+            "description": "Server-derived refusals from a \"no\" to a browser open or click, kept for the rest of this chat.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "created_at": {
             "description": "ISO 8601 creation timestamp.",
             "type": "string"
@@ -12292,6 +12366,7 @@
           "created_at",
           "updated_at",
           "approval_grants",
+          "approval_refusals",
           "metrics",
           "metadata",
           "source",
@@ -14290,7 +14365,7 @@
             "$ref": "#/components/schemas/Tier3CalendarEventBefore"
           },
           "calendar": {
-            "description": "The Google account whose main calendar is written.",
+            "description": "The account whose main calendar is written, as its own service names it.",
             "type": "string"
           },
           "description": {
@@ -14301,9 +14376,10 @@
             "description": "How long the event lasts, in plain words.",
             "type": "string"
           },
-          "guests_emailed": {
-            "description": "True when Google emails the guests about this.",
-            "type": "boolean"
+          "guests_line": {
+            "default": "",
+            "description": "What the card tells the person about the guests being emailed, in the finished words of the review that built the card. Empty when the event has no guests.",
+            "type": "string"
           },
           "location": {
             "description": "Place; empty when none.",
@@ -14341,7 +14417,6 @@
           "location",
           "description",
           "attendees",
-          "guests_emailed",
           "one_of_repeating",
           "before"
         ],
@@ -14429,7 +14504,7 @@
             "type": "boolean"
           },
           "mail_from": {
-            "description": "For a card on the Email connector: the account the message goes from. Otherwise null.",
+            "description": "For a mail card: the account the message goes from. Otherwise null.",
             "type": [
               "string",
               "null"
@@ -14995,6 +15070,10 @@
               "null"
             ]
           },
+          "calendar_unread": {
+            "description": "True when a calendar is connected but none of its accounts could be read just now. The day then lists no events and no free time, since neither is known.",
+            "type": "boolean"
+          },
           "due": {
             "description": "Reminders due today or overdue, earliest first.",
             "items": {
@@ -15024,6 +15103,7 @@
         "required": [
           "calendar",
           "free_after",
+          "calendar_unread",
           "due",
           "needs_ok",
           "needs_ok_more",
@@ -16178,6 +16258,10 @@
           },
           "read_only_hint": {
             "description": "MCP readOnlyHint: the tool does not modify anything in its environment.",
+            "type": "boolean"
+          },
+          "requires_network": {
+            "description": "The tool needs the network, as its own registration declares. Set by the host from the registration, never from tool arguments.",
             "type": "boolean"
           },
           "type": {
@@ -20353,7 +20437,7 @@
     },
     "/api/v1/mcp-servers/{name}/home-assistant-check": {
       "post": {
-        "description": "Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.",
+        "description": "Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. The check changes nothing on the server. It does store, on the connector record, which of the listed tools the server itself declares as changes, because standing grants read that. A failed check is a 200 carrying the reason.",
         "parameters": [
           {
             "description": "MCP server name.",
@@ -21663,7 +21747,7 @@
     },
     "/api/v1/memory/vault/delete-shown": {
       "post": {
-        "description": "Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.",
+        "description": "Delete every memory and every page line that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when nothing, or more than one different text, fits the words.",
         "requestBody": {
           "content": {
             "application/json": {

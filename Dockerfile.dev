@@ -21,6 +21,20 @@ RUN corepack enable && pnpm config set store-dir /pnpm/store
 WORKDIR /app
 
 # ---------------------------------------------------------------------------
+# memory-model: memory search model (Xenova/multilingual-e5-small, MIT upstream), fetched from the pinned
+# revision and checked against its SHA-256 (the same pins as EMBEDDING_MODEL_FILES in
+# packages/trueforge/src/runtime/memory/embeddingModel.ts). Its own stage takes no source files, so the layer
+# cache keeps it across code changes and it is fetched again only when a pin changes.
+# ---------------------------------------------------------------------------
+FROM base AS memory-model
+RUN mkdir -p /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx
+ADD --chmod=0644 --checksum=sha256:cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1 https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/config.json /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/config.json
+ADD --chmod=0644 --checksum=sha256:cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1 https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/config.json /opt/aman-models/memory-search/Xenova/multilingual-e5-small/config.json
+ADD --chmod=0644 --checksum=sha256:0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39 https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json
+ADD --chmod=0644 --checksum=sha256:a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer_config.json /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer_config.json
+ADD --chmod=0644 --checksum=sha256:f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193 https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx/model_quantized.onnx /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx/model_quantized.onnx
+
+# ---------------------------------------------------------------------------
 # store: the pnpm store, from the lockfile only (stable when manifests churn).
 # BuildKit cache mounts are omitted: Railway's Metal builder requires
 # `id=s/<service-id>-…` (hardcoded per deploy), which cannot live in a shared
@@ -48,6 +62,7 @@ COPY packages/trueforge/package.json packages/trueforge/package.json
 COPY packages/trueforge-sdk/package.json packages/trueforge-sdk/package.json
 COPY packages/frontend/package.json packages/frontend/package.json
 COPY packages/trueforge-ui/package.json packages/trueforge-ui/package.json
+COPY packages/trueforge-chat/package.json packages/trueforge-chat/package.json
 COPY packages/trueforge-core/scripts packages/trueforge-core/scripts
 COPY packages/trueforge-core/src/core/sandbox/scripts packages/trueforge-core/src/core/sandbox/scripts
 COPY packages/trueforge/scripts packages/trueforge/scripts
@@ -86,6 +101,7 @@ COPY packages/trueforge-sdk packages/trueforge-sdk
 COPY --from=builder /app/packages/trueforge-core/dist packages/trueforge-core/dist
 COPY packages/trueforge-core/src packages/trueforge-core/src
 COPY packages/trueforge-ui packages/trueforge-ui
+COPY packages/trueforge-chat packages/trueforge-chat
 # Vite alone peaks above 3 GB; the cap trades build time for staying inside a 6 GB Docker VM.
 ENV NODE_OPTIONS=--max-old-space-size=3072
 COPY packages/frontend packages/frontend
@@ -164,7 +180,14 @@ RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy \
 ENV MEMORY_MARKDOWN_DIR=/data/memory \
   PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
   APP_DATA_DIR=/data/app \
-  VOICE_VAD_MODEL_DIR=/opt/aman-voice
+  VOICE_VAD_MODEL_DIR=/opt/aman-voice \
+  MEMORY_EMBEDDINGS_MODEL_DIR=/opt/aman-models/memory-search \
+  HF_HUB_OFFLINE=1 \
+  HF_HUB_DISABLE_TELEMETRY=1
+
+# The memory search model from its cached stage. Owned by the runtime user because the server checks that
+# the model folder is writable before it loads.
+COPY --from=memory-model --chown=10001:10001 /opt/aman-models /opt/aman-models
 
 # Voice mode's listening model (Silero VAD v5.1.2, MIT), fetched at build time and checked against its
 # SHA-256, so the build fails on any other file and the running server never downloads it. The server

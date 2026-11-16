@@ -43,6 +43,7 @@ Options:
   --history <file>       Score history file to compare against and add this run to
   --max-drop <points>    Fail when a model's pass rate falls by more than this many points (default ${String(DEFAULT_MAX_DROP_POINTS)})
   --out <dir>            Output folder (default eval-results/<label>-<time>/)
+  --skills               Also add, run and remove skills. Needs an instance started with a sandbox and AMAN_EVAL_SKILLS=true
   -h, --help             Show this help
 
 Sign-in: put TRUEFORGE_TOKEN=<token> in .env.eval-tokens at the repo root, or set it in the environment.
@@ -73,6 +74,7 @@ export function parseModelArgs(argv) {
         history: { type: 'string' },
         'max-drop': { type: 'string' },
         out: { type: 'string' },
+        skills: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
     });
@@ -138,6 +140,7 @@ export function parseModelArgs(argv) {
     historyPath: values.history,
     maxDrop,
     outDir: values.out,
+    skills: values.skills === true,
   };
 }
 
@@ -238,6 +241,7 @@ export async function main({
       temperature: args.temperature,
       runs: args.runs,
       label: args.label,
+      skills: args.skills,
       outDir,
       generatedAt: now,
       pollIntervalMs,

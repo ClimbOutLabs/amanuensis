@@ -4,9 +4,18 @@
 	auto_https off
 	# Browsers opened by address send no server name; the one certificate lists every address.
 	default_sni @@DEFAULT_NAME@@
-	# No advertised HTTP/3: the front end is only published over TCP.
+	# No advertised HTTP/3: the front end is only published over TCP. Other devices reach it through the instance's lan
+	# service, which begins each connection with the visitor's address. Only the instance's own containers can reach
+	# these ports, and a connection from this computer itself carries no such line and is taken as it is.
 	servers {
 		protocols h1 h2
+		listener_wrappers {
+			proxy_protocol {
+				timeout 5s
+				allow 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+			}
+			tls
+		}
 	}
 }
 
@@ -47,6 +56,6 @@ http://:@@HTTP_IN@@ {
 		redir https://{http.request.host}:@@HTTPS_PORT@@{uri} 308
 	}
 	handle {
-		respond "This address is not one Aman is set up for." 421
+		respond "You opened Aman at {http.request.host}, which is not one of its addresses. If you typed it in yourself, run this on the computer that runs Aman to allow it: aman address add {http.request.host}" 421
 	}
 }

@@ -315,7 +315,7 @@ export const deleteShownMemoryRoute = createRoute({
   tags: [OpenApiTag.CAPABILITIES],
   summary: 'Delete a memory by the words a chat showed',
   description:
-    'Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.',
+    'Delete every memory and every page line that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when nothing, or more than one different text, fits the words.',
   'x-fern-sdk-group-name': ['memory', 'vault'],
   'x-fern-sdk-method-name': 'delete_shown',
   request: {

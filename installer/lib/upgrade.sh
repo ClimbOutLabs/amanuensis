@@ -94,15 +94,6 @@ upgrade_health_gate() {
   done
 }
 
-# Tailscale serve keeps trying for each port it is set up for, so it takes a port of an instance the moment the upgrade
-# stops the instance, and the new version and the rollback would both fail to start. The app port is never moved by
-# itself, so one Tailscale wants stops the upgrade before anything changes. An https port is moved when the instance is
-# drawn again, after the backup and the build.
-upgrade_ports_ready() {
-  local name
-  for name in $(reg_names); do instance_tailscale_port_check "$name"; done
-}
-
 # Backs up every instance that has data, then builds what is missing. Touches nothing that is running, so a failed
 # build needs no rollback.
 upgrade_prepare() {
@@ -244,6 +235,22 @@ upgrade_move_to_https() { # name
   UPGRADE_MOVED="$UPGRADE_MOVED $1"
 }
 
+# Reads the addresses of every instance open on the network again when they differ from what this version finds, so
+# each one answers only at the addresses this version listens on. A list an older version wrote is never carried over: an address it found by itself that this
+# version leaves out stops working, and the owner adds it back with aman address add.
+upgrade_refresh_addresses() {
+  local name origins tls_port expected
+  for name in $(reg_names); do
+    origins=$(reg_get "$name" origins)
+    if upgrade_moved "$name" || [ -z "$origins" ]; then continue; fi
+    tls_port=
+    case "$origins" in *https://*) tls_port=$(reg_get "$name" tls_port) ;; esac
+    # shellcheck disable=SC2046 # the extra hosts are checked names without spaces
+    expected=$(network_origin_list "$(reg_get "$name" app_port)" "$tls_port" $(reg_get "$name" extra_hosts))
+    if [ "$expected" != "$origins" ]; then instance_apply_addresses "$name" refresh "$REL_APP_TAG"; fi
+  done
+}
+
 # Whether this upgrade moved the instance to https.
 upgrade_moved() { # name
   case " $UPGRADE_MOVED " in *" $1 "*) return 0 ;; esac
@@ -308,7 +315,6 @@ cmd_upgrade() {
       return 0
     fi
     lock_acquire
-    upgrade_ports_ready
     ui_phase "Building the missing parts again"
     images_ensure
     machine_up "$REL_STT_TAG" "$REL_TTS_TAG"
@@ -318,8 +324,6 @@ cmd_upgrade() {
     for name in $(reg_names); do
       rc=
       if upgrade_moved "$name"; then rc=recreate; fi
-      # Containers rebuilt here restart, so an https port Tailscale serve took is moved first.
-      if tls_port_taken_by_tailscale "$name"; then instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"; fi
       instance_up "$name" ${rc:+"$rc"} || exit 1
     done
     upgrade_old_account_notices
@@ -357,11 +361,11 @@ cmd_upgrade() {
   ui_hint "If anything fails, the old version and the backup are put back."
   ui_phase "Checking and backing up" 2 4
   upgrade_health_gate
-  upgrade_ports_ready
   upgrade_prepare
   for name in $(upgrade_http_instances); do
     upgrade_move_to_https "$name"
   done
+  upgrade_refresh_addresses
   ui_phase "Restarting with the new version" 3 4
   upgrade_switch
   upgrade_old_account_notices

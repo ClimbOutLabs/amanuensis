@@ -17,12 +17,17 @@ export class SkillSiteSandbox extends FakeSandboxProvider {
   readonly network = 'none';
   /** What each fetch printed, in order. */
   readonly fetches: { site: string; output: string }[] = [];
+  /** Every command the sandbox was handed, in order, exactly as it arrived. */
+  readonly commands: string[] = [];
 
   constructor(private readonly gatewaySocketPath: string) {
     super(new Map());
   }
 
   override async exec(params?: SandboxExecParams): Promise<ExecResult> {
+    if (params !== undefined) {
+      this.commands.push(params.command);
+    }
     const site = params?.command.startsWith(`${SKILL_FETCH_COMMAND} `)
       ? params.command.slice(SKILL_FETCH_COMMAND.length + 1).trim()
       : undefined;

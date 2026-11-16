@@ -60,6 +60,12 @@ export const TodaySchema = z
       .string()
       .nullable()
       .describe('The first time after now with no event until the end of the day, or null when the day stays busy.'),
+    calendar_unread: z
+      .boolean()
+      .describe(
+        'True when a calendar is connected but none of its accounts could be read just now. The day ' +
+          'then lists no events and no free time, since neither is known.',
+      ),
     due: z.array(TodayDueReminderSchema).describe('Reminders due today or overdue, earliest first.'),
     needs_ok: z.array(TodayNeedsOkItemSchema).describe('Actions waiting for the person, oldest first.'),
     needs_ok_more: z

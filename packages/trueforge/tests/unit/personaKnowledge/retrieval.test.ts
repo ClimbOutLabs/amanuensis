@@ -17,7 +17,7 @@ const mockModelState = {
 };
 
 const mockModel: {
-  currentPhase: 'idle' | 'loading' | 'downloading' | 'ready' | 'unavailable';
+  currentPhase: 'idle' | 'loading' | 'ready' | 'unavailable';
   ensureReady: () => Promise<boolean>;
   embedQueries: (texts: string[]) => Promise<number[][]>;
   embedPassages: (texts: string[]) => Promise<number[][]>;

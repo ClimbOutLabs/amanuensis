@@ -582,7 +582,7 @@ describe('a calendar card as the calendar writes it, through the voice service c
         location: review.location,
         description: review.description,
         attendees: review.attendees,
-        guests_emailed: review.guests_emailed,
+        guests_line: review.guests_line,
         one_of_repeating: review.one_of_repeating,
         already_created: review.already_created,
         span_days: review.span_days,

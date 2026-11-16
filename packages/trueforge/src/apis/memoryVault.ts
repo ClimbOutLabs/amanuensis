@@ -7,6 +7,7 @@
  * append-only; edits and deletes are recorded as markers, never rewrites.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
+import { execFileRunner } from '@truefoundry/trueforge-core/core';
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
@@ -23,6 +24,7 @@ import {
   putMemoryVaultSharingRoute,
   updateMemoryVaultEntryRoute,
 } from '../routes/memoryVaultRoutes';
+import { localDay } from '../runtime/memory/localDay';
 import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
 import {
   readVaultSharing,
@@ -166,7 +168,11 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const body = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
     const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
-    const outcome = await client.deleteEntriesShownAs({ shownText: body.shown_text, timeoutMs: VAULT_TIMEOUT_MS });
+    const outcome = await client.deleteEntriesShownAs({
+      shownText: body.shown_text,
+      timeoutMs: VAULT_TIMEOUT_MS,
+      pageChange: { runner: execFileRunner, today: localDay({ instant: new Date() }).date, logger: deps.logger },
+    });
     if (!outcome.ok) {
       return c.json({ error: { message: outcome.reason } }, 500);
     }

@@ -94,6 +94,10 @@
       "set": "calendar",
       "tests": []
     },
+    "command:address": {
+      "set": "install",
+      "tests": ["installer/tests/lib/address.test.sh"]
+    },
     "command:adopt": {
       "set": "install",
       "tests": []
@@ -109,6 +113,10 @@
     "command:doctor": {
       "set": "install",
       "tests": ["installer/tests/lib/look.test.sh"]
+    },
+    "command:help": {
+      "set": "install",
+      "tests": ["installer/tests/lib/help.test.sh"]
     },
     "command:import": {
       "set": "install",
@@ -336,7 +344,7 @@
     },
     "route:memoryVault": {
       "set": "memory",
-      "tests": []
+      "tests": ["packages/frontend/tests/memoryPanelPageLines.browser.test.ts"]
     },
     "route:model": {
       "set": "models",
@@ -376,7 +384,7 @@
     },
     "route:recallExclusion": {
       "set": "memory",
-      "tests": []
+      "tests": ["packages/frontend/tests/memoryPanelPageLines.browser.test.ts"]
     },
     "route:reminder": {
       "set": "reminders",
@@ -835,7 +843,6 @@
     "route:memoryRecall",
     "route:memoryScreen",
     "route:memorySummarize",
-    "route:memoryVault",
     "route:model",
     "route:notesFolder",
     "route:permission",
@@ -844,7 +851,6 @@
     "route:personalization",
     "route:privateChat",
     "route:reach",
-    "route:recallExclusion",
     "route:reminder",
     "route:repository",
     "route:runCode",

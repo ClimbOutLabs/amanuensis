@@ -16,7 +16,7 @@ function event(overrides: Partial<SentinelApprovalCalendarEvent> = {}): Sentinel
     location: '',
     description: '',
     attendees: [],
-    guests_emailed: false,
+    guests_line: '',
     one_of_repeating: false,
     before: null,
     ...overrides,
@@ -40,5 +40,34 @@ describe('CalendarEventDetails warnings', () => {
     expect(screen.queryByText(/runs over/)).toBeNull();
     rerender(<CalendarEventDetails event={event()} />);
     expect(screen.queryByText(/runs over/)).toBeNull();
+  });
+});
+
+describe('CalendarEventDetails guest line', () => {
+  it('renders the line the review supplied, word for word, for the Google producer', () => {
+    render(
+      <CalendarEventDetails
+        event={event({ attendees: ['lin@example.com'], guests_line: 'Google will email every guest about this.' })}
+      />,
+    );
+    expect(screen.getByText('Google will email every guest about this.')).toBeTruthy();
+  });
+
+  it('renders a guest line from a service that exists nowhere in the product, with no Google wording', () => {
+    const { container } = render(
+      <CalendarEventDetails
+        event={event({
+          attendees: ['lin@example.com'],
+          guests_line: 'Moonmail will email every guest about this.',
+        })}
+      />,
+    );
+    expect(screen.getByText('Moonmail will email every guest about this.')).toBeTruthy();
+    expect(container.textContent).not.toContain('Google');
+  });
+
+  it('shows no guest line when the event has no guests', () => {
+    const { container } = render(<CalendarEventDetails event={event()} />);
+    expect(container.querySelector('[data-role="calendar-guests-emailed"]')).toBeNull();
   });
 });

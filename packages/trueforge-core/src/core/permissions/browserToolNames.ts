@@ -35,9 +35,14 @@ export const BROWSER_OPEN_SILENT_REASON = 'browser_open';
 /**
  * Reason code for an open that asks because the chat has read other people's content and the person never gave the
  * address: the address itself is sent to the site, so whatever the assistant put in it leaves with the request.
- * Also the code for an open whose link adds details to a site only the assistant's own reply named.
  */
 export const BROWSER_OPEN_UNVOUCHED_REASON = 'browser_open_unvouched';
+
+/**
+ * Reason code for an open whose link adds details to a site only the assistant's own reply named. Such a link always
+ * asks, so this reason is kept out of the site-grant reasons: "Always allow this site" never covers it.
+ */
+export const BROWSER_OPEN_REPLY_LINK_DATA_REASON = 'browser_open_reply_link_data';
 
 /** Reason code for an open that asks because its address carries a private detail, in a chat that read other content. */
 export const BROWSER_OPEN_PRIVATE_DETAIL_REASON = 'browser_open_private_detail';

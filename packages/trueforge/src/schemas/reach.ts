@@ -207,6 +207,12 @@ export const ReachViewSchema = z
     mail_source: MailSourceKindSchema.nullable().describe(
       'Where mail is read from. Null until mail has been checked once.',
     ),
+    mail_sender_confirmation: z
+      .boolean()
+      .nullable()
+      .describe(
+        'Whether the mail source read from reports sender confirmation, as the source states about itself. Null until mail has been checked once, or when the last checks predate the fact being recorded.',
+      ),
   })
   .openapi('ReachView');
 
