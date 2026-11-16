@@ -127,6 +127,14 @@ test('the section lists every stored night and weekly look-over, newest first', 
   assert.match(sweep, /<li>A &lt;button&gt; is cut off\.<\/li>/, 'and lists what was found on it');
   assert.ok(sweep.indexOf('chat-phone.png') < sweep.indexOf('chat-desktop.png'), 'pictures to look at come first');
   assert.match(sweep, /Nothing to look at\./, 'a picture with no finding says so');
+  assert.match(sweep, /<form class="filters" role="search" hidden/, 'the page has a filter bar');
+  assert.match(sweep, /<select data-filter="size">/);
+  assert.match(
+    sweep,
+    /data-result="look" data-size="phone" data-screen="chat"/,
+    'each picture carries what it is filtered by',
+  );
+  assert.match(sweep, /data-search="[^"]*a &lt;button&gt; is cut off\./, 'what was found can be searched, as text');
 });
 
 test('with nothing stored the page still builds and says so', async () => {
@@ -215,6 +223,9 @@ test('a night that stored its details gets a page with a link back, and damaged 
   assert.match(night, /<h1>14 Nov 2026, 15:51 UTC<\/h1>/);
   assert.match(night, /href="\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/"/, 'links back to the list');
   assert.match(night, /<h3>the chat opens<\/h3>/);
+  assert.match(night, /<form class="filters" role="search" hidden/, 'the page has a filter bar');
+  assert.match(night, /<option value="chat">Chat<\/option>/, 'feature areas with pictures can be picked');
+  assert.match(night, /data-search="the chat opens[^"]*" data-result="unknown" data-set="chat"/);
   const sweep = await readFile(path.join(siteDir, SECTION, 'weekly/2026-11-14/index.html'), 'utf8');
   assert.match(sweep, /No notes were saved for this picture\./);
 });

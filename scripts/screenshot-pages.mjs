@@ -76,6 +76,15 @@ details { margin-top: 1.25rem; border: 0.0625rem solid var(--line); border-radiu
 summary { padding: 0.875rem 1.125rem; cursor: pointer; font-weight: 600; }
 pre { margin: 0; padding: 0 1.125rem 1.125rem; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--soft); font: 0.8125rem/1.6 ui-monospace, 'SF Mono', Menlo, monospace; }
 footer { margin-top: 4rem; padding-top: 1.25rem; border-top: 0.0625rem solid var(--line); color: var(--soft); font-size: 0.8125rem; }
+.filters { display: flex; flex-wrap: wrap; align-items: end; gap: 0.75rem; margin-top: 1.75rem; padding: 1rem 1.125rem; border: 0.0625rem solid var(--line); border-radius: 0.875rem; background: var(--card); box-shadow: var(--shadow); }
+.filters label { display: flex; flex-direction: column; gap: 0.25rem; color: var(--accent); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.filters label.grow { flex: 1 1 14rem; }
+.filters input, .filters select { min-height: 2.5rem; padding: 0.375rem 0.75rem; border: 0.0625rem solid var(--line); border-radius: 0.625rem; background: var(--bg); color: var(--ink); font: inherit; font-size: 0.9375rem; letter-spacing: normal; text-transform: none; }
+.filters input:focus, .filters select:focus { outline: 0.125rem solid var(--accent); outline-offset: 0.0625rem; }
+.filters output { margin-left: auto; color: var(--soft); font-size: 0.875rem; }
+.filters button { min-height: 2.5rem; padding: 0.375rem 0.875rem; border: 0.0625rem solid var(--line); border-radius: 62rem; background: transparent; color: var(--ink); font: inherit; font-size: 0.875rem; cursor: pointer; }
+.filters button:hover { border-color: var(--accent); color: var(--accent); }
+[hidden] { display: none !important; }
 @media (max-width: 40rem) { main { padding: 1.5rem 1rem 3rem; } nav { margin-inline: -1rem; padding-inline: 1rem; } .grid, .runs { grid-template-columns: 1fr; } }
 `;
 
@@ -98,9 +107,71 @@ export function tilesHtml(tiles) {
  * One picture with its story. `rows` are `[name, html]` pairs and their html is used as it is, so the
  * caller escapes it.
  */
-export function cardHtml({ file, alt, pill, where, heading, rows, bad }) {
-  return `<figure class="card${bad ? ' bad' : ''}"><a class="shot" href="${escapeHtml(file)}"><img loading="lazy" src="${escapeHtml(file)}" alt="${escapeHtml(alt)}"></a><figcaption><div class="top">${pillHtml(pill)}<span class="where">${escapeHtml(where)}</span></div>${heading === null ? '' : `<h3>${escapeHtml(heading)}</h3>`}<dl>${rows.map(([name, html]) => `<dt>${name}</dt><dd>${html}</dd>`).join('')}</dl></figcaption></figure>`;
+export function cardHtml({ file, alt, pill, where, heading, rows, bad, filter }) {
+  const data = Object.entries(filter.values)
+    .map(([name, value]) => ` data-${name}="${escapeHtml(value)}"`)
+    .join('');
+  return `<figure class="card${bad ? ' bad' : ''}" data-search="${escapeHtml(filter.search.toLowerCase())}"${data}><a class="shot" href="${escapeHtml(file)}"><img loading="lazy" src="${escapeHtml(file)}" alt="${escapeHtml(alt)}"></a><figcaption><div class="top">${pillHtml(pill)}<span class="where">${escapeHtml(where)}</span></div>${heading === null ? '' : `<h3>${escapeHtml(heading)}</h3>`}<dl>${rows.map(([name, html]) => `<dt>${name}</dt><dd>${html}</dd>`).join('')}</dl></figcaption></figure>`;
 }
+
+/**
+ * A bar that narrows the cards on the page: a search over each card's words, and one list per kind of
+ * choice. Each choice is `{ name, label, options: [{ value, label }] }`, and matches a card's
+ * `data-<name>`. Without scripts the bar is hidden and every card shows.
+ */
+export function filterHtml({ placeholder, choices }) {
+  const selects = choices.map(
+    choice =>
+      `<label>${escapeHtml(choice.label)}<select data-filter="${escapeHtml(choice.name)}"><option value="">All</option>${choice.options
+        .map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+        .join('')}</select></label>`,
+  );
+  return `<form class="filters" role="search" hidden onsubmit="return false">
+<label class="grow">Search<input type="search" data-filter-search placeholder="${escapeHtml(placeholder)}"></label>
+${selects.join('\n')}
+<button type="reset">Clear</button>
+<output aria-live="polite"></output>
+</form>
+<p class="empty" data-filter-none hidden>No pictures match. Try fewer filters.</p>
+<script>${FILTER_SCRIPT}</script>`;
+}
+
+// Runs once the page is read, since the bar sits above the cards. Hides the cards that don't match, then any
+// section left with none. A summary section that repeats
+// cards shown elsewhere hides while a filter is set, so no card shows twice.
+const FILTER_SCRIPT = `document.addEventListener('DOMContentLoaded', () => {
+  const form = document.querySelector('.filters');
+  if (!form) return;
+  form.hidden = false;
+  const cards = [...document.querySelectorAll('.card[data-search]')];
+  const search = form.querySelector('[data-filter-search]');
+  const selects = [...form.querySelectorAll('select[data-filter]')];
+  const none = document.querySelector('[data-filter-none]');
+  const count = form.querySelector('output');
+  const apply = () => {
+    const words = search.value.trim().toLowerCase().split(/\\s+/).filter(Boolean);
+    const picked = selects.filter(select => select.value !== '');
+    const active = words.length > 0 || picked.length > 0;
+    let shown = 0;
+    for (const card of cards) {
+      const summary = card.closest('[data-summary]') !== null;
+      const match =
+        words.every(word => card.dataset.search.includes(word)) &&
+        picked.every(select => card.getAttribute('data-' + select.dataset.filter) === select.value);
+      card.hidden = !match || (active && summary);
+      if (!card.hidden && !summary) shown += 1;
+    }
+    for (const section of document.querySelectorAll('section')) {
+      const inside = section.querySelectorAll('.card[data-search]');
+      if (inside.length > 0) section.hidden = [...inside].every(card => card.hidden);
+    }
+    none.hidden = shown > 0;
+    count.textContent = active ? shown + ' of ' + cards.filter(card => card.closest('[data-summary]') === null).length + ' pictures' : '';
+  };
+  form.addEventListener('input', apply);
+  form.addEventListener('reset', () => setTimeout(apply));
+  apply();
+});`;
 
 /** A whole page. `home` is the link back to the list, left out on the list itself and in a download. */
 export function pageHtml({ title, eyebrow, lead, home, body, hidden = false }) {
@@ -146,7 +217,15 @@ function resultText(picture) {
   return picture.test === null ? 'No result was recorded' : 'Test did not finish';
 }
 
-function pictureHtml({ feature, picture }) {
+/** How a picture's test ended, as the result filter names it. */
+function resultValue(picture) {
+  if (fromFailedTest(picture)) {
+    return 'failed';
+  }
+  return picture.passed === true ? 'passed' : 'unknown';
+}
+
+function pictureHtml({ set, feature, picture }) {
   const bad = fromFailedTest(picture);
   const rows = [
     ['What the test did', picture.did],
@@ -162,6 +241,12 @@ function pictureHtml({ feature, picture }) {
     heading: picture.test ?? null,
     rows,
     bad,
+    filter: {
+      values: { result: resultValue(picture), set: set.id },
+      search: [picture.test, picture.did, picture.expect, feature.id, picture.step, set.name]
+        .filter(words => typeof words === 'string')
+        .join(' '),
+    },
   });
 }
 
@@ -174,7 +259,7 @@ function count(number, word) {
  * is the link back to the list when the page sits on the site.
  */
 export function galleryHtml({ run, title, home }) {
-  const shownIn = set => set.features.flatMap(feature => feature.pictures.map(picture => ({ feature, picture })));
+  const shownIn = set => set.features.flatMap(feature => feature.pictures.map(picture => ({ set, feature, picture })));
   const failures = run.feature_sets.flatMap(set => shownIn(set).filter(({ picture }) => fromFailedTest(picture)));
   const withPictures = run.feature_sets.filter(set => shownIn(set).length > 0);
   const sections = run.feature_sets.map(set => {
@@ -212,10 +297,29 @@ export function galleryHtml({ run, title, home }) {
       },
       { value: `${String(totals.features_with_a_test)} of ${String(totals.features)}`, label: 'features have a test' },
     ])}
+${filterHtml({
+  placeholder: 'Test name or what it checks',
+  choices: [
+    {
+      name: 'result',
+      label: 'Result',
+      options: [
+        { value: 'failed', label: 'Failed' },
+        { value: 'passed', label: 'Passed' },
+        { value: 'unknown', label: 'No result' },
+      ],
+    },
+    {
+      name: 'set',
+      label: 'Feature area',
+      options: withPictures.map(set => ({ value: set.id, label: set.name })),
+    },
+  ],
+})}
 <nav>${chips.join('')}</nav>
 ${
   failures.length > 0
-    ? `<section id="failed"><div class="section-head"><h2>Failed</h2><p>${count(failures.length, 'picture')} from tests that failed.</p></div><div class="grid">${failures.map(pictureHtml).join('')}</div></section>`
+    ? `<section id="failed" data-summary><div class="section-head"><h2>Failed</h2><p>${count(failures.length, 'picture')} from tests that failed.</p></div><div class="grid">${failures.map(pictureHtml).join('')}</div></section>`
     : ''
 }
 ${sections.join('\n')}`,
