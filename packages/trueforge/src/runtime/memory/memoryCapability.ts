@@ -605,7 +605,7 @@ function recordRecallProvenance(input: {
       // The assistant's own reply from a chat that had read nothing: recorded as a reply in this chat is.
       recordReplyText({ provenance, text });
     } else {
-      recordUntrustedText({ provenance, text, source });
+      recordUntrustedText({ provenance, text, source, page_site: null });
     }
   }
 }
@@ -1457,6 +1457,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
         provenance: this.webSearch.provenance,
         text: formatted.pageReadText.join('\n'),
         source: 'memory',
+        page_site: null,
       });
     }
     // Page stats describe the block as injected, not as loaded: a page the screen withheld or the

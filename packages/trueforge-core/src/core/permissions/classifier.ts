@@ -86,6 +86,7 @@ import { browserOpenCard, classifyBrowserActionTool, classifyBrowserViewTool } f
 import {
   BROWSER_OPEN_GUARD_REASON,
   BROWSER_OPEN_PRIVATE_DETAIL_REASON,
+  BROWSER_OPEN_REPLY_LINK_DATA_REASON,
   BROWSER_OPEN_SILENT_REASON,
   BROWSER_OPEN_TOOL_NAME,
   BROWSER_OPEN_UNVOUCHED_REASON,
@@ -1989,23 +1990,31 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
   const strings = collectOutboundStrings(action.canonical_params);
   const provenance = ctx.web_search.provenance;
-  const ask = async (reason: string, reasonSay: string, shownUrl: string = url): Promise<TierDecision> => {
+  const ask = async (input: {
+    reason: string;
+    say: string;
+    shownUrl: string | null;
+    siteGrantable?: boolean | undefined;
+  }): Promise<TierDecision> => {
+    const shownUrl = input.shownUrl ?? url;
     // The card shows the address as the browser will read it, so a look-alike spelling cannot hide the real site.
     const parsed = URL.canParse(shownUrl) ? new URL(shownUrl) : undefined;
     const shown = escapeDisplayText(parsed?.href ?? shownUrl);
+    const host = parsed === undefined ? null : escapeDisplayText(parsed.hostname);
     return tier3Decision({
       card: browserOpenCard({
         url: shown,
-        host: parsed === undefined ? null : escapeDisplayText(parsed.hostname),
+        host,
         // The question names the site; the full address is its own row on the card.
         headline:
           parsed === undefined ? 'Open this page?' : `Open a page on ${escapeDisplayText(siteName(parsed.hostname))}?`,
-        say: reasonSay,
+        say: input.say,
         plain_why: plainWhy(ctx.agent_intent),
       }),
-      reason,
-      reason_detail: reasonSay,
+      reason: input.reason,
+      reason_detail: input.say,
       sensitive_read: false,
+      site_grantable_open: input.siteGrantable === true,
       approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   };
@@ -2014,13 +2023,21 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
   if (!verdict.ok && verdict.rule === 'server_secret') {
     const masked = maskServerSecrets({ params: action.canonical_params, secrets, earlier: ctx.web_search.sentText });
     const maskedUrl = masked?.['url'];
-    return ask(BROWSER_OPEN_GUARD_REASON, SECRET_SAY, typeof maskedUrl === 'string' ? maskedUrl : HIDDEN_QUERY);
+    return ask({
+      reason: BROWSER_OPEN_GUARD_REASON,
+      say: SECRET_SAY,
+      shownUrl: typeof maskedUrl === 'string' ? maskedUrl : HIDDEN_QUERY,
+    });
   }
   if (!(await ctx.services.searchWithoutAsking(owner))) {
-    return ask(BROWSER_OPEN_GUARD_REASON, say.search_setting);
+    return ask({ reason: BROWSER_OPEN_GUARD_REASON, say: say.search_setting, shownUrl: null });
   }
   if (!verdict.ok) {
-    return ask(BROWSER_OPEN_GUARD_REASON, guardRuleSay({ rule: verdict.rule, assistant }));
+    return ask({
+      reason: BROWSER_OPEN_GUARD_REASON,
+      say: guardRuleSay({ rule: verdict.rule, assistant }),
+      shownUrl: null,
+    });
   }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return autoDenyDecision({
@@ -2035,29 +2052,34 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
     return ctx.services.unattended
       ? steeredSkipped(ctx)
       : steeringChecked({
-          decision: await ask(CONTENT_STEERED_REASON, steeredLinkSay({ ctx, url })),
+          decision: await ask({ reason: CONTENT_STEERED_REASON, say: steeredLinkSay({ ctx, url }), shownUrl: null }),
           ctx,
           guests: [],
         });
   }
   if (replyLinksWithAddedData({ provenance, values: [url] }).length > 0) {
-    return ctx.services.unattended ? replyLinkSkipped(ctx) : ask(BROWSER_OPEN_UNVOUCHED_REASON, say.reply_link);
+    return ctx.services.unattended
+      ? replyLinkSkipped(ctx)
+      : ask({ reason: BROWSER_OPEN_REPLY_LINK_DATA_REASON, say: say.reply_link, shownUrl: null });
   }
   if (hasReadContent(provenance)) {
     if (carriedPrivateDetails({ provenance, values: [url] }).length > 0) {
       return ctx.services.unattended
         ? privateDetailSkipped(ctx)
-        : ask(BROWSER_OPEN_PRIVATE_DETAIL_REASON, say.private_detail);
+        : ask({ reason: BROWSER_OPEN_PRIVATE_DETAIL_REASON, say: say.private_detail, shownUrl: null });
     }
     // After reading other people's content, an address the person never gave may have been put together to carry
     // something out (a host built in pieces, a form id, data in the path or query), so it asks.
     if (!isPersonVouchedUrl({ provenance, url })) {
       return ctx.services.unattended
         ? steeredSkipped(ctx)
-        : ask(
-            BROWSER_OPEN_UNVOUCHED_REASON,
-            `${assistant} has read things written by other people in this chat, and you did not give this address, so ${assistant} is checking with you first.`,
-          );
+        : ask({
+            reason: BROWSER_OPEN_UNVOUCHED_REASON,
+            say: `${assistant} has read things written by other people in this chat, and you did not give this address, so ${assistant} is checking with you first.`,
+            shownUrl: null,
+            // The person is the one vouching for this address, so "Always allow this site" may cover the site.
+            siteGrantable: true,
+          });
     }
   }
   // The address leaves with this call, so a later silent lookup sees a secret split across the two.
@@ -2110,6 +2132,7 @@ function steeredLinkSay({ ctx, url }: { ctx: ClassifyContext; url: string }): st
           kind,
           source: origin.source,
           who: escapeDisplayText(value),
+          site: origin.site === null ? null : escapeDisplayText(origin.site),
         })),
       });
 }
@@ -2171,6 +2194,7 @@ function steeringChecked(input: {
     reason_detail: say,
     standing_grant_barred: true,
     chat_grantable_consequence: false,
+    site_grantable_open: false,
     own_calendar_change: false,
     own_drive_write: false,
     card: {

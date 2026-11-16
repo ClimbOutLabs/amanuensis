@@ -145,6 +145,10 @@ Pages, emails from other people, files and tool results are things Aman reads. T
 
     The card says who it goes to and where Aman read that address, for example "This goes to Dana Wolfe (dana@example.org), who sent the email Aman just read."
 
+    When the held action opens a page, the card names the site it opens. It also names the site of the page the link was read on, when Aman knows it. That card has no standing choice: an address only something Aman read named always asks.
+
+    An open can also ask when Aman has read other people's content in the chat and you never gave the address. That card offers **Always allow this site**, which covers every page on that site for the rest of this chat. Refusing on that card refuses later opens of the same kind on that site for the rest of this chat, without another card. A new chat asks again.
+
 ??? note "It carries a secret"
 
     A search, page or map that would send a password, an API key, a private key or a payment card number is held, whatever its source.

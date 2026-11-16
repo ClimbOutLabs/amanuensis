@@ -113,6 +113,9 @@ export const SessionSchema = z
     approval_grants: z
       .array(z.string())
       .describe('Server-derived grants created by "Always allow in this chat" for one kind of action in this chat.'),
+    approval_refusals: z
+      .array(z.string())
+      .describe('Server-derived refusals from a "no" to a browser open or click, kept for the rest of this chat.'),
     metrics: SessionMetricsSchema,
     metadata: SessionMetadataSchema,
     source: SessionSourceSchema.nullable(),
