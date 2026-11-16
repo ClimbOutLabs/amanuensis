@@ -11,7 +11,7 @@ Two model files are downloaded from Hugging Face while Aman runs: the speech-to-
 Fetch both models when the images are built, not when Aman runs.
 
 - The speech image fetches the four files of the pinned Whisper small revision. The build checks each file against its SHA-256 and fails on any mismatch. The service loads the files from a read-only folder in the image and runs with the Hugging Face offline and telemetry flags set.
-- The app image fetches the five files of the pinned memory search revision, with the same SHA-256 checks. The server loads them from a folder in the image.
+- The app image fetches the five files of the pinned memory search revision, with the same SHA-256 checks. The server loads them from a folder in the image. Both app Dockerfiles do this: `Dockerfile.dev`, which the installer, compose and the published images build, and `Dockerfile`, the image built from the npm package. In `Dockerfile.dev` the files are fetched in a build stage of their own, so Docker's layer cache keeps them across code changes and fetches them again only when a pin changes.
 - The install-time downloads for these two models are removed from the installer's plan and from its download list. Their Docker volumes (`stt-cache`, `stt-model-cache`) are no longer mounted. An existing `aman_stt_cache` volume is still removed by uninstall, so nothing is left behind.
 - The memory search service still contains its existing download path. It runs only if the built-in copy fails its hash check, and that is the only case where it reaches Hugging Face.
 
