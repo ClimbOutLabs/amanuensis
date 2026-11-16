@@ -6890,6 +6890,30 @@
         ],
         "type": "object"
       },
+      "LookupTerminalPairingRequest": {
+        "properties": {
+          "code": {
+            "description": "The pairing code the terminal showed. Dashes and letter case do not matter.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "LookupTerminalPairingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TerminalPairingLookup"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "MCPAuthRequiredEvent": {
         "allOf": [
           {
@@ -14254,6 +14278,18 @@
         "required": [
           "device_name",
           "paired_at"
+        ],
+        "type": "object"
+      },
+      "TerminalPairingLookup": {
+        "properties": {
+          "device_name": {
+            "description": "The name of the terminal waiting on this pairing code.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name"
         ],
         "type": "object"
       },
@@ -31622,6 +31658,81 @@
           "terminalPairings"
         ],
         "x-fern-sdk-method-name": "confirm"
+      }
+    },
+    "/api/v1/terminal-pairings/lookup": {
+      "post": {
+        "description": "Names the terminal waiting on a pairing code, for the signed-in person, before they confirm it. A code that is not right, has expired, or was already used answers the same refusal, so the lookup cannot be used to test codes.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookupTerminalPairingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupTerminalPairingResponse"
+                }
+              }
+            },
+            "description": "The terminal waiting on the code."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The code is not right, has expired, or was already used."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many pairing attempts."
+          }
+        },
+        "summary": "Look up the terminal waiting on a pairing code",
+        "tags": [
+          "Auth"
+        ],
+        "x-fern-sdk-group-name": [
+          "terminalPairings"
+        ],
+        "x-fern-sdk-method-name": "lookup"
       }
     },
     "/api/v1/terminal-pairings/revoke-current": {

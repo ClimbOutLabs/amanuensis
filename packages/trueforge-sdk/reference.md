@@ -7074,6 +7074,71 @@ await client.terminalPairings.confirm({
 </dl>
 </details>
 
+<details><summary><code>client.terminalPairings.<a href="/src/api/resources/terminalPairings/client/Client.ts">lookup</a>({ ...params }) -> TrueForge.LookupTerminalPairingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Names the terminal waiting on a pairing code, for the signed-in person, before they confirm it. A code that is not right, has expired, or was already used answers the same refusal, so the lookup cannot be used to test codes.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.terminalPairings.lookup({
+    code: "code"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.LookupTerminalPairingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TerminalPairingsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.terminalPairings.<a href="/src/api/resources/terminalPairings/client/Client.ts">revokeCurrent</a>() -> TrueForge.RevokeCurrentTerminalKeyResponse</code></summary>
 <dl>
 <dd>
