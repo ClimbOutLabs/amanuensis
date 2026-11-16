@@ -132,7 +132,6 @@ export async function changeLocalUserPassword(params: {
   }
   const replaced = await params.store.replacePasswordHashAndRevokeTerminalKeys({
     password_hash: await hashPasswordValue(params.new_password),
-    updated_at: new Date().toISOString(),
     // Local sign-in exists only on a standalone install, whose tenant is always this one.
     tenant_id: 'default',
     subject_id: user.id,
@@ -170,7 +169,6 @@ export async function resetLocalUserPassword(params: {
   }
   const replaced = await params.store.replacePasswordHashAndRevokeTerminalKeys({
     password_hash: await hashPasswordValue(params.new_password),
-    updated_at: new Date().toISOString(),
     tenant_id: 'default',
     subject_id: user.id,
     revoked_at: new Date().toISOString(),

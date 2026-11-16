@@ -22,7 +22,6 @@ export class MemoryLocalUserStore implements ILocalUserStore {
 
   replacePasswordHashAndRevokeTerminalKeys(input: {
     password_hash: string;
-    updated_at: string;
     tenant_id: string;
     subject_id: string;
     revoked_at: string;
@@ -34,7 +33,8 @@ export class MemoryLocalUserStore implements ILocalUserStore {
       ...this.#user,
       password_hash: input.password_hash,
       session_version: this.#user.session_version + 1,
-      updated_at: input.updated_at,
+      // Stamped by the store, as the database stores stamp it inside their write.
+      updated_at: new Date().toISOString(),
     };
     // No terminal keys live beside this memory store, so the revocation lands on none.
     return Promise.resolve({ replaced: true, revoked_count: 0 });

@@ -64,18 +64,28 @@ export function runLocalUserStoreContractSuite(getStore: () => ILocalUserStore):
   it('replaces the hash, raises the session version and reports the revocation in the same write', async () => {
     const store = getStore();
     await store.createUser(record());
+    const before = new Date().toISOString();
     await expect(
       store.replacePasswordHashAndRevokeTerminalKeys({
         password_hash: 'hash-two',
-        updated_at: LATER,
         tenant_id: 'default',
         subject_id: 'user-1',
         revoked_at: LATER,
       }),
     ).resolves.toEqual({ replaced: true, revoked_count: 0 });
-    await expect(store.getUser()).resolves.toEqual(
-      record({ password_hash: 'hash-two', session_version: 2, updated_at: LATER }),
-    );
+    const after = new Date().toISOString();
+    const user = await store.getUser();
+    if (user === undefined) {
+      throw new Error('the local user vanished');
+    }
+    expect(user.password_hash).toBe('hash-two');
+    expect(user.session_version).toBe(2);
+    expect(user.created_at).toBe(NOW);
+    // The store stamps updated_at itself, inside the write: the value is the
+    // write's own moment, inside the window bracketing this call, and never a
+    // moment a caller minted before the write began.
+    expect(user.updated_at >= before).toBe(true);
+    expect(user.updated_at <= after).toBe(true);
   });
 
   it('reports replaced false from the password write when no user is stored', async () => {
@@ -83,7 +93,6 @@ export function runLocalUserStoreContractSuite(getStore: () => ILocalUserStore):
     await expect(
       store.replacePasswordHashAndRevokeTerminalKeys({
         password_hash: 'hash-two',
-        updated_at: LATER,
         tenant_id: 'default',
         subject_id: 'user-1',
         revoked_at: LATER,

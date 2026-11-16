@@ -15,6 +15,7 @@ import { createAuthMiddleware } from '../../../src/auth/middleware';
 import { verifyPasswordValue } from '../../../src/auth/passwordHash';
 import { hashTerminalKey, mintTerminalKey } from '../../../src/auth/terminalKey';
 import type { GlobalSettingRecord, IGlobalSettingsStore } from '../../../src/db/globalSettingsStore';
+import type { ILocalUserStore } from '../../../src/db/localUserStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteLocalUserStore } from '../../../src/db/sqlite/local-user-store/SqliteLocalUserStore';
@@ -253,6 +254,112 @@ describe('password change and terminal keys', () => {
       headers: { Authorization: `Bearer ${freshCompletion.terminal_key}` },
     });
     expect(accepted.status).toBe(200);
+    await db.destroy();
+  });
+
+  it('leaves no working key when a pairing claims after the change has begun', async () => {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const { userStore, user } = await buildStores(db);
+    const realStore = new TerminalKeyStore(db);
+
+    // A key store whose insert can be held open, to stage the confirm mid-flight.
+    let releaseCreate: () => void = () => undefined;
+    let enteredCreate: () => void = () => undefined;
+    const createGate = new Promise<void>(resolve => {
+      releaseCreate = resolve;
+    });
+    const createEntered = new Promise<void>(resolve => {
+      enteredCreate = resolve;
+    });
+    const gatedStore: ITerminalKeyStore = {
+      create: async record => {
+        enteredCreate();
+        await createGate;
+        await realStore.create(record);
+      },
+      findByKeyHash: hash => realStore.findByKeyHash(hash),
+      listForOwner: input => realStore.listForOwner(input),
+      markUsed: input => realStore.markUsed(input),
+      revoke: input => realStore.revoke(input),
+      revokeAllForOwner: input => realStore.revokeAllForOwner(input),
+    };
+    const service = new TerminalPairingService({ terminalKeyStore: gatedStore });
+    const started = await service.start({ device_name: 'Pippa' });
+    const owner = {
+      tenant_id: 'default',
+      subject_id: user.id,
+      subject_type: 'user',
+      subject_display_name: 'Nora',
+    };
+
+    // A user store that stages the narrowest form of the race inside the change
+    // itself: the write is called after the caller has minted its moments for
+    // the change, and the pairing confirms then, a few milliseconds into the
+    // window before the write runs, the pause standing in for the scheduling
+    // time a real confirm spends there. Its insert stays held until the write
+    // has run, so the revocation inside the write finds no key row.
+    const stagingStore: ILocalUserStore = {
+      getUser: () => userStore.getUser(),
+      createUser: record => userStore.createUser(record),
+      replacePasswordHashAndRevokeTerminalKeys: async input => {
+        await new Promise<void>(resolve => {
+          setTimeout(resolve, 5);
+        });
+        const confirmPromise = service.confirm({ code: started.code, owner });
+        await createEntered;
+        const result = await userStore.replacePasswordHashAndRevokeTerminalKeys(input);
+        releaseCreate();
+        await confirmPromise;
+        return result;
+      },
+    };
+
+    const changed = await changeLocalUserPassword({
+      store: stagingStore,
+      user_id: user.id,
+      current_password: OLD_PASSWORD,
+      new_password: NEW_PASSWORD,
+    });
+    expect(changed.ok).toBe(true);
+    if (changed.ok) {
+      expect(changed.revoked_terminal_keys).toBe(0);
+    }
+
+    const completion = await service.complete({ pairing_id: started.pairing_id, code: started.code });
+    if (completion?.status !== 'paired') {
+      throw new Error('the pairing did not complete');
+    }
+    const racedKey = completion.terminal_key;
+
+    // The row landed after the revocation, unrevoked, and it was claimed after
+    // the change began: only the password change watermark can refuse this key,
+    // and the watermark is the write's own moment, so it does.
+    const record = await realStore.findByKeyHash(hashTerminalKey(racedKey));
+    expect(record?.revoked_at).toBeNull();
+
+    const authenticator = new LocalAuthenticator({
+      localUserStore: userStore,
+      globalSettingsStore: new MemoryGlobalSettingsStore(),
+      terminalKeyStore: realStore,
+      logger: createLogger({ silent: true }),
+    });
+    const app = new OpenAPIHono();
+    app.onError((error, c) => {
+      if (error instanceof HTTPException) {
+        return c.json({ error: { message: error.message } }, error.status);
+      }
+      throw error;
+    });
+    const sessions = new OpenAPIHono();
+    sessions.use('*', createAuthMiddleware(authenticator));
+    sessions.get('/', c => c.json({ data: { ok: true } }));
+    app.route('/api/v1/sessions', sessions);
+
+    const refused = await app.request('/api/v1/sessions', {
+      headers: { Authorization: `Bearer ${racedKey}` },
+    });
+    expect(refused.status).toBe(401);
     await db.destroy();
   });
 });

@@ -66,11 +66,14 @@ export interface ILocalUserStore {
    * single transaction, so either all of it happens or none of it does. A failed
    * revocation can therefore never leave a changed password behind with the keys
    * still live, and there is no second write for a pairing in flight to slip past.
+   * The store stamps `updated_at` itself inside that transaction, never from the
+   * caller: terminal key validation refuses a key claimed at or before the last
+   * password change, so the stamp has to be the write's own moment, not a moment
+   * a caller minted before the write began.
    * Returns `replaced: false` (and revokes nothing) when there is no user.
    */
   replacePasswordHashAndRevokeTerminalKeys(input: {
     password_hash: string;
-    updated_at: string;
     tenant_id: string;
     subject_id: string;
     revoked_at: string;

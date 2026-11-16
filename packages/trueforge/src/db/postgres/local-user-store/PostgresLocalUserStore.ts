@@ -55,17 +55,20 @@ export class PostgresLocalUserStore implements ILocalUserStore {
 
   async replacePasswordHashAndRevokeTerminalKeys(input: {
     password_hash: string;
-    updated_at: string;
     tenant_id: string;
     subject_id: string;
     revoked_at: string;
   }): Promise<{ replaced: boolean; revoked_count: number }> {
     return this.#db.transaction().execute(async trx => {
+      // Stamped here, inside the transaction: terminal key validation refuses a
+      // key claimed at or before this moment, so it must be the write's own
+      // moment, never one the caller minted before the write began.
+      const updated_at = new Date().toISOString();
       const result = await trx
         .updateTable('local_user')
         .set({
           password_hash: input.password_hash,
-          updated_at: input.updated_at,
+          updated_at,
           session_version: sql<number>`session_version + 1`,
         })
         .executeTakeFirst();
