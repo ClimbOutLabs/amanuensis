@@ -268,6 +268,43 @@ describe('a call that carries words or an id but shows no destination', () => {
   });
 });
 
+describe('an open-world hint does not turn the refusal into a card', () => {
+  // A hint only escalates. A call hinted open-world that carries words and shows no destination
+  // is the same send to a place the card cannot show, so it is refused, not asked about.
+  it('refuses a text message hinted open-world that names no number to send to', async () => {
+    const decision = await classifyTier(
+      connectorCall({
+        tool_name: 'send_sms',
+        params: { text: 'Running late, see you at seven.' },
+        hints: { open_world_hint: true },
+      }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('refuses a notice hinted open-world that names nobody to notify', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'notify', params: { text: 'The build finished.' }, hints: { open_world_hint: true } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('still asks when the same hinted text message names the number it goes to', async () => {
+    const decision = await classifyTier(
+      connectorCall({
+        tool_name: 'send_sms',
+        params: { phone_number: '+15551234567', text: 'Running late, see you at seven.' },
+        hints: { open_world_hint: true },
+      }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+    expect(decision.card?.recipient).toBe('+15551234567');
+  });
+});
+
 describe('a name from the deleted registry no longer decides', () => {
   it('a send_message that carries a verifiable destination is carded, not auto-denied', async () => {
     const decision = await classifyTier(

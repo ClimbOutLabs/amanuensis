@@ -142,7 +142,12 @@ function harness(options: {
     sentinel: host,
     searchProvider:
       options.searchProvider === true
-        ? { tools: options.searchTools ?? [], page_read_tools: options.pageReadTools ?? [], plumbing_fields: options.plumbingFields ?? [], served_in_process: false }
+        ? {
+            tools: options.searchTools ?? [],
+            page_read_tools: options.pageReadTools ?? [],
+            plumbing_fields: options.plumbingFields ?? [],
+            served_in_process: false,
+          }
         : undefined,
   });
   return { toolSet, host, audit, dispatched };
@@ -820,9 +825,8 @@ describe('a write-capable connector designated as the search provider', () => {
 
   it('keeps every unannotated or write tool off the silent path on the designated provider', async () => {
     const h = harness({ serverName: 'github', searchProvider: true, tools });
-    // Writes a connector family claims, and a write escalated by its own destructive hint,
-    // keep the approval path: they ask, with a card that shows the arguments.
-    for (const name of ['push_files', 'create_or_update_file', 'run_workflow']) {
+    // Writes a connector family claims keep the approval path: they ask, with a card that shows the arguments.
+    for (const name of ['push_files', 'create_or_update_file']) {
       const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
       expect(info.tier).toBe(3);
       expect(info.is_approval_required).toBe(true);
@@ -831,8 +835,9 @@ describe('a write-capable connector designated as the search provider', () => {
       expect(isApprovalRequiredResponse(response)).toBe(true);
     }
     // An unclaimed write that carries words and names no destination is refused outright
-    // under the unverifiable-destination rule. Either way, nothing here ever runs silently.
-    for (const name of ['create_issue', 'add_issue_comment', 'merge_pull_request', 'fork_repository']) {
+    // under the unverifiable-destination rule, even one with its own destructive hint: a hint
+    // only escalates. Either way, nothing here ever runs silently.
+    for (const name of ['create_issue', 'add_issue_comment', 'merge_pull_request', 'fork_repository', 'run_workflow']) {
       const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
       expect(info.tier).toBe(3);
       expect(info.is_approval_required).toBe(false);
@@ -844,7 +849,7 @@ describe('a write-capable connector designated as the search provider', () => {
     expect(h.dispatched).toEqual([]);
     // The carded writes were never run, so they leave no audit row. Each refusal is audited
     // as an auto-denied call, once when the call is classified and once at dispatch.
-    expect(h.audit).toHaveLength(8);
+    expect(h.audit).toHaveLength(10);
     for (const row of h.audit) {
       expect(row).toMatchObject({ outcome: 'auto_denied', auto_deny_reason: 'destination_unverifiable', tier: 3 });
     }
@@ -858,6 +863,8 @@ describe('a write-capable connector designated as the search provider', () => {
         'fork_repository',
         'merge_pull_request',
         'merge_pull_request',
+        'run_workflow',
+        'run_workflow',
       ].sort(),
     );
   });

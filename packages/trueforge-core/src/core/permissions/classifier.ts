@@ -165,6 +165,7 @@ import {
 } from './searchHoldText';
 import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
 import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
+import { externalServiceWhat, externalServiceWhatSpecific, namedSendWhat } from './sendWording';
 import {
   hashArgv,
   matchAllowlist,
@@ -1890,74 +1891,6 @@ function sendCardCopy(input: {
       ? paymentCardCopy({ amount: input.amount, recipient: input.recipient, destination: input.destination })
       : simpleCardCopy({ headline: input.plain_what, undo: input.undo, reason: null });
   return input.notice === null ? base : { ...base, consequence: joinLine([input.notice, base.consequence]) };
-}
-
-/** The external-service sentence for a tool whose name names the kind of send, or null when it does not. */
-function externalServiceWhatSpecific(input: {
-  tool_name: string;
-  destination: string | null;
-  recipient: string | null;
-  amount: string | null;
-}): string | null {
-  const name = input.tool_name.toLowerCase();
-  const where = input.recipient ?? input.destination ?? 'an external destination';
-  if (name.includes('email') || name.includes('mail')) {
-    if (name.includes('draft')) {
-      return `Save an email draft for ${where}?`;
-    }
-    if (name.includes('forward')) {
-      return `Forward an email to ${where}?`;
-    }
-    if (name.includes('reply')) {
-      return `Reply to an email, sending it to ${where}?`;
-    }
-    return `Send an email to ${where}?`;
-  }
-  if (name.includes('sms') || name.includes('message') || name.includes('notify')) {
-    return `Send a message to ${where}?`;
-  }
-  if (name.includes('post') || name.includes('publish') || name.includes('tweet')) {
-    return `Publish a post${input.destination === null ? '' : ` to ${input.destination}`}?`;
-  }
-  if (name.includes('share') || name.includes('webhook')) {
-    return `Share data with ${where}?`;
-  }
-  if (
-    name.includes('pay') ||
-    name.includes('spend') ||
-    name.includes('charge') ||
-    name.includes('transfer') ||
-    name.includes('invoice')
-  ) {
-    return `Spend ${input.amount ?? 'money'}${input.destination === null ? '' : ` via ${input.destination}`}?`;
-  }
-  return null;
-}
-
-function externalServiceWhat(input: {
-  tool_name: string;
-  destination: string | null;
-  recipient: string | null;
-  amount: string | null;
-}): string {
-  const where = input.recipient ?? input.destination ?? 'an external destination';
-  return externalServiceWhatSpecific(input) ?? `Perform an external action affecting ${where}?`;
-}
-
-/**
- * The sentence for a call classified as an external-service send: the external-service sentence
- * when the tool's name names the kind of send, else the connector family's own sentence for the
- * call when a family described one, else the general external-action sentence.
- */
-function namedSendWhat(input: { action: SentinelAction; extraction: ExtractionResult }): string {
-  const { fields } = input.extraction;
-  const parts = {
-    tool_name: input.action.tool_name,
-    destination: fields.destination,
-    recipient: fields.recipient,
-    amount: fields.amount,
-  };
-  return externalServiceWhatSpecific(parts) ?? input.extraction.connector_what ?? externalServiceWhat(parts);
 }
 
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
@@ -4089,6 +4022,19 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // A call no connector family claims, which carries words or an id and shows no destination the
+  // card can verify, is refused before the hints: a hint only escalates, so an open-world or
+  // destructive hint never turns this refusal into a card. A name ranked destructive, install or
+  // calendar change keeps its own card below, which shows the arguments in full.
+  if (extraction.payload_unverifiable && !isDestructive && !isInstall && !isCalendarChangeToolName(action.tool_name)) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail:
+        'A connector call that carries words or an id and shows no verifiable destination is never carded.',
+      sensitive_read: false,
+    });
+  }
+
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
   const destructiveHint = action.mcp_hints.destructive_hint === true;
   const openWorldHint = action.mcp_hints.open_world_hint === true;
@@ -4097,7 +4043,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     const { fields } = extraction;
     // The external-service sentence wins: it is the more specific warning about where this goes.
     const plain_what = carriedSend
-      ? namedSendWhat({ action, extraction })
+      ? namedSendWhat({ tool_name: action.tool_name, extraction })
       : destructiveHint || extraction.connector_what === null
         ? destructiveHint
           ? 'Run this action, even though it might change or delete something for good?'
@@ -4155,7 +4101,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   if (namedSend || isDestructive || isInstall) {
     const { fields } = extraction;
     const what = namedSend
-      ? namedSendWhat({ action, extraction })
+      ? namedSendWhat({ tool_name: action.tool_name, extraction })
       : isInstall
         ? 'Install software or dependencies?'
         : `Delete or remove ${fields.destination ?? fields.recipient ?? 'data'}?`;
@@ -4290,21 +4236,6 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason: 'local_read_only',
       reason_detail: `Local read-only tool \`${action.tool_name}\`.`,
       sensitive_read: containsSecretPath(action.canonical_params),
-    });
-  }
-
-  // The carried-payload refusal, last: a call no mechanism above claims, which is not a known
-  // read and not declared read-only and closed-world, yet carries words or an id and shows no
-  // destination the card can verify, is refused rather than carded. Every more specific outcome
-  // (a family card, a hint escalation, a name-ranked class, the calendar card, a silent read)
-  // has already been decided above, so what reaches here is exactly the unclaimed remainder that
-  // would otherwise get the unrecognized-tool card below.
-  if (extraction.payload_unverifiable) {
-    return autoDenyDecision({
-      reason: 'destination_unverifiable',
-      reason_detail:
-        'A connector call that carries words or an id and shows no verifiable destination is never carded.',
-      sensitive_read: false,
     });
   }
 

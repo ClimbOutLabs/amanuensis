@@ -233,9 +233,10 @@ const LABEL_CASES: LabelCase[] = [
   {
     label: 'tool name on a flagged connector call',
     build: control => ({
+      // No arguments: a call carrying words with no destination is refused before its hint is read.
       call: action(
         `lookup${control}_records`,
-        { text: 'hi' },
+        {},
         {
           tool_type: 'mcp',
           mcp_server_name: 'crm',
