@@ -186,6 +186,8 @@ export type { FailoverLanguageModelOptions } from './llm/failoverLanguageModel';
 export type { AgentMetadata, ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './llm/ILLM';
 export { ModelRequestGate } from './llm/ModelRequestGate';
 export type { ModelRequestSlot } from './llm/ModelRequestGate';
+export { ModelUnreachableError } from './llm/modelUnreachable';
+export type { ModelAddressPlace, PlaceOfModelHost } from './llm/modelUnreachable';
 export {
   MODEL_WAITING_EVENT_TYPE,
   MODEL_WAITING_MESSAGE,
@@ -203,6 +205,8 @@ export {
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,
   VercelAILLM,
+  classifyProviderCallError,
+  describeAuthRefusal,
 } from './llm/VercelAILLM';
 export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
 
@@ -299,7 +303,12 @@ export {
   DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
   DEFAULT_MODEL_HTTP_MAX_RETRIES,
   MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+  OutboundRedirectRefusedError,
   configureOutboundFetches,
+  withCheckedRedirects,
+  withoutCrossOriginCredentials,
+  type OutboundRedirectCheck,
+  type OutboundRedirectRefusalKind,
 } from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
@@ -315,8 +324,6 @@ export { SANDBOX_ALLOWED_EGRESS_DOMAINS, sandboxEgressDomainAllowList } from './
 export { DockerDriver } from './sandbox/driver/DockerDriver';
 export type { DockerDriverOptions } from './sandbox/driver/DockerDriver';
 export { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './sandbox/driver/errors';
-export { classifyExecCommand, interpreterInvocationRefusal } from './sandbox/driver/ExecGuard';
-export type { ExecGuardHost, ExecGuardVerdict } from './sandbox/driver/ExecGuard';
 export { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX, runCodeProgramPath } from './sandbox/driver/IsolationDriver';
 export type {
   DriverReadiness,
@@ -343,6 +350,8 @@ export type {
 } from './sandbox/driver/RunCodeService';
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DisabledDriver } from './sandbox/driver/sandboxDisabled';
+export { DEFAULT_GIT_COMMIT_IDENTITY, GitCommitIdentitySchema } from './sandbox/gitCommitIdentity';
+export type { GitCommitIdentity } from './sandbox/gitCommitIdentity';
 export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
 export {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
@@ -359,6 +368,7 @@ export {
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
   shellEscape,
+  withArgvAsCommandLine,
   withTrustedPath,
   workspaceTerminationCommand,
 } from './sandbox/provider/Provider';
@@ -382,12 +392,16 @@ export type {
 } from './sandbox/provider/Provider';
 export { TFYSandboxProvider } from './sandbox/provider/TFYSandboxProvider';
 export {
+  SANDBOX_FILE_WRITE_TOOLS,
   SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+  SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+  SANDBOX_TOOL_DECLARATIONS,
   SANDBOX_WRITE_FILE_TOOL_NAME,
   SKILL_DOWNLOAD_TIMEOUT_SECONDS,
   Sandbox,
   buildWriteAndRunScriptCommand,
   forgetShownSkillNotices,
+  sandboxFileWriteToolNames,
 } from './sandbox/Sandbox';
 export type {
   BoundRepository,
@@ -399,6 +413,7 @@ export type {
   RepositoryCommandSourceObservation,
   RepositoryCommandSourceObserver,
   SandboxInfo,
+  SandboxToolDeclaration,
   WorkspaceVerificationCoordinator,
 } from './sandbox/Sandbox';
 export { extractSandboxArtifactsFromMessage, parseSandboxArtifacts } from './sandbox/sandboxArtifacts';
@@ -417,6 +432,7 @@ export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandb
 export type { SandboxRefParts } from './sandbox/sandboxRef';
 export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
+export type { HostCommandRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
 export {
@@ -441,9 +457,21 @@ export {
   SkillMounter,
   SkillPromptModeSchema,
   getSkillPath,
+  readGitSkillFiles,
   renderSkillPromptBody,
+  resolveGitSkillObjectId,
+  scanSkillSites,
 } from './sandbox/skills';
-export type { GitSkill, ISkillMounter, Skill, SkillMounterOptions, SkillPromptMode } from './sandbox/skills';
+export type {
+  GitSkill,
+  GitSkillSource,
+  ISkillMounter,
+  Skill,
+  SkillFile,
+  SkillMounterOptions,
+  SkillPromptMode,
+  SkillSiteScan,
+} from './sandbox/skills';
 
 // Host tool-call policy: lets the host review model-authored tool calls before dispatch
 export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
@@ -453,7 +481,10 @@ export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCal
 export {
   callResultSource,
   callReturnsOutsideContent,
+  contextCalledMemoryPagesWriter,
   contextHasOutsideToolResult,
+  personTypedText,
+  turnReadOutsideText,
 } from './capabilities/builtins/ChatProvenance';
 export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';
 export {
@@ -503,7 +534,6 @@ export {
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './permissions/classifier';
-export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './permissions/classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
@@ -537,14 +567,17 @@ export {
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
 export {
+  hasReadContent,
   isTrustedLink,
   isTrustedPicture,
   recordPageImageUrls,
   recordPersonText,
+  recordReplyText,
   recordUntrustedText,
   searchResultUrls,
 } from './permissions/provenance';
 export type { ChatProvenance, ReadSource, SearchResultUrls } from './permissions/provenance';
+export type { SkillNetworkCardRequest } from './permissions/skillNetworkCards';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -563,26 +596,24 @@ export type {
   Tier3Card,
   Tier3Persona,
   Tier3Schedule,
+  Tier3ScheduleTools,
   Tier3Skill,
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';
+export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './permissions/tierTypes';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
 export {
   PAGE_PICTURES_LABEL,
   SILENT_SEARCH_LIMIT,
+  chatSawOutsideText,
   createWebSearchTurnState,
   pageImageUrls,
 } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
-export {
-  FETCHED_PAGE_TEXT_MAX_CHARS,
-  FetchedPageStore,
-  fetchedPages,
-  isPageReaderTool,
-  isSearchResultTool,
-  recordFetchedPages,
-} from './search/fetchedPages';
+export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';
 export type { FetchedPageScope } from './search/fetchedPages';
 export { groundPlace, isInCalendar, normalizedWords } from './search/groundPlace';
 export type { GroundedPlace, PlaceClaim } from './search/groundPlace';
+export { declaredSearchProviderTools } from './search/searchProviderTools';
+export type { SearchProviderToolDeclaration } from './search/searchProviderTools';

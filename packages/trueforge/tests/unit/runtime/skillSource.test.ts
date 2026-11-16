@@ -1,27 +1,34 @@
+import { Response as UndiciResponse } from 'undici';
+
 import {
   MAX_SKILL_FILE_BYTES,
   parseSkillAddress,
   parseSkillFile,
   readPublishedSkill,
   SkillSourceError,
+  type SkillLookupDeps,
   type SkillSourceProblem,
 } from '../../../src/runtime/skillSource';
 
 const COMMIT = 'a'.repeat(40);
 const SKILL_FILE = '---\nname: Release Notes\ndescription: Writes release notes.\n---\n\n# Steps\n\nRead the log.\n';
 
-type Reply = { status: number; body: string };
+type Reply = { status: number; body: string; headers?: Record<string, string> };
+
+const resolveAddresses = (): Promise<string[]> => Promise.resolve(['140.82.112.6']);
 
 /** A GitHub stand-in that answers by path and records what was asked. */
 function github(replies: Record<string, Reply>) {
   const asked: string[] = [];
-  const fetchImpl: typeof fetch = input => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    asked.push(url);
-    const reply = replies[url.replace('https://api.github.com', '')] ?? { status: 404, body: '{}' };
-    return Promise.resolve(new Response(reply.body, { status: reply.status }));
+  const deps: SkillLookupDeps = {
+    fetchImpl: url => {
+      asked.push(String(url));
+      const reply = replies[String(url).replace('https://api.github.com', '')] ?? { status: 404, body: '{}' };
+      return Promise.resolve(new UndiciResponse(reply.body, { status: reply.status, headers: reply.headers ?? {} }));
+    },
+    resolveAddresses,
   };
-  return { fetchImpl, asked };
+  return { deps, asked };
 }
 
 async function problemOf(run: Promise<unknown>): Promise<string | undefined> {
@@ -92,11 +99,11 @@ describe('readPublishedSkill', () => {
   const address = { owner: 'acme', repo: 'skills', path: 'skills/release-notes', ref: 'main' };
 
   it('settles the branch to a commit, then reads the file at that commit', async () => {
-    const { fetchImpl, asked } = github({
+    const { deps, asked } = github({
       '/repos/acme/skills/commits/main': { status: 200, body: JSON.stringify({ sha: COMMIT }) },
       [`/repos/acme/skills/contents/skills/release-notes/SKILL.md?ref=${COMMIT}`]: { status: 200, body: SKILL_FILE },
     });
-    await expect(readPublishedSkill({ address, fetchImpl })).resolves.toEqual({
+    await expect(readPublishedSkill({ address, deps })).resolves.toEqual({
       commit: COMMIT,
       name: 'Release Notes',
       description: 'Writes release notes.',
@@ -112,33 +119,52 @@ describe('readPublishedSkill', () => {
     });
     const read = await readPublishedSkill({
       address: { owner: 'acme', repo: 'skills', path: undefined, ref: undefined },
-      fetchImpl: top.fetchImpl,
+      deps: top.deps,
     });
     expect(read.commit).toBe(COMMIT);
 
     const pinned = github({
       [`/repos/acme/skills/contents/skills/release-notes/SKILL.md?ref=${COMMIT}`]: { status: 200, body: SKILL_FILE },
     });
-    await readPublishedSkill({ address: { ...address, ref: COMMIT }, fetchImpl: pinned.fetchImpl });
+    await readPublishedSkill({ address: { ...address, ref: COMMIT }, deps: pinned.deps });
     expect(pinned.asked).toHaveLength(1);
   });
 
   it('says which thing is wrong, each with the one thing to do next', async () => {
-    expect(await problemOf(readPublishedSkill({ address, fetchImpl: github({}).fetchImpl }))).toBe('not_found');
+    expect(await problemOf(readPublishedSkill({ address, deps: github({}).deps }))).toBe('not_found');
     const noFile = github({
       '/repos/acme/skills/commits/main': { status: 200, body: JSON.stringify({ sha: COMMIT }) },
     });
-    expect(await problemOf(readPublishedSkill({ address, fetchImpl: noFile.fetchImpl }))).toBe('no_skill_file');
+    expect(await problemOf(readPublishedSkill({ address, deps: noFile.deps }))).toBe('no_skill_file');
     const limited = github({ '/repos/acme/skills/commits/main': { status: 403, body: '{}' } });
-    expect(await problemOf(readPublishedSkill({ address, fetchImpl: limited.fetchImpl }))).toBe('rate_limited');
+    expect(await problemOf(readPublishedSkill({ address, deps: limited.deps }))).toBe('rate_limited');
     const moved = github({ '/repos/acme/skills/commits/main': { status: 301, body: '' } });
-    expect(await problemOf(readPublishedSkill({ address, fetchImpl: moved.fetchImpl }))).toBe('not_found');
-    const down: typeof fetch = () => Promise.reject(new Error('offline'));
-    expect(await problemOf(readPublishedSkill({ address, fetchImpl: down }))).toBe('unavailable');
+    expect(await problemOf(readPublishedSkill({ address, deps: moved.deps }))).toBe('not_found');
+    const down: SkillLookupDeps = { fetchImpl: () => Promise.reject(new Error('offline')), resolveAddresses };
+    expect(await problemOf(readPublishedSkill({ address, deps: down }))).toBe('unavailable');
     const problems: SkillSourceProblem[] = ['not_found', 'no_skill_file', 'rate_limited', 'unavailable'];
     for (const problem of problems) {
       expect(new SkillSourceError(problem).message).toMatch(/^Nothing was added because .+\. .+\.$/);
     }
+  });
+
+  it('never follows a redirect, and never reaches an address that is not on the public internet', async () => {
+    const moved = github({
+      '/repos/acme/skills/commits/main': {
+        status: 301,
+        body: '',
+        headers: { location: 'https://api.github.com/repositories/1/commits/main' },
+      },
+    });
+    expect(await problemOf(readPublishedSkill({ address, deps: moved.deps }))).toBe('not_found');
+    expect(moved.asked).toHaveLength(1);
+
+    const inside = github({
+      '/repos/acme/skills/commits/main': { status: 200, body: JSON.stringify({ sha: COMMIT }) },
+    });
+    const deps: SkillLookupDeps = { ...inside.deps, resolveAddresses: () => Promise.resolve(['127.0.0.1']) };
+    expect(await problemOf(readPublishedSkill({ address, deps }))).toBe('unavailable');
+    expect(inside.asked).toHaveLength(0);
   });
 
   it('refuses a file too large to show in full', async () => {
@@ -149,6 +175,6 @@ describe('readPublishedSkill', () => {
         body: `${SKILL_FILE}${'x'.repeat(MAX_SKILL_FILE_BYTES)}`,
       },
     });
-    expect(await problemOf(readPublishedSkill({ address, fetchImpl: huge.fetchImpl }))).toBe('too_large');
+    expect(await problemOf(readPublishedSkill({ address, deps: huge.deps }))).toBe('too_large');
   });
 });

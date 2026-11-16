@@ -45,7 +45,7 @@ import {
 } from '@/components/VoiceInputContext.js';
 import { LiveVoiceBridge } from '@/containers/LiveVoiceBridge.js';
 import { PUSH_TO_TALK_HOTKEY_STORAGE_KEY } from '@/utils/pushToTalkHotkey.js';
-import { getVoiceMode, setVoiceMode } from '@/utils/voiceMode.js';
+import { getVoiceMode, setLiveNotice, setVoiceMode } from '@/utils/voiceMode.js';
 import { clearDraftFromVoice, takeDraftFromVoice } from '@/utils/voiceTurn.js';
 import { installSpeechSynthesis, removeSpeechSynthesis, stopSpokenReply } from '../utils/speechSynthesisFake.js';
 
@@ -107,6 +107,8 @@ function hangingTranscribe(capture: { signal?: AbortSignal }) {
 }
 
 beforeEach(() => {
+  // The notice lives outside the button, so one test's notice must not carry into the next.
+  setLiveNotice(null);
   mockSetText.mockClear();
   mockStartVoiceRecording.mockReset();
   mockStartVoiceRecording.mockImplementation(async () => makeRecorder());
@@ -278,6 +280,87 @@ describe('VoiceInputButton', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss transcription error' }));
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says so when a tap recording hears nothing, instead of failing silently', async () => {
+    const { api, transcribeMock } = makeApi({
+      transcribe: async () => ({ ...DEFAULT_TRANSCRIPTION, text: ' ' }),
+    });
+    render(
+      <VoiceInputProvider api={api}>
+        <VoiceInputButton disabled={false} />
+      </VoiceInputProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop and transcribe' }));
+
+    expect(await screen.findByText('Nothing was heard. Tap the mic and try again.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(transcribeMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('button', { name: 'Record voice message' })).toBeEnabled();
+  });
+
+  it('an address tidy-up on the same path leaves a recording alone; a real move ends it and says so', async () => {
+    const recorder = makeRecorder();
+    mockStartVoiceRecording.mockResolvedValueOnce(recorder);
+    const { api } = makeApi();
+    render(
+      <VoiceInputProvider api={api}>
+        <VoiceInputButton disabled={false} />
+      </VoiceInputProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
+    await screen.findByRole('button', { name: 'Stop and transcribe' });
+
+    // The app clearing a link or an error flag out of the address writes the same path.
+    act(() => {
+      window.dispatchEvent(new Event('trueforge:routechange'));
+    });
+    expect(recorder.cancel).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Stop and transcribe' })).toBeInTheDocument();
+
+    window.history.pushState({}, '', '/another-chat');
+    try {
+      act(() => {
+        window.dispatchEvent(new Event('trueforge:routechange'));
+      });
+      expect(recorder.cancel).toHaveBeenCalled();
+      expect(
+        await screen.findByText('Recording stopped before it finished. Tap the mic to try again.'),
+      ).toBeInTheDocument();
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
+  });
+
+  it('backgrounding the app mid-recording says the recording was stopped', async () => {
+    const recorder = makeRecorder();
+    mockStartVoiceRecording.mockResolvedValueOnce(recorder);
+    const { api } = makeApi();
+    render(
+      <VoiceInputProvider api={api}>
+        <VoiceInputButton disabled={false} />
+      </VoiceInputProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
+    await screen.findByRole('button', { name: 'Stop and transcribe' });
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    try {
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    }
+
+    expect(recorder.cancel).toHaveBeenCalled();
+    expect(
+      await screen.findByText('Recording stopped before it finished. Tap the mic to try again.'),
+    ).toBeInTheDocument();
   });
 
   it('shows the limit notice after an auto-stopped segment transcribes', async () => {

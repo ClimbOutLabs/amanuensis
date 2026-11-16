@@ -102,6 +102,8 @@ export interface IDeliveryStore {
   /** Marks every unread delivery of the owner seen, loaded on a page or not. Resolves to how many changed. */
   markAllSeen(input: PersonOwner & { now?: Date }): Promise<number>;
   countUnread(input: PersonOwner): Promise<number>;
+  /** The owner's unread deliveries of these kinds, newest first, at most `limit`. */
+  listUnread(input: PersonOwner & { kinds: readonly Delivery['kind'][]; limit: number }): Promise<Delivery[]>;
   /** How many of the owner's deliveries of these kinds went out at one of these levels at or after `since`. */
   countSince(
     input: PersonOwner & { since: Date; kinds: readonly Delivery['kind'][]; levels: readonly DeliveryLevel[] },
@@ -343,6 +345,24 @@ export class DeliveryStore implements IDeliveryStore {
       .where('seen_at', 'is', null)
       .executeTakeFirst();
     return Number(row?.unread ?? 0);
+  }
+
+  async listUnread(input: PersonOwner & { kinds: readonly Delivery['kind'][]; limit: number }): Promise<Delivery[]> {
+    if (input.kinds.length === 0) {
+      return [];
+    }
+    const rows = await this.#db
+      .selectFrom('delivery')
+      .selectAll()
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('kind', 'in', [...input.kinds])
+      .where('seen_at', 'is', null)
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc')
+      .limit(input.limit)
+      .execute();
+    return this.#hydrate(rows);
   }
 
   async countSince(

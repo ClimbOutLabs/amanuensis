@@ -115,13 +115,12 @@ describe('sortNewestFirst', () => {
 });
 
 describe('dateGroupLabel', () => {
-  it('names today, yesterday, last week, then the month and year', () => {
+  it('names today and yesterday, then each earlier day by its date', () => {
     expect(dateGroupLabel({ timestamp: localDay({ daysAgo: 0, hour: 1 }), now: NOW })).toBe('Today');
     expect(dateGroupLabel({ timestamp: localDay({ daysAgo: 1 }), now: NOW })).toBe('Yesterday');
-    expect(dateGroupLabel({ timestamp: localDay({ daysAgo: 6 }), now: NOW })).toBe('Last week');
-    expect(dateGroupLabel({ timestamp: localDay({ daysAgo: 7 }), now: NOW })).toBe('Last week');
-    expect(dateGroupLabel({ timestamp: localDay({ daysAgo: 8 }), now: NOW })).toBe('October 2026');
-    expect(dateGroupLabel({ timestamp: new Date(2026, 2, 14, 9).toISOString(), now: NOW })).toBe('March 2026');
+    expect(dateGroupLabel({ timestamp: localDay({ daysAgo: 6 }), now: NOW })).toBe('Fri, Oct 16, 2026');
+    expect(dateGroupLabel({ timestamp: localDay({ daysAgo: 7 }), now: NOW })).toBe('Thu, Oct 15, 2026');
+    expect(dateGroupLabel({ timestamp: new Date(2026, 2, 14, 9).toISOString(), now: NOW })).toBe('Sat, Mar 14, 2026');
   });
 
   it('files a memory with an unreadable timestamp under Earlier', () => {
@@ -140,7 +139,7 @@ describe('groupMemoriesByDate', () => {
       ]),
       now: NOW,
     });
-    expect(groups.map(group => group.label)).toEqual(['Today', 'Last week', 'September 2026']);
+    expect(groups.map(group => group.label)).toEqual(['Today', 'Tue, Oct 20, 2026', 'Tue, Sep 22, 2026']);
     expect(groups[0]?.memories.map(item => item.id)).toEqual(['a', 'b']);
   });
 });

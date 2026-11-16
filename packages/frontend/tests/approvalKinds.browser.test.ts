@@ -41,6 +41,20 @@ async function allow(page: Page): Promise<void> {
   // The "Waiting for you" line can show before the card's buttons do.
   await button.first().waitFor({ timeout: RENDER_TIMEOUT_MS });
   assert.equal(await button.count(), 1, 'one card is waiting');
+  // Allow leads its row on every kind, and no choice is filled or inked differently from it.
+  const row = await button.evaluate(allowButton => {
+    const actions = allowButton.closest('.aui-approval-card__actions');
+    if (actions === null) throw new Error('Allow is outside the card choices');
+    return Array.from(actions.querySelectorAll('button')).map(choice => {
+      const style = getComputedStyle(choice);
+      return { label: (choice.textContent ?? '').trim(), background: style.backgroundColor, color: style.color };
+    });
+  });
+  assert.equal(row[0]?.label, 'Allow', `Allow is not the first choice: ${row.map(choice => choice.label).join(', ')}`);
+  for (const choice of row) {
+    assert.equal(choice.background, row[0]?.background, `"${choice.label}" is filled differently from Allow`);
+    assert.equal(choice.color, row[0]?.color, `"${choice.label}" has a different ink from Allow`);
+  }
   await button.click();
   await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
   await button.waitFor({ state: 'detached', timeout: RENDER_TIMEOUT_MS });
@@ -97,9 +111,23 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
       timeout: FIRST_LOAD_TIMEOUT_MS,
     });
     await page.getByText('Waiting for you').first().waitFor({ timeout: FIRST_LOAD_TIMEOUT_MS });
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '1-card',
+        did: 'Opened a chat that stopped on a plain approval card for a connector tool that changes something.',
+        expect: 'The card says "Waiting for you" and shows what the tool will do.',
+      }),
+    });
     await allow(page);
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '2-allowed',
+        did: 'Pressed Allow on the card.',
+        expect: 'The card shows as allowed and the tool ran.',
+      }),
+    });
 
     current = 'approval:persona';
     assert.ok(
@@ -110,7 +138,15 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
     const personaCard = page.locator('main');
     await personaCard.getByText(`Add the persona "${SCRIPTED_PERSONA.name}"?`).waitFor({ timeout: RENDER_TIMEOUT_MS });
     await personaCard.getByText(SCRIPTED_PERSONA.description).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '1-card',
+        did: 'Asked Aman, with a scripted model, to add a persona. The chat stopped on an approval card.',
+        expect:
+          'The card shows the question "Add the persona ...?" with the persona name and description. Nothing is saved while it waits.',
+      }),
+    });
     assert.ok(
       !(await savedNames({ api, path: '/api/v1/personas' })).includes(SCRIPTED_PERSONA.name),
       'nothing is saved while the card waits',
@@ -120,7 +156,14 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
       (await savedNames({ api, path: '/api/v1/personas' })).includes(SCRIPTED_PERSONA.name),
       'Allow saved the persona',
     );
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '2-allowed',
+        did: 'Pressed Allow on the card.',
+        expect: 'The card shows as allowed and the persona is saved.',
+      }),
+    });
 
     current = 'approval:schedule';
     await askFromHome({ page, origin, ask: 'run:create_schedule please' });
@@ -129,7 +172,15 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
       .locator('main')
       .getByText(`Every Friday at 4:00 PM (${SCRIPTED_SCHEDULE.time_zone})`)
       .waitFor({ timeout: RENDER_TIMEOUT_MS });
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '1-card',
+        did: 'Asked Aman, with a scripted model, to add a schedule. The chat stopped on an approval card.',
+        expect:
+          'The card shows the task and "Every Friday at 4:00 PM" with its time zone. Nothing is saved while it waits.',
+      }),
+    });
     assert.ok(
       !(await savedNames({ api, path: '/api/v1/schedules' })).includes(SCRIPTED_SCHEDULE.name),
       'nothing is saved while the card waits',
@@ -139,7 +190,14 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
       (await savedNames({ api, path: '/api/v1/schedules' })).includes(SCRIPTED_SCHEDULE.name),
       'Allow saved the schedule',
     );
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '2-allowed',
+        did: 'Pressed Allow on the card.',
+        expect: 'The card shows as allowed and the schedule is saved.',
+      }),
+    });
 
     // A starter skill: it is added as shipped, so the card needs nothing from outside this machine.
     current = 'approval:skill';
@@ -154,7 +212,15 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
       .getByText(`github.com/anthropics/skills, folder ${SCRIPTED_SKILL.path}`)
       .first()
       .waitFor({ timeout: RENDER_TIMEOUT_MS });
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '1-card',
+        did: 'Asked Aman, with a scripted model, to add a starter skill. The chat stopped on an approval card.',
+        expect:
+          'The card shows the question "Add the skill ...?" and where the skill comes from. Nothing is saved while it waits.',
+      }),
+    });
     assert.ok(
       !(await savedNames({ api, path: '/api/v1/settings/skills' })).includes(SCRIPTED_SKILL.name),
       'nothing is saved while the card waits',
@@ -164,7 +230,14 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
       (await savedNames({ api, path: '/api/v1/settings/skills' })).includes(SCRIPTED_SKILL.name),
       'Allow added the skill',
     );
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '2-allowed',
+        did: 'Pressed Allow on the card.',
+        expect: 'The card shows as allowed and the skill is added.',
+      }),
+    });
 
     // Gmail and Google Calendar are the invented inbox and calendar from here on, so nothing reaches Google.
     api.setEvalMode(true);
@@ -177,7 +250,15 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
     for (const shown of [SCRIPTED_DRAFT.to[0], SCRIPTED_DRAFT.subject, SCRIPTED_DRAFT.body]) {
       await mailCard.getByText(shown).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
     }
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '1-card',
+        did: 'Asked Aman, with a scripted model, to draft an email in the invented inbox. The chat stopped on an approval card.',
+        expect:
+          'The card shows "Save this draft?" with who it goes to, the subject and the body. Nothing is saved while it waits.',
+      }),
+    });
     assert.deepEqual(await savedDraftIds(api), [], 'nothing is saved while the card waits');
     await allow(page);
     const [draftId, ...otherDrafts] = await savedDraftIds(api);
@@ -185,22 +266,44 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
     const draft = await api.evalSources().gmail.getDraft(draftId);
     const subject = draft.message?.payload?.headers?.find(header => header.name.toLowerCase() === 'subject');
     assert.equal(subject?.value, SCRIPTED_DRAFT.subject, 'the saved draft is the one the card showed');
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '2-allowed',
+        did: 'Pressed Allow on the card.',
+        expect: 'The card shows as allowed and exactly one draft is saved, with the subject the card showed.',
+      }),
+    });
 
     current = 'approval:calendar_event';
     assert.equal(await savedEventCount(api), 0, 'the event is not in the calendar before the card is allowed');
     await askFromHome({ page, origin, ask: 'run:create_event please' });
     const eventCard = page.locator('main');
+    // The headline is the server's copy, which names the calendar and the day.
     await eventCard
-      .getByText(`Add "${SCRIPTED_EVENT.title}" to your calendar?`)
+      .getByText(`Add "${SCRIPTED_EVENT.title}" to your Google Calendar on`)
       .first()
       .waitFor({ timeout: RENDER_TIMEOUT_MS });
     await eventCard.getByText(SCRIPTED_EVENT.location).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '1-card',
+        did: 'Asked Aman, with a scripted model, to add an event to the invented calendar. The chat stopped on an approval card.',
+        expect: 'The card shows the event title, the calendar, the day and the place. Nothing is saved while it waits.',
+      }),
+    });
     assert.equal(await savedEventCount(api), 0, 'nothing is saved while the card waits');
     await allow(page);
     assert.equal(await savedEventCount(api), 1, 'Allow added the event');
-    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: current,
+        step: '2-allowed',
+        did: 'Pressed Allow on the card.',
+        expect: 'The card shows as allowed and the event is in the calendar once.',
+      }),
+    });
   } catch (error) {
     await saveFailureShots({ browser, surface: current });
     throw error;

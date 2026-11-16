@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { VAULT_TOMBSTONES_FILE } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 
 async function withClient(run: (client: MarkdownMemoryClient, dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(path.join(tmpdir(), 'mdmem-doc-'));
@@ -13,13 +14,13 @@ async function withClient(run: (client: MarkdownMemoryClient, dir: string) => Pr
   }
 }
 
-function profileItem(content: string) {
+function profileItem(content: string): RetainItem {
   return {
     content,
     timestamp: '2026-10-28T12:00:00.000Z',
     document_id: 'learned-profile',
     context: 'Learned user profile',
-    metadata: { replace_document: 'true' },
+    metadata: { origin: 'user_stated', replace_document: 'true' },
   };
 }
 
@@ -27,8 +28,6 @@ async function recalledTexts(client: MarkdownMemoryClient): Promise<string[]> {
   const outcome = await client.recall({
     query: 'profile tea coffee',
     maxTokens: 4000,
-    queryTimestamp: '2026-10-28T13:00:00.000Z',
-    entityTokens: 0,
     timeoutMs: 1000,
   });
   if (!outcome.ok) {
@@ -76,9 +75,13 @@ describe('MarkdownMemoryClient documents', () => {
     await withClient(async client => {
       await client.retain({ items: [profileItem('Profile: likes tea')], operationId: 'op-1', timeoutMs: 1000 });
 
-      expect(await client.deleteDocument({ documentId: 'learned-profile', timeoutMs: 1000 })).toEqual({ ok: true });
-      expect(await client.deleteDocument({ documentId: 'learned-profile', timeoutMs: 1000 })).toEqual({ ok: true });
-      expect(await client.deleteDocument({ documentId: 'never-stored', timeoutMs: 1000 })).toEqual({ ok: true });
+      expect(await client.deleteDocument({ documentId: 'learned-profile', timeoutMs: 1000 })).toMatchObject({
+        ok: true,
+      });
+      expect(await client.deleteDocument({ documentId: 'learned-profile', timeoutMs: 1000 })).toMatchObject({
+        ok: true,
+      });
+      expect(await client.deleteDocument({ documentId: 'never-stored', timeoutMs: 1000 })).toMatchObject({ ok: true });
 
       expect(await recalledTexts(client)).toEqual([]);
     });
@@ -86,10 +89,11 @@ describe('MarkdownMemoryClient documents', () => {
 
   it('leaves entries without the replace flag alone', async () => {
     await withClient(async client => {
-      const turn = (content: string) => ({
+      const turn = (content: string): RetainItem => ({
         content,
         timestamp: '2026-10-28T12:00:00.000Z',
         document_id: 'same-id',
+        metadata: { origin: 'user_stated' },
       });
       await client.retain({ items: [turn('profile tea one')], operationId: 'op-1', timeoutMs: 1000 });
       await client.retain({ items: [turn('profile tea two')], operationId: 'op-2', timeoutMs: 1000 });
@@ -118,7 +122,7 @@ describe('MarkdownMemoryClient documents', () => {
         timeoutMs: 1000,
       });
 
-      expect(retried).toEqual({ ok: true });
+      expect(retried).toMatchObject({ ok: true });
       const texts = await recalledTexts(client);
       expect(texts).toHaveLength(1);
       expect(texts[0]).toContain('likes coffee');

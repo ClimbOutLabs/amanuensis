@@ -1,6 +1,6 @@
 /**
  * Meaning-based recall for the markdown memory backend. When the vector leg
- * cannot contribute — model still downloading, backfill incomplete, no peaked
+ * cannot contribute — model missing or still loading, backfill incomplete, no peaked
  * signal, or any error — it degrades to "not available" and recall behaves
  * exactly as it did before embeddings existed. A peak gate (top-1 similarity
  * minus the corpus mean) rejects flat score distributions; peaked vector hits
@@ -9,8 +9,9 @@
 import { PromiseTimeoutError, withTimeout } from '@truefoundry/trueforge-core/core';
 import path from 'node:path';
 import { EMBEDDING_DIMENSIONS, getSharedEmbeddingModel, type EmbeddingModel } from './embeddingModel';
-import { EmbeddingStore, hashEntryText } from './embeddingStore';
-import { namespaceDirFor, scanNamespaceEntries } from './markdownMemoryFiles';
+import { EmbeddingStore, hashEntryText, LOG_VECTORS_FILE } from './embeddingStore';
+import { namespaceDirFor, scanNamespaceEntries, withoutSourceLines } from './markdownMemoryFiles';
+import { trackMemoryBackgroundWork } from './memoryBackgroundWork';
 
 /** How many vector hits lead the ranking; bounded work per recall. */
 export const VECTOR_TOP_K = 50;
@@ -149,7 +150,7 @@ export function orderVectorFirst({
   return ordered;
 }
 
-export type EmbeddingSubsystemState = 'starting' | 'downloading' | 'backfilling' | 'ready' | 'unavailable';
+export type EmbeddingSubsystemState = 'starting' | 'backfilling' | 'ready' | 'unavailable';
 
 export interface EmbeddingStatus {
   state: EmbeddingSubsystemState;
@@ -171,6 +172,15 @@ export interface EmbeddingSubsystemOptions {
 export interface RankedMemory {
   id: string;
   text: string;
+}
+
+/**
+ * The text of a memory that is embedded and hashed. The closing line that says where it came from is
+ * left out: the same words on many notes would pull them toward each other and toward any question
+ * that uses those words.
+ */
+export function indexedText(entry: RankedMemory): string {
+  return withoutSourceLines(entry.text);
 }
 
 function defaultBatchSize(batchSize: number): number {
@@ -215,6 +225,18 @@ export class EmbeddingSubsystem {
     this.model = sharedModel(options);
   }
 
+  /** The shared model, so the statement index embeds with the same one instead of loading a second. */
+  get embeddingModel(): EmbeddingModel {
+    return this.model;
+  }
+
+  /** The log's vectors once the model is ready and every saved note has one; undefined before that. */
+  get readyStore(): EmbeddingStore | undefined {
+    return this.model.currentPhase === 'ready' && this.store?.isBackfilled === true && !this.backfillRunning
+      ? this.store
+      : undefined;
+  }
+
   getStatus(): EmbeddingStatus {
     const indexedEntries = this.store?.size ?? 0;
     const phase = this.model.currentPhase;
@@ -233,14 +255,6 @@ export class EmbeddingSubsystem {
       return {
         state: 'ready',
         detail: 'Smart search is on — memories are found by meaning as well as keywords.',
-        indexedEntries,
-      };
-    }
-    if (phase === 'downloading') {
-      return {
-        state: 'downloading',
-        detail:
-          'Downloading the memory search model once (about 120 MB) in the background. Memory search keeps working with keywords until it finishes.',
         indexedEntries,
       };
     }
@@ -280,7 +294,7 @@ export class EmbeddingSubsystem {
     // would let it fire inside the new attempt's cooldown, get gated, and
     // silently end the retry chain.
     this.clearRetry();
-    this.warmPromise = this.warm().then(
+    this.warmPromise = trackMemoryBackgroundWork(this.warm()).then(
       warmed => {
         this.warmPromise = undefined;
         // Only a warm that actually backfilled counts as success: a failed
@@ -434,11 +448,13 @@ export class EmbeddingSubsystem {
     if (entries.length === 0) {
       return;
     }
-    void this.queueStoreMutation(() => this.indexEntries(entries)).catch((error: unknown) => {
-      this.log?.(
-        `Smart search couldn't index ${String(entries.length)} new memories (${error instanceof Error ? error.message : String(error)}); the next warm will retry.`,
-      );
-    });
+    void trackMemoryBackgroundWork(this.queueStoreMutation(() => this.indexEntries(entries))).catch(
+      (error: unknown) => {
+        this.log?.(
+          `Smart search couldn't index ${String(entries.length)} new memories (${error instanceof Error ? error.message : String(error)}); the next warm will retry.`,
+        );
+      },
+    );
   }
 
   private async indexEntries(entries: RankedMemory[]): Promise<void> {
@@ -448,19 +464,19 @@ export class EmbeddingSubsystem {
     }
     const pending = entries.filter(entry => {
       const existing = store.get(entry.id);
-      return existing?.hash !== hashEntryText(entry.text);
+      return existing?.hash !== hashEntryText(indexedText(entry));
     });
     if (pending.length === 0) {
       return;
     }
     for (let i = 0; i < pending.length; i += this.batchSize) {
       const batch = pending.slice(i, i + this.batchSize);
-      const vectors = await this.model.embedPassages(batch.map(entry => entry.text));
+      const vectors = await this.model.embedPassages(batch.map(indexedText));
       for (let k = 0; k < batch.length; k++) {
         const entry = batch[k];
         const vector = vectors[k];
         if (entry !== undefined && vector !== undefined) {
-          store.set({ id: entry.id, text: entry.text, vector });
+          store.set({ id: entry.id, text: indexedText(entry), vector });
         }
       }
       await store.save();
@@ -478,7 +494,7 @@ export class EmbeddingSubsystem {
     // the retry stays on the short cooldown instead of the 10-minute timer.
     let warmed = false;
     await this.queueStoreMutation(async () => {
-      this.store = await EmbeddingStore.load({ namespaceDir: this.namespaceDir() });
+      this.store = await EmbeddingStore.load({ namespaceDir: this.namespaceDir(), fileName: LOG_VECTORS_FILE });
       await this.backfill();
       warmed = this.store.isBackfilled;
     });
@@ -513,7 +529,7 @@ export class EmbeddingSubsystem {
       }
       const pending = scan.entries.filter(entry => {
         const existing = store.get(entry.id);
-        return existing?.hash !== hashEntryText(entry.text);
+        return existing?.hash !== hashEntryText(indexedText(entry));
       });
       this.backfillTotal = pending.length;
       this.backfillDone = 0;
@@ -525,12 +541,12 @@ export class EmbeddingSubsystem {
       let batchesSinceSave = 0;
       for (let i = 0; i < pending.length; i += this.batchSize) {
         const batch = pending.slice(i, i + this.batchSize);
-        const vectors = await this.model.embedPassages(batch.map(entry => entry.text));
+        const vectors = await this.model.embedPassages(batch.map(indexedText));
         for (let k = 0; k < batch.length; k++) {
           const entry = batch[k];
           const vector = vectors[k];
           if (entry !== undefined && vector !== undefined) {
-            store.set({ id: entry.id, text: entry.text, vector });
+            store.set({ id: entry.id, text: indexedText(entry), vector });
           }
         }
         batchesSinceSave += 1;

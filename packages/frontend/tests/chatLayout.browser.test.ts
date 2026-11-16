@@ -78,8 +78,22 @@ test(
       await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.locator('.aui-thread-composer').waitFor({ timeout: RENDER_TIMEOUT_MS });
 
-      await page.screenshot({ path: await featureShotPath({ surface: 'route:session', step: 'new-chat-opened' }) });
-      await page.screenshot({ path: await featureShotPath({ surface: 'route:turn', step: 'reply-shown' }) });
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: 'route:session',
+          step: 'new-chat-opened',
+          did: 'Opened Aman on a 1440 px wide screen, typed "Hello" and pressed Enter. A scripted model answered.',
+          expect: 'A new chat opened with the message in it and a place to type the next one.',
+        }),
+      });
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: 'route:turn',
+          step: 'reply-shown',
+          did: 'Opened Aman on a 1440 px wide screen, typed "Hello" and pressed Enter. A scripted model answered.',
+          expect: 'The reply shows in the chat, with the chat column centred between the two side panels.',
+        }),
+      });
       const bothOpen = await composerBox(page);
       assertCentred(bothOpen, 'both sides open');
       assert.equal(bothOpen.transition, '0.3s', 'the width change is smooth when motion is allowed');
@@ -93,7 +107,12 @@ test(
       await page.getByRole('button', { name: 'Hide panel' }).click();
       const bothFolded = await composerBox(page);
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:chat-layout', step: 'both-sides-folded' }),
+        path: await featureShotPath({
+          surface: 'screen:chat-layout',
+          step: 'both-sides-folded',
+          did: 'In that chat, folded the chat list on the left and the panel on the right.',
+          expect: 'The chat column is wider than before and still centred.',
+        }),
       });
       assert.ok(
         bothFolded.width > listFolded.width + 64,
@@ -134,7 +153,12 @@ test(
           };
         });
         await small.screenshot({
-          path: await featureShotPath({ surface: 'screen:chat-layout', step: `phone-header-${String(width)}` }),
+          path: await featureShotPath({
+            surface: 'screen:chat-layout',
+            step: `phone-header-${String(width)}`,
+            did: `Opened the same chat on a ${String(width)} px wide phone.`,
+            expect: 'The top bar is one line: its buttons sit level, none runs off the screen and nothing wraps.',
+          }),
         });
         assert.ok(!header.overflows, `the ${String(width)}px phone header does not overflow`);
         assert.ok(header.height <= 57, `the phone header is one line tall (${header.height})`);

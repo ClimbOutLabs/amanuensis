@@ -39,12 +39,12 @@ export function sessionApprovalSource({
           agent_id: undefined,
           folder_id: undefined,
           no_folder: false,
+          include_private: false,
           created_by_or_agent_ids: undefined,
           metadata: undefined,
           source_type: undefined,
           source_id: undefined,
           // An incognito chat leaves no trace outside itself, so its waiting approvals are never raised.
-          include_private: false,
         });
         let older = false;
         for (const session of listed.data) {

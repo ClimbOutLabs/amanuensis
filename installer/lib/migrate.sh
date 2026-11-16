@@ -62,7 +62,7 @@ migrate_export() {
   D run --rm -i --network "$MIGRATE_NET" --user "$APP_UID:$APP_UID" \
     -e STANDALONE=false -e NODE_ENV=production -e HOME=/tmp -e TRUEFORGE_API_KEY=export-only-placeholder \
     -e POSTGRES_HOST="$MIGRATE_PG" -e POSTGRES_PORT=5432 -e POSTGRES_USER=aman -e POSTGRES_PASSWORD=unused -e POSTGRES_DB=aman \
-    -e MEMORY_BACKEND=markdown -e MEMORY_MARKDOWN_DIR=/data/memory -e PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
+    -e MEMORY_MARKDOWN_DIR=/data/memory -e PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
     -v aman_migrate_memory:/data/memory -v aman_migrate_knowledge:/data/persona-knowledge -v aman_migrate_out:/out \
     --tmpfs "/migrate:rw,mode=0700,uid=$APP_UID,gid=$APP_UID,size=1m" \
     "$MIGRATE_IMAGE" sh -c 'cat >/migrate/old.env && exec aman export-data "$@"' export-data "$@" <"$MIGRATE_ENV"
@@ -185,7 +185,7 @@ cmd_migrate() {
   # Shared memories and instance settings can hold other people's data, so they come along only when one person used it.
   if [ "$count" = 1 ]; then include=(--include-instance-data); fi
 
-  say "Exporting the chats of $user from the copy"
+  say "Exporting the chats of ${display:-$user} from the copy"
   migrate_export --migrate --include-uploads ${include[@]+"${include[@]}"} --user "$user" \
     --secrets-env /migrate/old.env --out /out/aman-export.zip >/dev/null 2>"$log" ||
     die "Export failed: $(cli_reason "$log" "The export stopped without giving a reason. Run this again.")"

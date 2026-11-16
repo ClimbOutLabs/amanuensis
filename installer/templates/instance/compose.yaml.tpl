@@ -2,12 +2,12 @@
 name: aman-@@NAME@@
 
 services:
-  # Idle holder of the network namespace that app, login and the https front end share and that publishes their ports.
-  # They are on 127.0.0.1 and on each private address of this computer an instance opened on the local network lists,
-  # never on a wildcard; the login port is always on 127.0.0.1 (other devices reach sign-in through the app). Either
-  # container can restart without stranding the other, and the login issuer name is the same URL for the browser and
-  # for the app.
+  # Idle holder of the network namespace that app, login and the https front end share and that publishes their ports on
+  # 127.0.0.1 only; the login port is always there too (other devices reach sign-in through the app). Either container
+  # can restart without stranding the other, and the login issuer name is the same URL for the browser and for the app.
+  # Other devices come in through the lan service below, so an address this computer no longer has never stops these.
   loopback:
+    container_name: @@CONTAINER_PREFIX@@-loopback
     image: @@APP_IMAGE@@
     # Built on this machine and never pulled.
     pull_policy: never
@@ -25,14 +25,50 @@ services:
     networks:
       - default
       - link
+@@IF_LAN@@      - front
 @@IF_CALENDAR@@      - calendar
+@@IF_EMAIL@@      - mail
 @@IF_BROWSER@@      - browser-control
+@@IF_LOCAL_MODEL@@      - local-model
     restart: unless-stopped
+
+@@IF_LAN@@  # Listens for other devices on this computer's private addresses and passes each connection unchanged to the https
+@@IF_LAN@@  # front end, prefixed with the visitor's address so sign-in limits guessing per visitor. It is a container of its own,
+@@IF_LAN@@  # so when this computer loses one of these addresses only this one fails to start, and Aman still answers on
+@@IF_LAN@@  # 127.0.0.1. Never a wildcard.
+@@IF_LAN@@  lan:
+@@IF_LAN@@    container_name: @@CONTAINER_PREFIX@@-lan
+@@IF_LAN@@    image: @@APP_IMAGE@@
+@@IF_LAN@@    pull_policy: never
+@@IF_LAN@@    init: true
+@@IF_LAN@@    user: '10001:10001'
+@@IF_LAN@@    entrypoint:
+@@IF_LAN@@      - node
+@@IF_LAN@@      - --input-type=module
+@@IF_LAN@@      - -e
+@@IF_LAN@@      - "import n from 'node:net';const v=a=>(a||'').replace(/^::ffff:/,'');const r=(p,q)=>n.createServer(c=>{const u=n.connect(q,'loopback');const x=()=>{c.destroy();u.destroy()};c.on('error',x);u.on('error',x);const s=v(c.remoteAddress),d=v(c.localAddress);if(@@LAN_PROXY@@)u.write(n.isIPv4(s)&&n.isIPv4(d)?'PROXY TCP4 '+s+' '+d+' '+c.remotePort+' '+c.localPort+'\\r\\n':'PROXY UNKNOWN\\r\\n');c.pipe(u).pipe(c)}).listen(p);@@LAN_FORWARDS@@"
+@@IF_LAN@@    ports:
+@@LAN_PORTS@@
+@@IF_LAN@@    networks:
+@@IF_LAN@@      - lan-out
+@@IF_LAN@@      - front
+@@IF_LAN@@    depends_on:
+@@IF_LAN@@      loopback:
+@@IF_LAN@@        condition: service_started
+@@IF_LAN@@    cap_drop:
+@@IF_LAN@@      - ALL
+@@IF_LAN@@    security_opt:
+@@IF_LAN@@      - no-new-privileges:true
+@@IF_LAN@@    read_only: true
+@@IF_LAN@@    mem_limit: 64m
+@@IF_LAN@@    pids_limit: 64
+@@IF_LAN@@    restart: unless-stopped
 
   # Carries the app's speech requests to the shared speech services and nothing else: speech-to-text on 8001, the voice
   # on 8002. The services are on a network of their own with this relay alone, so they have no route to the app, the
   # login service or the https front end.
   speech-link:
+    container_name: @@CONTAINER_PREFIX@@-speech-link
     image: @@APP_IMAGE@@
     pull_policy: never
     init: true
@@ -58,6 +94,7 @@ services:
     restart: unless-stopped
 
   app:
+    container_name: @@CONTAINER_PREFIX@@-app
     image: @@APP_IMAGE@@
     pull_policy: never
     network_mode: 'service:loopback'
@@ -113,13 +150,80 @@ services:
     stop_grace_period: 35s
     restart: unless-stopped
 
+@@IF_LOCAL_MODEL@@  # The local model bridge: carries the app's model requests to a model server on this computer, at the ports its owner
+@@IF_LOCAL_MODEL@@  # named with aman local-model. This host side dials the model and listens only on socket files in a volume it shares
+@@IF_LOCAL_MODEL@@  # with the link side below, never on a network port, so nothing else reaches the model through it.
+@@IF_LOCAL_MODEL@@  local-model-host:
+@@IF_LOCAL_MODEL@@    container_name: @@CONTAINER_PREFIX@@-local-model-host
+@@IF_LOCAL_MODEL@@    image: @@APP_IMAGE@@
+@@IF_LOCAL_MODEL@@    pull_policy: never
+@@IF_LOCAL_MODEL@@    init: true
+@@IF_LOCAL_MODEL@@    user: '10001:10001'
+@@IF_LOCAL_MODEL@@    entrypoint: ['node', '/usr/local/lib/aman/local-model-bridge.mjs']
+@@IF_LOCAL_MODEL@@    environment:
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_SIDE: host
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_PORTS: '@@LOCAL_MODEL_PORTS@@'
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_TARGET: '@@LOCAL_MODEL_TARGET@@'
+@@IF_LOCAL_MODEL_HOSTNET@@    # Docker runs on this computer itself, so this side shares its network to reach a model that listens on 127.0.0.1.
+@@IF_LOCAL_MODEL_HOSTNET@@    network_mode: host
+@@IF_LOCAL_MODEL_DESKTOP@@    # Docker Desktop reaches a model on this computer at host.docker.internal, from a network of this side's own.
+@@IF_LOCAL_MODEL_DESKTOP@@    networks:
+@@IF_LOCAL_MODEL_DESKTOP@@      - local-model-egress
+@@IF_LOCAL_MODEL_DESKTOP@@    extra_hosts:
+@@IF_LOCAL_MODEL_DESKTOP@@      - 'host.docker.internal:host-gateway'
+@@IF_LOCAL_MODEL@@    volumes:
+@@IF_LOCAL_MODEL@@      - ./local-model-bridge.mjs:/usr/local/lib/aman/local-model-bridge.mjs:ro
+@@IF_LOCAL_MODEL@@      - local-model-sockets:/run/aman-local-model
+@@IF_LOCAL_MODEL@@    cap_drop:
+@@IF_LOCAL_MODEL@@      - ALL
+@@IF_LOCAL_MODEL@@    security_opt:
+@@IF_LOCAL_MODEL@@      - no-new-privileges:true
+@@IF_LOCAL_MODEL@@    read_only: true
+@@IF_LOCAL_MODEL@@    mem_limit: 64m
+@@IF_LOCAL_MODEL@@    pids_limit: 64
+@@IF_LOCAL_MODEL@@    restart: unless-stopped
+
+@@IF_LOCAL_MODEL@@  # The link side: answers the app at aman-local-model on a network only the app's network holder shares, and passes
+@@IF_LOCAL_MODEL@@  # each connection to the host side's socket file.
+@@IF_LOCAL_MODEL@@  local-model-link:
+@@IF_LOCAL_MODEL@@    container_name: @@CONTAINER_PREFIX@@-local-model-link
+@@IF_LOCAL_MODEL@@    image: @@APP_IMAGE@@
+@@IF_LOCAL_MODEL@@    pull_policy: never
+@@IF_LOCAL_MODEL@@    init: true
+@@IF_LOCAL_MODEL@@    user: '10001:10001'
+@@IF_LOCAL_MODEL@@    entrypoint: ['node', '/usr/local/lib/aman/local-model-bridge.mjs']
+@@IF_LOCAL_MODEL@@    environment:
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_SIDE: link
+@@IF_LOCAL_MODEL@@      LOCAL_MODEL_PORTS: '@@LOCAL_MODEL_PORTS@@'
+@@IF_LOCAL_MODEL@@    networks:
+@@IF_LOCAL_MODEL@@      local-model:
+@@IF_LOCAL_MODEL@@        aliases:
+@@IF_LOCAL_MODEL@@          - aman-local-model
+@@IF_LOCAL_MODEL@@    volumes:
+@@IF_LOCAL_MODEL@@      - ./local-model-bridge.mjs:/usr/local/lib/aman/local-model-bridge.mjs:ro
+@@IF_LOCAL_MODEL@@      - local-model-sockets:/run/aman-local-model
+@@IF_LOCAL_MODEL@@    depends_on:
+@@IF_LOCAL_MODEL@@      local-model-host:
+@@IF_LOCAL_MODEL@@        condition: service_started
+@@IF_LOCAL_MODEL@@    cap_drop:
+@@IF_LOCAL_MODEL@@      - ALL
+@@IF_LOCAL_MODEL@@    security_opt:
+@@IF_LOCAL_MODEL@@      - no-new-privileges:true
+@@IF_LOCAL_MODEL@@    read_only: true
+@@IF_LOCAL_MODEL@@    mem_limit: 64m
+@@IF_LOCAL_MODEL@@    pids_limit: 64
+@@IF_LOCAL_MODEL@@    restart: unless-stopped
+
 @@IF_TLS@@  # Serves the app over https on the addresses of this computer, with a certificate from its own authority, and sends the
 @@IF_TLS@@  # plain port to https. It shares the network of the app, so the app is never reachable except through it.
 @@IF_TLS@@  tls:
+@@IF_TLS@@    container_name: @@CONTAINER_PREFIX@@-tls
 @@IF_TLS@@    image: @@CADDY_IMAGE@@
 @@IF_TLS@@    network_mode: 'service:loopback'
 @@IF_TLS@@    user: '@@TLS_USER@@'
 @@IF_TLS@@    command: ['caddy', 'run', '--config', '/etc/caddy/Caddyfile']
+@@IF_TLS@@    labels:
+@@IF_TLS@@      aman.tls-config: '@@TLS_CONFIG@@'
 @@IF_TLS@@    volumes:
 @@IF_TLS@@      - ./tls.Caddyfile:/etc/caddy/Caddyfile:ro
 @@IF_TLS_HOST@@      - @@TLS_LEAF_DIR@@:/certs:ro
@@ -166,6 +270,7 @@ services:
 # and the Settings Calendar card changes through the same agent on port 9560.
 # The tool server inside runs only while a login is saved.
 @@IF_CALENDAR@@  calendar-caldav:
+@@IF_CALENDAR@@    container_name: @@CONTAINER_PREFIX@@-calendar-caldav
 @@IF_CALENDAR@@    image: @@CALENDAR_IMAGE@@
 @@IF_CALENDAR@@    pull_policy: never
 @@IF_CALENDAR@@    environment:
@@ -189,11 +294,13 @@ services:
 @@IF_CALENDAR@@      - no-new-privileges:true
 @@IF_CALENDAR@@    restart: unless-stopped
 
-# Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp on this project's
-# private network. Nothing is published. The account lives in a volume this sidecar owns, which the installer writes
-# through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559,
-# also private-network only.
+# Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp. Nothing is
+# published. It sits on a network of its own that only the app's network holder shares, so no other service can reach
+# its tool port or its account port. The account lives in a volume this sidecar owns, which the installer writes
+# through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559.
+# The account agent answers only a caller that presents this instance's secret.
 @@IF_EMAIL@@  mail-email:
+@@IF_EMAIL@@    container_name: @@CONTAINER_PREFIX@@-mail-email
 @@IF_EMAIL@@    image: @@MAIL_EMAIL_IMAGE@@
 @@IF_EMAIL@@    pull_policy: never
 @@IF_EMAIL@@    # The wrapper starts the connector on the send list the app writes, and restarts it when that list changes.
@@ -209,9 +316,13 @@ services:
 @@IF_EMAIL@@      # The account agent: the account file it owns, its private-network port, and its own path in the image.
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_PORT: '9559'
+@@IF_EMAIL@@      # Shared with the app through .env, which the installer fills in once.
+@@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?missing from .env}
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_AGENT: /usr/local/bin/aman-mail-account-agent
 @@IF_EMAIL@@      AMAN_MAIL_EMAIL_CHECK: /usr/local/bin/aman-mail-email-check
 @@IF_EMAIL@@      MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'
+@@IF_EMAIL@@    networks:
+@@IF_EMAIL@@      - mail
 @@IF_EMAIL@@    volumes:
 @@IF_EMAIL@@      - ./mail-email-entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
 @@IF_EMAIL@@      - ./mail-account-agent.py:/usr/local/bin/aman-mail-account-agent:ro
@@ -234,6 +345,7 @@ services:
 @@IF_BROWSER@@# through the gateway's proxy, which refuses this computer and private networks, and the app reaches it only through
 @@IF_BROWSER@@# the gateway's relay, which checks the secret the app and the gateway share. This container never holds that secret.
 @@IF_BROWSER@@  browser:
+@@IF_BROWSER@@    container_name: @@CONTAINER_PREFIX@@-browser
 @@IF_BROWSER@@    image: @@BROWSER_IMAGE@@
 @@IF_BROWSER@@    pull_policy: never
 @@IF_BROWSER@@    init: true
@@ -262,6 +374,7 @@ services:
 @@IF_BROWSER@@    restart: unless-stopped
 
 @@IF_BROWSER@@  browser-gateway:
+@@IF_BROWSER@@    container_name: @@CONTAINER_PREFIX@@-browser-gateway
 @@IF_BROWSER@@    image: @@BROWSER_GATEWAY_IMAGE@@
 @@IF_BROWSER@@    pull_policy: never
 @@IF_BROWSER@@    environment:
@@ -290,6 +403,7 @@ services:
 @@IF_BROWSER@@    restart: unless-stopped
 
   dex:
+    container_name: @@CONTAINER_PREFIX@@-dex
     image: @@DEX_IMAGE@@
     network_mode: 'service:loopback'
     command: ['dex', 'serve', '/etc/dex/config.yaml']
@@ -339,7 +453,7 @@ volumes:
 @@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
 @@IF_EMAIL@@  # Records which send list the Email connector loaded. Written by the connector, read by the app.
 @@IF_EMAIL@@  mail-policy-status:
-@@IF_EMAIL@@    name: aman_@@NAME@@_mail_policy_status
+@@IF_EMAIL@@    name: aman_@@SHORT_NAME@@_mail_policy_status
 @@IF_EMAIL@@    labels:
 @@IF_EMAIL@@      com.amanuensis.instance: @@NAME@@
 @@IF_EMAIL@@  # Mail metadata index (SQLite). Holds mail metadata at rest, never credentials.
@@ -362,6 +476,11 @@ volumes:
 @@IF_BROWSER@@    name: aman_@@NAME@@_browser_profiles
 @@IF_BROWSER@@    labels:
 @@IF_BROWSER@@      com.amanuensis.instance: @@NAME@@
+@@IF_LOCAL_MODEL@@  # The local model bridge's socket files. Holds no data.
+@@IF_LOCAL_MODEL@@  local-model-sockets:
+@@IF_LOCAL_MODEL@@    name: aman_@@SHORT_NAME@@_local_model
+@@IF_LOCAL_MODEL@@    labels:
+@@IF_LOCAL_MODEL@@      com.amanuensis.instance: @@NAME@@
 @@IF_SANDBOX@@  # Created by the slots project, which the installer starts before this one.
 @@IF_SANDBOX@@  slot_ctl_1:
 @@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_1
@@ -378,6 +497,11 @@ volumes:
 @@IF_SANDBOX@@    external: true
 
 networks:
+@@IF_LAN@@  # Between the app's network holder and the lan service only.
+@@IF_LAN@@  front:
+@@IF_LAN@@    internal: true
+@@IF_LAN@@  # The lan service's own network, which Docker publishes its ports from. Nothing else is on it.
+@@IF_LAN@@  lan-out: {}
   # Between the app and the relay only.
   link:
     internal: true
@@ -388,6 +512,9 @@ networks:
   # Between the app's network holder and the calendar connector only. Not internal: the connector reaches the
   # calendar server on the internet.
 @@IF_CALENDAR@@  calendar: {}
+@@IF_EMAIL@@  # Between the app's network holder and the mail connector only. Not internal: the connector reaches the mail
+@@IF_EMAIL@@  # server on the internet.
+@@IF_EMAIL@@  mail: {}
 @@IF_BROWSER@@  # The browser and its gateway only. Internal: the browser has no way out but the gateway.
 @@IF_BROWSER@@  browser-internal:
 @@IF_BROWSER@@    internal: true
@@ -396,3 +523,8 @@ networks:
 @@IF_BROWSER@@    internal: true
 @@IF_BROWSER@@  # The gateway's own way out to the internet. Nothing else is on it.
 @@IF_BROWSER@@  browser-egress: {}
+@@IF_LOCAL_MODEL@@  # The app's network holder and the local model bridge's link side only. Internal: it has no way out.
+@@IF_LOCAL_MODEL@@  local-model:
+@@IF_LOCAL_MODEL@@    internal: true
+@@IF_LOCAL_MODEL_DESKTOP@@  # The bridge's host side alone, for its calls to the model at host.docker.internal under Docker Desktop.
+@@IF_LOCAL_MODEL_DESKTOP@@  local-model-egress: {}

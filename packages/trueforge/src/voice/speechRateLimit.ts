@@ -1,7 +1,8 @@
 /**
- * Per-person limits on the voice service. One sidecar serves every person on the instance and
- * synthesizes one reply at a time, so each person gets a bounded share: a number of requests per
- * rolling minute and a cap on requests in flight. The read-aloud route and voice conversations share
+ * Per-person limits on the voice services. One sidecar serves every person on the instance and does
+ * one piece of speech work at a time, so each person gets a bounded share: a number of requests per
+ * rolling minute and a cap on requests in flight. Reading aloud and transcribing a recording share
+ * one budget. The read-aloud route and voice conversations share
  * the in-flight cap. Connecting a conversation uses a limiter of its own with a per-minute count only.
  * State is in memory and lost on restart.
  */
@@ -14,8 +15,13 @@ const MAX_KEYS = 1_000;
 interface KeyState {
   starts: number[];
   inFlight: number;
-  /** Callers waiting for a place, woken one at a time as places come back. */
-  waiters: (() => void)[];
+  /** Callers waiting for a place. A place that comes back goes straight to the first, never to a new request. */
+  waiters: ((release: () => void) => void)[];
+}
+
+/** The key a person's place at the voice service is kept under, the same wherever they speak from. */
+export function speechPersonKey({ tenantId, personId }: { tenantId: string; personId: string }): string {
+  return `${tenantId}:${personId}`;
 }
 
 export type SpeechPermit = { allowed: true; release: () => void } | { allowed: false; retryAfterSeconds: number };
@@ -47,26 +53,24 @@ export class SpeechRateLimiter {
     timeoutMs: number;
   }): Promise<() => void> {
     const stop = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
-    for (;;) {
-      stop.throwIfAborted();
-      const permit = this.#take({ key, countsTowardMinute: false });
-      if (permit.allowed) {
-        return permit.release;
-      }
-      const state = this.#keys.get(key);
-      await new Promise<void>((resolve, reject) => {
-        const wake = (): void => {
-          stop.removeEventListener('abort', giveUp);
-          resolve();
-        };
-        const giveUp = (): void => {
-          state?.waiters.splice(state.waiters.indexOf(wake), 1);
-          reject(stop.reason instanceof Error ? stop.reason : new Error('stopped waiting for a free place'));
-        };
-        state?.waiters.push(wake);
-        stop.addEventListener('abort', giveUp, { once: true });
-      });
+    stop.throwIfAborted();
+    const permit = this.#take({ key, countsTowardMinute: false });
+    if (permit.allowed) {
+      return permit.release;
     }
+    const state = this.#keys.get(key);
+    return await new Promise<() => void>((resolve, reject) => {
+      const handOver = (release: () => void): void => {
+        stop.removeEventListener('abort', giveUp);
+        resolve(release);
+      };
+      const giveUp = (): void => {
+        state?.waiters.splice(state.waiters.indexOf(handOver), 1);
+        reject(stop.reason instanceof Error ? stop.reason : new Error('stopped waiting for a free place'));
+      };
+      state?.waiters.push(handOver);
+      stop.addEventListener('abort', giveUp, { once: true });
+    });
   }
 
   #take({ key, countsTowardMinute }: { key: string; countsTowardMinute: boolean }): SpeechPermit {
@@ -88,16 +92,23 @@ export class SpeechRateLimiter {
       state.starts.push(now);
     }
     state.inFlight += 1;
+    return { allowed: true, release: this.#releaseFor(state) };
+  }
+
+  /** Frees a place once; when someone waits, the place stays counted and goes to them. */
+  #releaseFor(state: KeyState): () => void {
     let released = false;
-    return {
-      allowed: true,
-      release: () => {
-        if (!released) {
-          released = true;
-          state.inFlight -= 1;
-          state.waiters.shift()?.();
-        }
-      },
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      const next = state.waiters.shift();
+      if (next === undefined) {
+        state.inFlight -= 1;
+      } else {
+        next(this.#releaseFor(state));
+      }
     };
   }
 

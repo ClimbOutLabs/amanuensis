@@ -6,9 +6,6 @@ import type * as TrueForge from "../../../../../../index.js";
  * @example
  *     {
  *         manifest: {
- *             auth: {
- *                 apiKey: "api_key"
- *             },
  *             models: [{
  *                     modelId: "model_id",
  *                     name: "name",

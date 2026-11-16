@@ -647,13 +647,13 @@ describe('AgentsLibraryButton', () => {
   });
 
   it('does not show an empty-schedules action before schedule counts load', async () => {
+    // Every read waits on the same answer, so it does not matter how many reads the library
+    // has started, or whether one starts later, by the time the answer is given.
     let resolveSchedules: (value: { data: [] }) => void = () => undefined;
-    const listSchedules = vi.fn(
-      () =>
-        new Promise<{ data: [] }>(resolve => {
-          resolveSchedules = resolve;
-        }),
-    );
+    const schedules = new Promise<{ data: [] }>(resolve => {
+      resolveSchedules = resolve;
+    });
+    const listSchedules = vi.fn(() => schedules);
     const server = createMockAgentUIServer({
       searchAgents: vi.fn(async () => [{ name: 'alpha-agent', agentId: 'alpha-agent' }]),
       schedules: {

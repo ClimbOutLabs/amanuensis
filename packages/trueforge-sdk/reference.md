@@ -66,6 +66,72 @@ await client.internal.listPermissions({
 </dl>
 </details>
 
+## Telegram
+<details><summary><code>client.telegram.<a href="/src/api/resources/telegram/client/Client.ts">webhook</a>({ ...params }) -> void</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The address Telegram posts updates to when a public https address is configured. The secret Telegram was given at setup must ride the call, or it is refused. An update in a shape this build cannot read is dropped with the same success answer, so Telegram does not keep retrying it.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.telegram.webhook({
+    updateId: 1
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.TelegramWebhookUpdate`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Agents
 <details><summary><code>client.agents.<a href="/src/api/resources/agents/client/Client.ts">list</a>({ ...params }) -> core.Page&lt;TrueForge.Agent, TrueForge.ListAgentsResponse&gt;</code></summary>
 <dl>
@@ -1020,7 +1086,7 @@ await client.mcpServers.deleteAuthorization("name");
 <dl>
 <dd>
 
-Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.
+Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. The check changes nothing on the server. It does store, on the connector record, which of the listed tools the server itself declares as changes, because standing grants read that. A failed check is a 200 carrying the reason.
 </dd>
 </dl>
 </dd>
@@ -1036,69 +1102,6 @@ Runs the MCP handshake against the saved connector, lists its tools, and reads t
 
 ```typescript
 await client.mcpServers.homeAssistantCheck("name");
-
-```
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### ⚙️ Parameters
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-**name:** `string` — MCP server name.
-
-</dd>
-</dl>
-
-<dl>
-<dd>
-
-**requestOptions:** `McpServersClient.RequestOptions`
-
-</dd>
-</dl>
-</dd>
-</dl>
-
-
-</dd>
-</dl>
-</details>
-
-<details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">memoryCheck</a>(name) -> TrueForge.MemoryProviderCheckResponse</code></summary>
-<dl>
-<dd>
-
-#### 📝 Description
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-Runs one live recall against the Hindsight REST API behind this connector, the surface host-enforced memory actually calls. That is not the MCP endpoint `auth_status` reflects, and it may validate a different credential. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason. The same check runs on every create or replace that sets `manifest.memory_provider: true`.
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### 🔌 Usage
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-```typescript
-await client.mcpServers.memoryCheck("name");
 
 ```
 </dd>
@@ -6874,6 +6877,70 @@ await client.spaces.revert("space_id", {
 </dl>
 </details>
 
+## Today
+<details><summary><code>client.today.<a href="/src/api/resources/today/client/Client.ts">get</a>({ ...params }) -> TrueForge.GetTodayResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The person's day read from stored state: calendar events, free time, due reminders, held actions and how many schedules are on. Nothing here asks the assistant anything, and no model is called.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.today.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.GetTodayRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TodayClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Deliveries
 <details><summary><code>client.deliveries.<a href="/src/api/resources/deliveries/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListDeliveriesResponse</code></summary>
 <dl>
@@ -7387,7 +7454,7 @@ await client.reach.listSuggestions();
 <dl>
 <dd>
 
-Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.
+Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts and test calls are limited, and a test past the limit answers 429.
 </dd>
 </dl>
 </dd>
@@ -7429,6 +7496,70 @@ await client.reach.testChannel({
 <dd>
 
 **requestOptions:** `ReachClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Reminders
+<details><summary><code>client.reminders.<a href="/src/api/resources/reminders/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListRemindersResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lists the reminders the signed-in person set, upcoming and past, a page at a time, each with the chat it was set in.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reminders.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.ListRemindersRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `RemindersClient.RequestOptions`
 
 </dd>
 </dl>
@@ -8553,6 +8684,75 @@ await client.internal.sessions.getOrCreateByExternalId({
 </dl>
 </details>
 
+## Internal Telegram
+<details><summary><code>client.internal.telegram.<a href="/src/api/resources/internal/resources/telegram/client/Client.ts">processUpdate</a>({ ...params }) -> void</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Handles one update the controller polled for a connection: a message becomes a turn, a button tap answers an approval. Called only with the service credential.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.internal.telegram.processUpdate({
+    connectionId: "connection_id",
+    update: {
+        updateId: 1
+    }
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.internal.ProcessTelegramUpdateRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Internal Agents
 <details><summary><code>client.internal.agents.<a href="/src/api/resources/internal/resources/agents/client/Client.ts">getCodeSnippets</a>(agent_id, { ...params }) -> TrueForge.GetAgentCodeSnippetsResponse</code></summary>
 <dl>
@@ -8625,6 +8825,705 @@ await client.internal.agents.getCodeSnippets("agent_id");
 </dl>
 </details>
 
+## Memory Pages
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListMemoryPagesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+List the pages for people and matters, with the files that could not be read as pages.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.ListPagesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">listChanges</a>({ ...params }) -> TrueForge.ListMemoryPageChangesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+List the last changes to pages, newest first, and whether each can be undone.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.listChanges();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.ListChangesPagesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">undoChange</a>(change_id, { ...params }) -> TrueForge.UndoMemoryPageChangeResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Put the pages a change touched back as they were before it, as a new change. Refused while a later change left those pages different.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.undoChange("change_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**change_id:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.UndoChangePagesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">get</a>(kind, slug, { ...params }) -> TrueForge.GetMemoryPageResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Get one page: its sections in order, where each line came from, and its Markdown text.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.get("person", "slug");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**kind:** `TrueForge.GetPagesRequestKind`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**slug:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.GetPagesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">update</a>(kind, slug, { ...params }) -> TrueForge.GetMemoryPageResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Replace a page with the person’s Markdown. New or changed lines become their own. Refused when the page changed since the version sent, or the text is not a page.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.update("person", "slug", {
+    text: "text",
+    version: "version"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**kind:** `TrueForge.UpdatePagesRequestKind`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**slug:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.UpdateMemoryPageRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">delete</a>(kind, slug, { ...params }) -> TrueForge.DeleteMemoryPageResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Delete a page file. The history keeps it, so the delete can be undone.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.delete("person", "slug");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**kind:** `TrueForge.DeletePagesRequestKind`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**slug:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.DeletePagesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">dismissDisagreement</a>(kind, slug, disagreement_id, { ...params }) -> TrueForge.GetMemoryPageResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Mark a pair as not a problem. The same two lines are not listed again. No line on the page changes.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**kind:** `TrueForge.DismissDisagreementPagesRequestKind`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**slug:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**disagreement_id:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.DismissDisagreementPagesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">confirmLine</a>(kind, slug, fact_id, { ...params }) -> TrueForge.GetMemoryPageResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Move a line from Unconfirmed to a section of the page as the person’s own words.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.confirmLine("person", "slug", "fact_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**kind:** `TrueForge.ConfirmLinePagesRequestKind`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**slug:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**fact_id:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.ConfirmMemoryPageLineRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">dismissLine</a>(kind, slug, fact_id, { ...params }) -> TrueForge.GetMemoryPageResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Remove a line from Unconfirmed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.dismissLine("person", "slug", "fact_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**kind:** `TrueForge.DismissLinePagesRequestKind`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**slug:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**fact_id:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.DismissLinePagesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Memory Vault
 <details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListMemoryVaultEntriesResponse</code></summary>
 <dl>
@@ -8670,6 +9569,71 @@ await client.memory.vault.list();
 <dd>
 
 **request:** `TrueForge.memory.ListVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">deleteShown</a>({ ...params }) -> TrueForge.DeleteShownMemoryResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.deleteShown({
+    shownText: "shown_text"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.DeleteShownMemoryRequest`
 
 </dd>
 </dl>
@@ -8800,6 +9764,134 @@ await client.memory.vault.importEntries({
 <dd>
 
 **request:** `TrueForge.memory.ImportMemoryVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">listReviewNotes</a>({ ...params }) -> TrueForge.ListMemoryVaultReviewNotesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+List older notes with no record of their source that were saved in a chat where Aman read nothing from outside. Nothing changes. Each request looks at a limited number of notes; send `next_cursor` to continue.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.listReviewNotes();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.ListReviewNotesVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">markReviewNotes</a>({ ...params }) -> TrueForge.MarkMemoryVaultReviewNotesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Mark the named older notes as the person's own words. Each is checked again and refused unless it still qualifies. At most 200 ids per call.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.markReviewNotes({
+    entryIds: ["entry_ids"]
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.MarkMemoryVaultReviewNotesRequest`
 
 </dd>
 </dl>
@@ -8985,6 +10077,69 @@ await client.memory.vault.getSummaryStatus();
 <dd>
 
 **request:** `TrueForge.memory.GetSummaryStatusVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">dismissSummaryStatus</a>({ ...params }) -> TrueForge.DeleteMemoryVaultSummaryStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Put away the note that one vault namespace is owed a turn summary. Nothing in memory changes, and a later failed summary shows the note again.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.dismissSummaryStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.DismissSummaryStatusVaultRequest`
 
 </dd>
 </dl>
@@ -9399,6 +10554,514 @@ await client.personalization.briefItems.undo("item_key");
 </dl>
 </details>
 
+## Reach Texts
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">get</a>() -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reads the signed-in person’s number for texts and whether it is confirmed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">update</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Chooses Private (only the kind of thing) or Full (a reminder’s own words).
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.update({
+    mode: "private"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.UpdateTextModeRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">delete</a>() -> TrueForge.DeleteTextNumberResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Forgets the number and switches texts off.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.delete();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">sendCode</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Texts a one-time code to a number. Nothing else is sent to a number until it is confirmed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.sendCode({
+    phone: "phone"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.SendTextCodeRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">confirm</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks the one-time code. A right code confirms the number. Too many wrong tries void the code.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.confirm({
+    code: "code"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.ConfirmTextCodeRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">addWord</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lets a Full text carry a name or word that is not a common word. Letters only. A web ending or a number word is refused.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.addWord({
+    word: "word"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.AddTextWordRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">removeWord</a>(word) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Takes a word off the person’s list. A word that is not on it changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.removeWord("word");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**word:** `string` — The word to remove.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Sessions RecallExclusions
+<details><summary><code>client.sessions.recallExclusions.<a href="/src/api/resources/sessions/resources/recallExclusions/client/Client.ts">create</a>(session_id, { ...params }) -> TrueForge.CreateRecallExclusionResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Stops one recalled fact from being recalled again in this chat. The memory itself is not changed or deleted, and other chats still recall it.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.recallExclusions.create("session_id", {
+    factText: "fact_text"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.sessions.CreateRecallExclusionRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `RecallExclusionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings FirstRunGuide
 <details><summary><code>client.settings.firstRunGuide.<a href="/src/api/resources/settings/resources/firstRunGuide/client/Client.ts">get</a>() -> TrueForge.GetFirstRunGuideResponse</code></summary>
 <dl>
@@ -9509,6 +11172,128 @@ await client.settings.firstRunGuide.createOrUpdate({
 <dd>
 
 **requestOptions:** `FirstRunGuideClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings GitCommitIdentity
+<details><summary><code>client.settings.gitCommitIdentity.<a href="/src/api/resources/settings/resources/gitCommitIdentity/client/Client.ts">get</a>() -> TrueForge.GetGitCommitIdentityResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The name and email written on Git commits made in the sandbox. A `null` part means the person chose none and the default shown beside it is used.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.gitCommitIdentity.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `GitCommitIdentityClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.gitCommitIdentity.<a href="/src/api/resources/settings/resources/gitCommitIdentity/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetGitCommitIdentityResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Sets the name and email written on Git commits made in the sandbox. `null` for a part goes back to its default. New commits use the change from the next message.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.gitCommitIdentity.createOrUpdate({
+    email: null,
+    name: "Sam Rivera"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateGitCommitIdentityRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `GitCommitIdentityClient.RequestOptions`
 
 </dd>
 </dl>
@@ -9842,6 +11627,359 @@ await client.settings.mcpServers.delete("name");
 </dl>
 </details>
 
+## Settings MemoryNightly
+<details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">get</a>() -> TrueForge.GetMemoryNightlyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Whether the nightly tidy-up runs and at which hour: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryNightly.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryNightlyClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryNightlyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the nightly tidy-up override and its hour: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. A field left out stays as it is.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryNightly.createOrUpdate({
+    enabled: true,
+    hour: 0
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryNightlyRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryNightlyClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">getRun</a>() -> TrueForge.RunMemoryNightlyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Tells whether a tidy-up is running now (`busy`), what one that finished in the last hour did (`ran`), that it stopped on an error (`failed`), or that there is none (`idle`). It starts nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryNightly.getRun();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryNightlyClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">run</a>() -> TrueForge.RunMemoryNightlyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Starts tidying the memory pages, whatever the hour and whether or not the daily tidy-up is on. It answers at once with `busy` and does not wait for the end. With a tidy-up already running, it starts nothing. Read the same path to see what it did.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryNightly.run();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryNightlyClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings MemoryPageSorting
+<details><summary><code>client.settings.memoryPageSorting.<a href="/src/api/resources/settings/resources/memoryPageSorting/client/Client.ts">get</a>() -> TrueForge.GetMemoryPageSortingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryPageSorting.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryPageSortingClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryPageSorting.<a href="/src/api/resources/settings/resources/memoryPageSorting/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryPageSortingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryPageSorting.createOrUpdate({
+    mode: "report"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryPageSortingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryPageSortingClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings MemoryRecalls
 <details><summary><code>client.settings.memoryRecalls.<a href="/src/api/resources/settings/resources/memoryRecalls/client/Client.ts">get</a>() -> TrueForge.GetMemoryRecallResponse</code></summary>
 <dl>
@@ -10097,7 +12235,7 @@ await client.settings.memoryScreens.createOrUpdate({
 <dl>
 <dd>
 
-The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored, plus the effective state with the markdown-only gate applied.
+The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored.
 </dd>
 </dl>
 </dd>
@@ -10152,7 +12290,7 @@ await client.settings.memorySummarize.get();
 <dl>
 <dd>
 
-Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default. The response carries the effective state.
+Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default.
 </dd>
 </dl>
 </dd>
@@ -10290,9 +12428,6 @@ Creates a provider (models included). Fails if `name` is already taken. Well-kno
 ```typescript
 await client.settings.modelProviders.create({
     manifest: {
-        auth: {
-            apiKey: "api_key"
-        },
         models: [{
                 modelId: "model_id",
                 name: "name",
@@ -10365,9 +12500,6 @@ Create or replace a provider (models included). Well-known types use `type` as `
 ```typescript
 await client.settings.modelProviders.createOrUpdate({
     manifest: {
-        auth: {
-            apiKey: "api_key"
-        },
         models: [{
                 modelId: "model_id",
                 name: "name",
@@ -10907,6 +13039,72 @@ await client.settings.skills.createOrUpdate({
 </dl>
 </details>
 
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">checkWebsites</a>({ ...params }) -> TrueForge.CheckSkillWebsitesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reads every file of a git skill and lists the websites it sends requests to. Nothing is saved. Approve the list when adding the skill.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.checkWebsites({
+    ref: "ref",
+    url: "url"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.CheckSkillWebsitesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">delete</a>(name) -> TrueForge.DeleteSkillResponse</code></summary>
 <dl>
 <dd>
@@ -11136,6 +13334,298 @@ await client.settings.skills.deleteNetworkApproval("name");
 <dd>
 
 **name:** `TrueForge.ResourceName`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">createOrUpdateNetworkAllowedHost</a>(name, { ...params }) -> TrueForge.UpdateSkillNetworkHostResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Allows one site for the skill on its own, apart from the declared list approval. On a skill with no approval yet, the allowance is bound to the skill's code as it stands, and a code version that cannot be read refuses it.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.createOrUpdateNetworkAllowedHost("name", {
+    host: "host"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `TrueForge.ResourceName`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.UpdateSkillNetworkHostRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">deleteNetworkAllowedHost</a>(name, { ...params }) -> TrueForge.DeleteSkillNetworkHostResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Clears the one-site allowance. The skill cannot reach the site from the next run on.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.deleteNetworkAllowedHost("name", {
+    host: "host"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `TrueForge.ResourceName`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.DeleteNetworkAllowedHostSkillsRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">createOrUpdateNetworkDeniedHost</a>(name, { ...params }) -> TrueForge.UpdateSkillNetworkHostResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Stores the site as turned down for the skill, so it is not granted and raises no card.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.createOrUpdateNetworkDeniedHost("name", {
+    host: "host"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `TrueForge.ResourceName`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.UpdateSkillNetworkHostRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">deleteNetworkDeniedHost</a>(name, { ...params }) -> TrueForge.DeleteSkillNetworkHostResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Clears the site being turned down, so a card can ask about it again.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.skills.deleteNetworkDeniedHost("name", {
+    host: "host"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `TrueForge.ResourceName`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.DeleteNetworkDeniedHostSkillsRequest`
 
 </dd>
 </dl>
@@ -11400,7 +13890,7 @@ await client.settings.calendar.saveAccount({
 </dl>
 </details>
 
-<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">removeAccount</a>() -> TrueForge.RemoveCalendarAccountResponse</code></summary>
+<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">removeAccount</a>({ ...params }) -> TrueForge.RemoveCalendarAccountResponse</code></summary>
 <dl>
 <dd>
 
@@ -11412,7 +13902,7 @@ await client.settings.calendar.saveAccount({
 <dl>
 <dd>
 
-Deletes the saved account and its app password from the sidecar for good.
+Deletes the named account and its app password from the sidecar for good, or every account when the body names none.
 </dd>
 </dl>
 </dd>
@@ -11443,6 +13933,79 @@ await client.settings.calendar.removeAccount();
 <dl>
 <dd>
 
+**request:** `TrueForge.settings.RemoveCalendarAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `CalendarClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.calendar.<a href="/src/api/resources/settings/resources/calendar/client/Client.ts">setDefaultAccount</a>({ ...params }) -> TrueForge.SetDefaultCalendarAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Makes the named connected account the default. Naming an account that is not connected changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.calendar.setDefaultAccount({
+    address: "address"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.SetDefaultCalendarAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
 **requestOptions:** `CalendarClient.RequestOptions`
 
 </dd>
@@ -11467,7 +14030,7 @@ await client.settings.calendar.removeAccount();
 <dl>
 <dd>
 
-Returns whether a calendar account is connected, its email, login and calendar address, and the provider table for the picker. The app password is never returned.
+Returns whether a calendar account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.
 </dd>
 </dl>
 </dd>
@@ -11578,7 +14141,7 @@ await client.settings.email.saveAccount({
 </dl>
 </details>
 
-<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">removeAccount</a>() -> TrueForge.RemoveEmailAccountResponse</code></summary>
+<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">removeAccount</a>({ ...params }) -> TrueForge.RemoveEmailAccountResponse</code></summary>
 <dl>
 <dd>
 
@@ -11590,7 +14153,7 @@ await client.settings.email.saveAccount({
 <dl>
 <dd>
 
-Deletes the saved account and its app password from the sidecar for good.
+Deletes the named account and its app password from the sidecar for good, or every account when the body names none.
 </dd>
 </dl>
 </dd>
@@ -11621,6 +14184,79 @@ await client.settings.email.removeAccount();
 <dl>
 <dd>
 
+**request:** `TrueForge.settings.RemoveEmailAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `EmailClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.email.<a href="/src/api/resources/settings/resources/email/client/Client.ts">setDefaultAccount</a>({ ...params }) -> TrueForge.SetDefaultEmailAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Makes the named connected account the default. Naming an account that is not connected changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.email.setDefaultAccount({
+    address: "address"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.SetDefaultEmailAccountRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
 **requestOptions:** `EmailClient.RequestOptions`
 
 </dd>
@@ -11645,7 +14281,7 @@ await client.settings.email.removeAccount();
 <dl>
 <dd>
 
-Returns whether an email account is connected, its address and provider, and the provider table for the picker. The app password is never returned.
+Returns whether an email account is connected, its accounts and the default among them, and the provider table for the picker. The app password is never returned.
 </dd>
 </dl>
 </dd>
@@ -12218,6 +14854,302 @@ await client.settings.notes.getStatus();
 <dd>
 
 **requestOptions:** `NotesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings Telegram
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">connect</a>({ ...params }) -> TrueForge.ConnectTelegramResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks the bot token with Telegram first and saves the connection only when it passes. The token is stored with the connection and never returned.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.connect({
+    token: "token"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.ConnectTelegramRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">remove</a>() -> TrueForge.RemoveTelegramResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Removes the bot, its token and its pairing for good. Messages to the bot are no longer answered.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.remove();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">cancelPairing</a>() -> TrueForge.CancelTelegramPairingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Drops the pairing that is waiting, without pairing anyone, so a /start from someone else can be refused. The person can send /start again to start over.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.cancelPairing();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">confirmPairing</a>({ ...params }) -> TrueForge.ConfirmTelegramPairingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Pairs the person who sent /start to the bot, when the code they type matches the code the bot sent them in Telegram. Only that person can then talk to the bot.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.confirmPairing({
+    code: "code"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.ConfirmTelegramPairingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">getStatus</a>() -> TrueForge.GetTelegramAccountResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns whether a bot is connected, its name, where pairing stands, and the name of the person waiting to pair while one waits. The bot token and the pairing code are never returned: the code is shown only in Telegram.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.telegram.getStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TelegramClient.RequestOptions`
 
 </dd>
 </dl>

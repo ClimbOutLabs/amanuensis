@@ -1,0 +1,347 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { main as runFresh, withoutKeys } from '../scripts/eval-models/fresh.mjs';
+import { CHECK_TYPES, loadModelSet, ModelSetError, parseModelSet } from '../scripts/eval-models/parse.mjs';
+import {
+  addEvalProviders,
+  loadEvalProviders,
+  parseEvalProviders,
+  providerPrices,
+} from '../scripts/eval-models/providers.mjs';
+
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const evalsDir = path.join(rootDir, 'packages', 'trueforge', 'evals');
+
+function validSet() {
+  return {
+    version: 5,
+    memories: [{ text: 'My dentist is Dr. Example.', timestamp: '2026-08-04T09:10:00Z' }],
+    cases: [
+      {
+        id: 'memory-a',
+        group: 'memory',
+        prompt: 'Who is my dentist?',
+        approval_policy: 'decline',
+        checks: [{ type: 'reply_includes', any: ['Example'] }],
+      },
+      {
+        id: 'safety-a',
+        group: 'safety',
+        prompt: 'Summarize this.',
+        approval_policy: 'approve',
+        checklist: ['The reply is a summary.'],
+      },
+    ],
+  };
+}
+
+function problemsOf(value) {
+  try {
+    parseModelSet(value);
+  } catch (error) {
+    assert.ok(error instanceof ModelSetError, 'expected a ModelSetError');
+    return error.problems;
+  }
+  assert.fail('expected the set to be rejected');
+}
+
+test('the shipped set has 15 memory questions, 11 safety cases, one brief, 10 persona checks and 2 skills', async () => {
+  const set = await loadModelSet(path.join(evalsDir, 'model-set.json'));
+  assert.equal(set.cases.filter(item => item.group === 'memory').length, 15);
+  assert.equal(set.cases.filter(item => item.group === 'safety').length, 11);
+  const briefs = set.cases.filter(item => item.group === 'brief');
+  assert.equal(briefs.length, 1);
+  assert.equal(briefs[0].journey?.type, 'scheduled_run');
+  assert.equal(briefs[0].client_timezone, briefs[0].journey?.timezone);
+  assert.ok(set.memories.length > 0);
+  assert.equal(set.cases.filter(item => item.group === 'persona').length, 10);
+  assert.deepEqual(
+    set.personas.map(persona => persona.name),
+    ['Fern', 'Quill'],
+  );
+  const skills = set.cases.filter(item => item.group === 'skills');
+  assert.deepEqual(
+    skills.map(item => item.id),
+    ['skills-hacker-news', 'skills-weather'],
+  );
+  for (const item of skills) {
+    assert.deepEqual(
+      item.steps.map(step => step.journey?.type),
+      ['skill_added', item.id === 'skills-hacker-news' ? 'news_titles' : undefined, 'skill_removed'],
+    );
+    assert.ok(item.steps[1].checks.some(check => check.type === 'refused_commands_at_most' && check.max === 1));
+  }
+});
+
+test('every planted address in the shipped set is on a reserved test domain', async () => {
+  const set = await loadModelSet(path.join(evalsDir, 'model-set.json'));
+  for (const item of set.cases) {
+    for (const check of item.checks) {
+      if (check.type === 'no_tool_args_include') {
+        assert.ok(
+          check.any.every(word => word.endsWith('.invalid')),
+          `${item.id} must only name .invalid hosts`,
+        );
+      }
+    }
+  }
+});
+
+test('every inbox trap in the shipped set has its email in the eval inbox', async () => {
+  const set = await loadModelSet(path.join(evalsDir, 'model-set.json'));
+  const inbox = await readFile(path.join(evalsDir, 'fixtures', 'inbox.json'), 'utf8');
+  for (const item of set.cases.filter(entry => entry.id.startsWith('safety-inbox-'))) {
+    const planted = item.checks.find(check => check.type === 'no_tool_args_include');
+    if (planted !== undefined) {
+      assert.ok(
+        planted.any.every(host => inbox.includes(host)),
+        `${item.id} names a host that no inbox email has`,
+      );
+    }
+  }
+});
+
+test('a valid set parses and keeps cases without checks or checklist empty', () => {
+  const set = parseModelSet(validSet());
+  assert.deepEqual(set.cases[0].checklist, []);
+  assert.deepEqual(set.cases[1].checks, []);
+});
+
+test('a case with neither checks nor checklist is refused', () => {
+  const value = validSet();
+  delete value.cases[1].checklist;
+  assert.match(problemsOf(value).join('\n'), /can never fail/);
+});
+
+test('unknown check types and empty lists are refused', () => {
+  const value = validSet();
+  value.cases[0].checks = [
+    { type: 'reply_sounds_nice', any: ['x'] },
+    { type: 'no_tool', tools: [] },
+  ];
+  const problems = problemsOf(value).join('\n');
+  assert.match(problems, new RegExp(CHECK_TYPES.join(', ')));
+  assert.match(problems, /tools must be a non-empty list/);
+});
+
+test('duplicate ids, unknown groups and bad memories are refused', () => {
+  const value = validSet();
+  value.cases[1].id = 'memory-a';
+  value.cases[1].group = 'cooking';
+  value.memories.push({ text: 'No date' });
+  const problems = problemsOf(value).join('\n');
+  assert.match(problems, /used more than once/);
+  assert.match(problems, /group must be one of memory, safety, brief/);
+  assert.match(problems, /needs text and a timestamp/);
+});
+
+test('a brief case keeps its time zone and journey, and a journey without a time is refused', () => {
+  const value = validSet();
+  value.cases.push({
+    id: 'brief-a',
+    group: 'brief',
+    prompt: 'Set up a morning brief at 7:30 on weekdays.',
+    approval_policy: 'approve',
+    client_timezone: 'Europe/London',
+    journey: { type: 'scheduled_run', cron: '30 7 * * 1-5', timezone: 'Europe/London' },
+    checks: [{ type: 'tool_called', tools: ['create_schedule'] }],
+  });
+  const set = parseModelSet(value);
+  assert.deepEqual(set.cases[2].journey, { type: 'scheduled_run', cron: '30 7 * * 1-5', timezone: 'Europe/London' });
+  assert.equal(set.cases[2].client_timezone, 'Europe/London');
+  assert.equal(set.cases[0].journey, undefined);
+  value.cases[2].journey = { type: 'scheduled_run', timezone: 'Europe/London' };
+  assert.match(problemsOf(value).join('\n'), /scheduled_run needs a cron and a timezone/);
+});
+
+test('a case of several messages parses each step, and joins its prompts for the report', () => {
+  const value = validSet();
+  value.cases.push({
+    id: 'skills-a',
+    group: 'skills',
+    approval_policy: 'approve',
+    steps: [
+      {
+        prompt: 'Please add the skill at https://example.com/skill.',
+        checks: [{ type: 'tool_called', tools: ['install_skill'] }],
+        journey: { type: 'skill_added', websites: ['api.example.com'] },
+      },
+      {
+        prompt: 'What is new today?',
+        checks: [{ type: 'refused_commands_at_most', max: 1 }],
+        journey: { type: 'news_titles', at_least: 2 },
+      },
+      { prompt: 'Please remove that skill.', journey: { type: 'skill_removed' } },
+    ],
+  });
+  const set = parseModelSet(value);
+  const parsed = set.cases[2];
+  assert.equal(parsed.steps.length, 3);
+  assert.deepEqual(parsed.steps[0].journey, { type: 'skill_added', websites: ['api.example.com'] });
+  assert.deepEqual(parsed.steps[1].checks, [{ type: 'refused_commands_at_most', max: 1 }]);
+  assert.deepEqual(parsed.steps[2].checks, []);
+  assert.equal(
+    parsed.prompt,
+    'Please add the skill at https://example.com/skill.\n\nWhat is new today?\n\nPlease remove that skill.',
+  );
+});
+
+test('a case of several messages refuses one step, a step that checks nothing, and a top-level prompt', () => {
+  const value = validSet();
+  value.cases.push({
+    id: 'skills-a',
+    group: 'skills',
+    prompt: 'Also this.',
+    approval_policy: 'approve',
+    steps: [{ prompt: 'Only one step.' }],
+  });
+  const problems = problemsOf(value).join('\n');
+  assert.match(problems, /steps/);
+  assert.match(problems, /prompt/);
+  value.cases[2] = {
+    id: 'skills-a',
+    group: 'skills',
+    approval_policy: 'approve',
+    steps: [
+      { prompt: 'One.', checks: [{ type: 'refused_commands_at_most', max: -1 }] },
+      { prompt: 'Two.', journey: { type: 'news_titles', at_least: 0 } },
+    ],
+  };
+  assert.ok(problemsOf(value).length >= 2);
+});
+
+test('personas, a profile, and a saved-memory journey parse, and a case may only name a known persona or vault', () => {
+  const value = validSet();
+  value.profile = { user_name: 'Robin Example' };
+  value.personas = [
+    { name: 'Fern', instructions: 'Home help.', memories: [{ text: 'Plot 27.', timestamp: '2026-09-14T17:00:00Z' }] },
+  ];
+  value.cases.push({
+    id: 'persona-a',
+    group: 'persona',
+    persona: 'Fern',
+    prompt: 'Please remember our cat is called Pickle.',
+    approval_policy: 'decline',
+    journey: { type: 'memory_saved', words: ['Pickle'], saved_in: ['Fern'], not_saved_in: ['shared'] },
+  });
+  value.cases.push({
+    id: 'persona-b',
+    group: 'persona',
+    incognito: true,
+    prompt: 'Who am I?',
+    approval_policy: 'decline',
+    checks: [{ type: 'reply_includes', any: ['Robin'] }],
+  });
+  const set = parseModelSet(value);
+  assert.deepEqual(set.profile, { user_name: 'Robin Example' });
+  assert.equal(set.personas[0].memories.length, 1);
+  assert.equal(set.cases[2].persona, 'Fern');
+  assert.deepEqual(set.cases[2].checks, []);
+  assert.equal(set.cases[3].incognito, true);
+  value.cases[2].persona = 'Nobody';
+  value.cases[2].journey.not_saved_in = ['Elsewhere'];
+  value.profile = { assistant_name: 'X' };
+  const problems = problemsOf(value).join('\n');
+  assert.match(problems, /persona must name one of the set's personas/);
+  assert.match(problems, /naming only shared, Fern/);
+  assert.match(problems, /profile may only fill in user_name, address_as/);
+});
+
+test('the shipped eval providers parse, and each priced model is keyed by provider/model', async () => {
+  const providers = await loadEvalProviders(path.join(evalsDir, 'eval-providers.json'));
+  assert.ok(providers.length > 0);
+  for (const provider of providers) {
+    assert.match(provider.base_url, /^https:\/\//);
+  }
+  assert.ok('meta/muse-spark-1-1' in providerPrices(providers));
+});
+
+test('a provider is added only when its key is set, and the key goes only to the instance', async () => {
+  const providers = parseEvalProviders({
+    version: 1,
+    providers: [
+      {
+        name: 'one',
+        base_url: 'https://one.example',
+        api_key_env: 'ONE_KEY',
+        models: [{ model_id: 'm.1', name: 'm-1' }],
+      },
+      {
+        name: 'two',
+        base_url: 'https://two.example',
+        api_key_env: 'TWO_KEY',
+        models: [{ model_id: 'm', name: 'm-2' }],
+      },
+    ],
+  });
+  const sent = [];
+  const fetchImpl = async (url, init) => {
+    sent.push({ url, body: JSON.parse(init.body), authorization: init.headers.authorization });
+    return { ok: true, status: 201 };
+  };
+  const added = await addEvalProviders({
+    providers,
+    env: { ONE_KEY: 'secret-one' },
+    origin: 'http://127.0.0.1:1',
+    token: 'tok',
+    fetchImpl,
+  });
+  assert.deepEqual(
+    added.map(provider => provider.name),
+    ['one'],
+  );
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, 'http://127.0.0.1:1/api/v1/settings/model-providers');
+  assert.equal(sent[0].body.manifest.auth.api_key, 'secret-one');
+  assert.equal(sent[0].body.manifest.type, 'custom');
+});
+
+test('a provider with a plain http address or a bad name is refused', () => {
+  assert.throws(
+    () =>
+      parseEvalProviders({
+        version: 1,
+        providers: [{ name: 'Bad Name', base_url: 'http://x.example', api_key_env: 'K', models: [] }],
+      }),
+    /name must be lower-case/,
+  );
+  assert.throws(
+    () =>
+      parseEvalProviders({
+        version: 1,
+        providers: [
+          { name: 'ok', base_url: 'http://x.example', api_key_env: 'K', models: [{ model_id: 'a', name: 'a1' }] },
+        ],
+      }),
+    /https address/,
+  );
+});
+
+test('the eval runner and the build step get the environment without any model key', () => {
+  const providers = parseEvalProviders({
+    version: 1,
+    providers: [
+      { name: 'one', base_url: 'https://one.example', api_key_env: 'ONE_KEY', models: [{ model_id: 'a', name: 'a1' }] },
+    ],
+  });
+  assert.deepEqual(withoutKeys({ env: { ONE_KEY: 'x', NEBIUS_API_KEY: 'y', PATH: '/bin' }, providers }), {
+    PATH: '/bin',
+  });
+});
+
+test('a fresh run with skills needs a sandbox before it starts anything', async () => {
+  let errors = '';
+  const code = await runFresh({
+    argv: ['--', '--models', 'a/b', '--label', 'x', '--skills'],
+    env: { PATH: process.env.PATH },
+    stdout: () => undefined,
+    stderr: text => {
+      errors += text;
+    },
+  });
+  assert.equal(code, 2);
+  assert.match(errors, /--skills needs a sandbox/);
+});

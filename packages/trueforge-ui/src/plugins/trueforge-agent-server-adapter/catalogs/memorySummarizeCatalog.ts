@@ -6,15 +6,12 @@ import type { CreateTrueForgeClientOptions } from '../client.js';
 /**
  * The turn-summarization setting: `enabled` is the stored value (persisted override when
  * one is stored, else the `MEMORY_SUMMARIZE` env default); `overridden` says which of the
- * two it is; `effectiveEnabled` is what the server will actually do for the next turn —
- * the stored value with the markdown-only gate applied. The toggle shows the effective
- * value: what you see is the truth.
+ * two it is.
  */
 export interface MemorySummarizeSetting {
   enabled: boolean;
   overridden: boolean;
   defaultEnabled: boolean;
-  effectiveEnabled: boolean;
 }
 
 export interface MemorySummarizeCatalog {
@@ -31,7 +28,6 @@ const MemorySummarizeResponseSchema = z.object({
     enabled: z.boolean(),
     overridden: z.boolean(),
     default_enabled: z.boolean(),
-    effective_enabled: z.boolean(),
   }),
 });
 
@@ -44,7 +40,6 @@ function parseSetting(body: unknown): MemorySummarizeSetting {
     enabled: parsed.data.data.enabled,
     overridden: parsed.data.data.overridden,
     defaultEnabled: parsed.data.data.default_enabled,
-    effectiveEnabled: parsed.data.data.effective_enabled,
   };
 }
 

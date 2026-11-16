@@ -1,4 +1,6 @@
 import { personMessageIndex } from '@truefoundry/trueforge-core/core';
+import type { BrowserElementReview } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import type { ToolInvocationContext } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 
@@ -39,8 +41,8 @@ function mount(reply: (path: string) => { status?: number; json: unknown }) {
   if (toolSet === undefined) {
     throw new Error('the browser capability has no tool set');
   }
-  const call = async (name: string, args: Record<string, unknown> = {}) => {
-    const response = await toolSet.callTool({ name, arguments: args });
+  const call = async (name: string, args: Record<string, unknown> = {}, context?: ToolInvocationContext) => {
+    const response = await toolSet.callTool({ name, arguments: args }, undefined, context);
     if (!('result' in response)) {
       throw new Error('expected a tool result');
     }
@@ -309,70 +311,162 @@ describe('browser capability', () => {
     );
   });
 
+  const CHECKED: BrowserElementReview = {
+    site: 'shop.example',
+    accessible_name: 'Help center',
+    role: 'link',
+    is_form_submit: false,
+    form_values: {},
+    link_url: 'https://shop.example/help',
+  };
+  const FIELD: BrowserElementReview = { ...CHECKED, accessible_name: 'Name', role: 'textbox', link_url: null };
+  const checkedContext = (review: BrowserElementReview): ToolInvocationContext => ({
+    admission_provenance: { source: 'automatic' },
+    browser_element_precondition: review,
+  });
+
   it('browser_type refuses a sensitive field with the plain reason', async () => {
     const { sent, call } = mount(() => ({ json: { status: 'refused', reason: 'sensitive_field' } }));
-    const result = await call('browser_type', { ref: 'e1', text: 'hunter2' });
+    const result = await call('browser_type', { ref: 'e1', text: 'hunter2' }, checkedContext(FIELD));
     expect(result.isError).toBe(true);
     expect(JSON.parse(textOf(result)).message).toBe(
       'This field is for a password, a payment detail or a one-time code. Ask the person to type it themselves.',
     );
     expect(sent[0]?.url).toBe('http://browser-relay:8792/type');
-    expect(sent[0]?.body).toEqual({ ref: 'e1', text: 'hunter2', owner: 'tenant-1:person-1', tab: 'chat-1' });
+    expect(sent[0]?.body).toEqual({
+      ref: 'e1',
+      text: 'hunter2',
+      expect: FIELD,
+      owner: 'tenant-1:person-1',
+      tab: 'chat-1',
+    });
   });
 
-  it('browser_click sends the ref and returns the page it lands on', async () => {
+  it('browser_select sends the option with the read it was checked against', async () => {
+    const { sent, call } = mount(() => ({ json: { status: 'ok', text: '# Picked' } }));
+    const result = await call('browser_select', { ref: 'e2', option: 'Premium' }, checkedContext(FIELD));
+    expect(result.isError).toBeUndefined();
+    expect(sent[0]?.url).toBe('http://browser-relay:8792/select');
+    expect(sent[0]?.body).toEqual({
+      ref: 'e2',
+      option: 'Premium',
+      expect: FIELD,
+      owner: 'tenant-1:person-1',
+      tab: 'chat-1',
+    });
+  });
+
+  it('browser_click sends the ref with the read it was checked against, and returns the page it lands on', async () => {
     const { sent, call } = mount(() => ({ json: { status: 'ok', text: '# Done' } }));
-    const result = await call('browser_click', { ref: 'e3' });
+    const result = await call('browser_click', { ref: 'e3' }, checkedContext(CHECKED));
     expect(result.isError).toBeUndefined();
     expect(textOf(result)).toContain('# Done');
     expect(sent[0]?.url).toBe('http://browser-relay:8792/click');
-    expect(sent[0]?.body).toEqual({ ref: 'e3', owner: 'tenant-1:person-1', tab: 'chat-1' });
+    expect(sent[0]?.body).toEqual({
+      ref: 'e3',
+      expect: CHECKED,
+      owner: 'tenant-1:person-1',
+      tab: 'chat-1',
+    });
   });
 
-  it("toolCallInfo stamps browser_click with the sidecar's dry-run read, not from model text", async () => {
-    const { sent, toolSet } = mount(path =>
-      path === '/click-info'
-        ? {
-            json: {
-              status: 'ok',
-              site: 'shop.example',
-              accessible_name: 'Place order',
-              is_form_submit: true,
-              form_values: { card_last4: '4242' },
-            },
-          }
-        : { json: { status: 'ok', text: '' } },
+  it('a disabled, read-only or covered element, or a line break for a one-line field, is refused with a plain reason', async () => {
+    for (const [reason, message] of [
+      [
+        'disabled',
+        'That part of the page is switched off right now, so it was not touched. Read the page again, then try again.',
+      ],
+      ['read_only', 'That field cannot be changed, so nothing was typed. Read the page again to find the right field.'],
+      [
+        'line_break',
+        'That field holds one line, and the text has a line break or tab, which would press Enter or Tab. Nothing was typed. Type it as one line.',
+      ],
+      [
+        'covered',
+        'Something else on the page is covering that part, so it was not touched. Read the page again, then try again.',
+      ],
+    ] as const) {
+      const { call } = mount(() => ({ json: { status: 'refused', reason } }));
+      const result = await call('browser_click', { ref: 'e3' }, checkedContext(CHECKED));
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(textOf(result)).message).toBe(message);
+    }
+  });
+
+  it('an action with no checked read is refused without calling the browser', async () => {
+    const { sent, call } = mount(() => ({ json: { status: 'ok', text: '# Done' } }));
+    for (const [name, args] of [
+      ['browser_click', { ref: 'e3' }],
+      ['browser_type', { ref: 'e1', text: 'hi' }],
+      ['browser_select', { ref: 'e2', option: 'Premium' }],
+    ] as const) {
+      const result = await call(name, args);
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(textOf(result)).message).toBe(
+        'Aman could not check that part of the page first, so it was not touched. Read the page again, then try again.',
+      );
+    }
+    expect(sent).toEqual([]);
+  });
+
+  it('an action tells the model to read again when the page changed since it was checked', async () => {
+    const { call } = mount(() => ({ json: { status: 'refused', reason: 'changed' } }));
+    const result = await call('browser_click', { ref: 'e3' }, checkedContext(CHECKED));
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(textOf(result)).message).toBe(
+      'That part of the page changed after Aman checked it, so it was not touched. Read the page again, then try again.',
     );
-    const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
-    expect(info.browser_click).toEqual({
+  });
+
+  it("toolCallInfo stamps a click, type or select with the sidecar's dry-run read, not from model text", async () => {
+    const read = {
       site: 'shop.example',
       accessible_name: 'Place order',
+      role: 'button',
       is_form_submit: true,
       form_values: { card_last4: '4242' },
+      link_url: null,
+    };
+    const { sent, toolSet } = mount(path =>
+      path === '/element-info' ? { json: { status: 'ok', ...read } } : { json: { status: 'ok', text: '' } },
+    );
+    for (const [name, args] of [
+      ['browser_click', { ref: 'e3' }],
+      ['browser_type', { ref: 'e3', text: 'x' }],
+      ['browser_select', { ref: 'e3', option: 'y' }],
+    ] as const) {
+      const info = await toolSet.toolCallInfo({ name, arguments: args });
+      expect(info.browser_element).toEqual(read);
+    }
+    expect(sent).toHaveLength(3);
+    expect(sent[0]).toEqual({
+      url: 'http://browser-relay:8792/element-info',
+      headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
+      body: { ref: 'e3', owner: 'tenant-1:person-1', tab: 'chat-1' },
     });
-    expect(sent).toEqual([
-      {
-        url: 'http://browser-relay:8792/click-info',
-        headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
-        body: { ref: 'e3', owner: 'tenant-1:person-1', tab: 'chat-1' },
-      },
-    ]);
   });
 
-  it('toolCallInfo leaves browser_click unset when click-info says the tab moved to another site', async () => {
+  it('toolCallInfo reads nothing for a tool that does not act on an element', async () => {
+    const { sent, toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
+    const info = await toolSet.toolCallInfo({ name: 'browser_read', arguments: {} });
+    expect(info.browser_element).toBeUndefined();
+    expect(sent).toEqual([]);
+  });
+
+  it('toolCallInfo leaves browser_element unset when the read says the tab moved to another site', async () => {
     const { toolSet } = mount(path =>
-      path === '/click-info'
+      path === '/element-info'
         ? { json: { status: 'moved', url: 'https://mail.example/inbox' } }
         : { json: { status: 'ok', text: '' } },
     );
     const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
-    expect(info.browser_click).toBeUndefined();
+    expect(info.browser_element).toBeUndefined();
   });
 
-  it('toolCallInfo leaves browser_click unset when the sidecar cannot be reached, failing closed', async () => {
+  it('toolCallInfo leaves browser_element unset when the sidecar cannot be reached, failing closed', async () => {
     const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
     jest.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('ECONNREFUSED'));
     const info = await toolSet.toolCallInfo({ name: 'browser_click', arguments: { ref: 'e3' } });
-    expect(info.browser_click).toBeUndefined();
+    expect(info.browser_element).toBeUndefined();
   });
 });

@@ -14,6 +14,10 @@ export type AlwaysAllowToolControlProps = {
   disabled?: boolean;
   /** Runs only after the owner confirms; a cancel never calls it. */
   onConfirm: () => void;
+  /** Button label; the every-chat wording by default, a skill network card names the skill instead. */
+  label?: string;
+  /** Confirm step title; the every-chat wording by default. */
+  title?: string;
 };
 
 /** "Always allow everywhere" and its confirm step, shared by every approval card that offers it. */
@@ -23,6 +27,8 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
   className,
   disabled = false,
   onConfirm,
+  label = APPROVAL_CHOICES.alwaysAllowTool.label,
+  title = 'Always allow everywhere?',
 }) => {
   const [confirming, setConfirming] = useState(false);
   return (
@@ -37,14 +43,14 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
         disabled={disabled}
         className={className}
       >
-        {APPROVAL_CHOICES.alwaysAllowTool.label}
+        {label}
       </Button>
       <CenteredModal
         open={confirming}
         onOpenChange={open => {
           if (!open) setConfirming(false);
         }}
-        title="Always allow everywhere?"
+        title={title}
         description={confirm.description}
         contentSized
         aria-label="Confirm always allowing this"

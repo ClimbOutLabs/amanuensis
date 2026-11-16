@@ -126,6 +126,9 @@ test('home is one left-aligned column whose edges the composer and the cards sha
         path: await featureShotPath({
           surface: 'screen:home',
           step: `column-${String(viewport.width)}x${String(viewport.height)}-light`,
+          did: `Opened home on a ${String(viewport.width)} by ${String(viewport.height)} screen in the light theme.`,
+          expect:
+            'The greeting, the box you type in, the pills, the section label and the cards all start at the same left edge. The second card ends where the box ends, and no card text is cut off.',
         }),
       });
       await context.close();

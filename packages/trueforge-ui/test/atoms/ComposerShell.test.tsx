@@ -16,7 +16,10 @@ describe('ComposerShell', () => {
           onSubmit={() => undefined}
         />,
       );
-      expect(screen.getByRole('status')).toHaveTextContent(/^Working on it$/);
+      const status = screen.getByRole('status');
+      expect(status).toHaveTextContent(/^Working on it$/);
+      expect(status).toHaveClass('text-sm');
+      expect(status.className).not.toMatch(/text-\[0\.8125rem\]/);
 
       act(() => {
         vi.advanceTimersByTime(125_000);
@@ -45,7 +48,9 @@ describe('ComposerShell', () => {
     expect(shell).toHaveClass('consumer-class');
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Hello');
     expect(screen.getByText('design.png')).toBeInTheDocument();
-    expect(screen.getByText('Connected')).toBeInTheDocument();
+    const connectorStatus = screen.getByText('Connected');
+    expect(connectorStatus).toHaveClass('text-sm');
+    expect(connectorStatus.className).not.toMatch(/text-\[0\.8125rem\]/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
     expect(onSubmit).toHaveBeenCalledOnce();

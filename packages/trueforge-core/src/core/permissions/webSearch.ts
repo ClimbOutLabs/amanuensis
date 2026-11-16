@@ -6,20 +6,27 @@ import { htmlImages } from '../email/gmail/htmlText';
 import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import {
+  FORGET_FACT_TOOL_NAME,
+  LIST_PAGES_TOOL_NAME,
+  READ_PAGE_TOOL_NAME,
+  REMEMBER_FACT_TOOL_NAME,
+  UPDATE_FACT_TOOL_NAME,
+} from '../memory/pagesToolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
 import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
-import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
 import { BROWSER_OPEN_SILENT_REASON, BROWSER_OPEN_TOOL_NAME, isBrowserToolName } from './browserToolNames';
 import {
+  type ChatProvenance,
   emptyChatProvenance,
   firstUrlHost,
+  hasReadContent,
   namesUrl,
+  type ReadSource,
   recordEmailText,
   recordPageImageUrls,
   recordSearchResults,
   recordUntrustedText,
-  type ChatProvenance,
-  type ReadSource,
 } from './provenance';
 
 /**
@@ -73,10 +80,18 @@ export function isSearchAskReason(reason: string): boolean {
 
 /** What the host lets the designated search provider's connector do silently, resolved for one turn. */
 export interface SearchProviderGrant {
-  /** Tools that run without asking even when the server does not declare them read-only. */
+  /** Search tools that run without asking even when the server does not declare them read-only. Their results are recorded as search hits. */
   tools: readonly string[];
+  /** Page-read tools that run without asking on the same terms. What they return is recorded as page text, never as search hits. */
+  page_read_tools: readonly string[];
   /** Top-level argument names that are provider plumbing, not user text. */
   plumbing_fields: readonly string[];
+  /**
+   * The host serves this provider's search itself, in process, rather than through the connector's
+   * remote endpoint. Captured on the connector record when the person designated it; the chat
+   * resolver and the guide read it instead of recognising the provider by its address.
+   */
+  served_in_process: boolean;
 }
 
 export interface WebSearchTurnState {
@@ -86,10 +101,19 @@ export interface WebSearchTurnState {
   sentText: string;
   /** Where the links and addresses this chat has seen came from. */
   provenance: ChatProvenance;
+  /** Whether a tool that can return text from outside the chat has answered in this chat, a plain search included. */
+  outsideToolResult: boolean;
+  /** Whether memory shown in any turn of this chat held text that is not the person's own words. */
+  recalledOutsideText: boolean;
   /** The name the person calls the assistant, for the sentences on its cards. */
   assistantName: string;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
+}
+
+/** Whether any turn of this chat has seen text that is not the person's own: read content, a tool's answer or recalled memory. */
+export function chatSawOutsideText(state: WebSearchTurnState): boolean {
+  return hasReadContent(state.provenance) || state.outsideToolResult || state.recalledOutsideText;
 }
 
 export function createWebSearchTurnState(): WebSearchTurnState {
@@ -97,6 +121,8 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     silentSearches: 0,
     sentText: '',
     provenance: emptyChatProvenance(),
+    outsideToolResult: false,
+    recalledOutsideText: false,
     assistantName: DEFAULT_ASSISTANT_NAME,
     admission: Promise.resolve(),
   };
@@ -195,8 +221,8 @@ export function pageImageUrls(text: string): string[] {
  * from the page text so the page's own words stay framed as untrusted data. A space only accepts an
  * https picture, so an http one is left out rather than offered and then refused.
  */
-export function pagePicturesNote(input: { tool_name: string; text: string }): string | undefined {
-  if (!isPageReaderTool(baseToolName(input.tool_name))) {
+export function pagePicturesNote(input: { page_reader: boolean; text: string }): string | undefined {
+  if (!input.page_reader) {
     return undefined;
   }
   const shown = pagePictures(input.text)
@@ -228,6 +254,20 @@ function baseToolName(toolName: string): string {
 const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
 
 /**
+ * The memory page tools answer with a fixed sentence and the words the model sent, or with a page the host
+ * has already marked. The read tool tells the turn itself when what it shows holds outside text, so a call does
+ * not count as outside by its name. They are matched by their full name: a connector's tool carries its
+ * server's prefix, so it can never pass for one.
+ */
+const HOST_ONLY_FULL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  REMEMBER_FACT_TOOL_NAME,
+  UPDATE_FACT_TOOL_NAME,
+  FORGET_FACT_TOOL_NAME,
+  LIST_PAGES_TOOL_NAME,
+  READ_PAGE_TOOL_NAME,
+]);
+
+/**
  * What the host itself recorded about the tool that ran a call. A connector chooses its tools' names, so a
  * name alone never earns a tool the standing of one of the assistant's own tools or of the search provider.
  */
@@ -236,18 +276,33 @@ export interface HostToolStamp {
   host_tool: boolean;
   /** The call went to the connector the person designated as the search provider. */
   search_provider: boolean;
+  /** The call ran one of the search tools the designated provider's record declares. */
+  search_result: boolean;
+  /** The call ran one of the page-read tools the designated provider's record declares. */
+  page_reader: boolean;
 }
 
 /** The stamp of a call the host recorded nothing about: it earns no standing. */
-export const NO_HOST_STAMP: HostToolStamp = { host_tool: false, search_provider: false };
+export const NO_HOST_STAMP: HostToolStamp = {
+  host_tool: false,
+  search_provider: false,
+  search_result: false,
+  page_reader: false,
+};
 
 /** Reads the host's stamp from the call info it wrote; a call with no info earns no standing. */
 export function hostToolStamp(
-  info: Pick<InternalToolCallInfo, 'type' | 'search_provider_call'> | undefined,
+  info:
+    Pick<InternalToolCallInfo, 'type' | 'search_provider_call' | 'search_result_call' | 'page_read_call'> | undefined,
 ): HostToolStamp {
   return info === undefined
     ? NO_HOST_STAMP
-    : { host_tool: info.type === 'truefoundry-system', search_provider: info.search_provider_call === true };
+    : {
+        host_tool: info.type === 'truefoundry-system',
+        search_provider: info.search_provider_call === true,
+        search_result: info.search_result_call === true,
+        page_reader: info.page_read_call === true,
+      };
 }
 
 /**
@@ -255,16 +310,18 @@ export function hostToolStamp(
  * own host-only tools. A connector's tool with one of their names still brings in outside content.
  */
 export function toolReturnsOutsideContent(input: { tool_name: string; stamp: HostToolStamp }): boolean {
-  return !(input.stamp.host_tool && HOST_ONLY_TOOL_NAMES.has(baseToolName(input.tool_name)));
+  const hostOnly =
+    HOST_ONLY_TOOL_NAMES.has(baseToolName(input.tool_name)) || HOST_ONLY_FULL_TOOL_NAMES.has(input.tool_name);
+  return !(input.stamp.host_tool && hostOnly);
 }
 
 /** The kind of content a tool's result is, so a card or a memory note can say where something was read. */
-export function readSourceOf(toolName: string): ReadSource {
+export function readSourceOf(toolName: string, stamp: HostToolStamp): ReadSource {
   const baseName = baseToolName(toolName);
   if (isBrowserToolName(baseName)) {
     return 'browser_page';
   }
-  if (isSearchResultTool(baseName) || isPageReaderTool(baseName)) {
+  if (stamp.search_provider && (stamp.search_result || stamp.page_reader)) {
     return 'page';
   }
   if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {
@@ -291,14 +348,13 @@ export function recordToolResultProvenance(input: {
   texts: readonly string[];
 }): void {
   const { provenance } = input.state;
-  const baseName = baseToolName(input.tool_name);
-  const searchTool = input.stamp.search_provider && isSearchResultTool(baseName);
+  const searchTool = input.stamp.search_provider && input.stamp.search_result;
   if (searchTool && !namesUrl(input.argument_values)) {
     recordSearchResults({ provenance, texts: input.texts });
     return;
   }
-  const source = readSourceOf(baseName);
-  const pageReader = input.stamp.search_provider && isPageReaderTool(baseName);
+  const source = readSourceOf(input.tool_name, input.stamp);
+  const pageReader = input.stamp.search_provider && input.stamp.page_reader;
   // A page read names the page it read in its own arguments, so where its links were read is known by host.
   const page_site = source === 'page' || source === 'browser_page' ? firstUrlHost(input.argument_values) : null;
   for (const text of input.texts) {

@@ -18,6 +18,7 @@ import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { textReplyStream } from '../../orchestration/helpers/helpers';
 import { makeSilentLogger } from '../harnessMocks';
 
+import { everyMailDraftApproved } from '../fixtures/approvedMailDrafts';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
 const ROOT_ID = 'thread_root';
 const CHILD_ID = 'thread_child';
@@ -88,7 +89,7 @@ function makeSource(input: { name: string; tools: string[]; reply: string; annot
 
 /** The same services serve every request of the chat, as on the server: approval tokens live in them. */
 function makeServices() {
-  return defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  return { ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), mail_approved_drafts: everyMailDraftApproved };
 }
 
 type Services = ReturnType<typeof makeServices>;
@@ -119,7 +120,7 @@ function build(input: {
       reply: '[]',
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
-    notes: makeSource({ name: 'Notes', tools: ['save_note'], reply: 'saved' }),
+    notes: makeSource({ name: 'Notes', tools: ['delete_note'], reply: 'deleted' }),
     claim: makeSource({
       name: 'Misc',
       tools: ['do_thing'],
@@ -263,9 +264,13 @@ const CALENDAR_AND_MAIL: CallSpec[] = [
   { id: 'call-calendar', name: 'list_events', args: '{}' },
   { id: 'call-mail', name: 'get_emails_content', args: '{}' },
 ];
+// The write that asks here is a delete, which keeps its own card: a connector write that
+// carries only text and names no destination is refused under the unverifiable-destination
+// rule, so it could never be the call that asked first and was allowed. The machinery under
+// test (ask, answer, reopen, run) is the same for any change that asks.
 const READ_AND_WRITE: CallSpec[] = [
   { id: 'call-calendar', name: 'list_events', args: '{}' },
-  { id: 'call-note', name: 'save_note', args: JSON.stringify({ text: 'Lunch at noon' }) },
+  { id: 'call-note', name: 'delete_note', args: JSON.stringify({ title: 'Lunch at noon' }) },
 ];
 
 describe('a call that asked first and was allowed, when the chat is opened again', () => {
@@ -438,6 +443,8 @@ describe('a send steered by something the chat read', () => {
     const services = makeServices();
     const addRecipients = jest.fn(() => Promise.resolve('loaded' as const));
     services.mail_add_recipients = addRecipients;
+    // The mail world of this test holds one account, which the sidecar names default.
+    services.mail_accounts = () => Promise.resolve({ accounts: ['default'], default_account: 'default' });
     const send: CallSpec = {
       id: 'call-send',
       name: 'send_email',
@@ -477,6 +484,6 @@ describe('a send steered by something the chat read', () => {
     );
 
     expect(addRecipients).toHaveBeenCalledTimes(1);
-    expect(addRecipients).toHaveBeenCalledWith(OWNER, ['collect@evil.example']);
+    expect(addRecipients).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['collect@evil.example']);
   });
 });

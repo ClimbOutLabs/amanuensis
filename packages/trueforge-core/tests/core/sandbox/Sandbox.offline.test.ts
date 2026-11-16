@@ -68,9 +68,10 @@ describe('sandbox tool descriptions follow the provider network', () => {
     expect(exec).not.toContain('Network egress');
     expect(exec).not.toContain('retrieval');
     expect(runCode).toContain(`This sandbox ${OFFLINE_SENTENCE}`);
-    expect(runCode).not.toContain('requests');
-    expect(runCode).not.toContain('beautifulsoup4');
     expect(runCode).toContain('pandas');
+    for (const addOn of ['requests', 'pyyaml', 'httpx', 'beautifulsoup4']) {
+      expect(runCode).toContain(addOn);
+    }
     expect(runCode).toContain('If a network call fails, do not retry it through exec or any shell.');
   });
 
@@ -134,7 +135,7 @@ describe('exec on a provider with no network', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it('refuses an inline Python network call without an approval request', async () => {
+  it('asks before inline Python that tries the network: the offline sandbox, not the command text, stops it', async () => {
     const exec = jest.fn<Promise<ExecResult>, [SandboxExecParams]>();
     const sandbox = makeSandbox(makeProvider({ network: 'none', exec }));
     const call = {
@@ -147,10 +148,9 @@ describe('exec on a provider with no network', () => {
     };
 
     const info = await sandbox.toolCallInfo(call);
-    expect(info.is_approval_required).toBe(false);
-    const response = await sandbox.callTool(call);
-    if (!isCallToolResponseResult(response)) throw new Error('Expected a tool result');
-    expect(response.result.isError).toBe(true);
+    expect(info.pre_dispatch_failure).toBeUndefined();
+    expect(info.is_approval_required).toBe(true);
+    await sandbox.callTool(call);
     expect(exec).not.toHaveBeenCalled();
   });
 

@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
-import { PersonalizationProvider, type PersonalizationProfile } from '@/components/PersonalizationContext.js';
+import {
+  PersonalizationConflictError,
+  PersonalizationProvider,
+  type PersonalizationProfile,
+} from '@/components/PersonalizationContext.js';
 import { PersonalizationPanel } from '@/components/PersonalizationPanel.js';
 
 const initialProfile: PersonalizationProfile = {
@@ -21,6 +25,43 @@ const initialProfile: PersonalizationProfile = {
 };
 
 describe('PersonalizationPanel', () => {
+  it('keeps text learned while the page was open when the person saves another field', async () => {
+    const opened: PersonalizationProfile = { ...initialProfile, learned_profile: '- Likes tea.', revision: 1 };
+    const learnedSince: PersonalizationProfile = {
+      ...opened,
+      learned_profile: '- Likes tea.\n- Likes hiking.',
+      revision: 2,
+    };
+    const getProfile = vi.fn<() => Promise<PersonalizationProfile>>();
+    getProfile.mockResolvedValueOnce(opened).mockResolvedValue(learnedSince);
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => {
+      if (profile.revision !== 2) {
+        throw new PersonalizationConflictError('Your profile changed while this page was open.');
+      }
+      return { ...profile, revision: 3 };
+    });
+    render(
+      <PersonalizationProvider api={{ getProfile, updateProfile, deleteProfile: async () => {} }}>
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    const name = await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot land on top of the typed name.
+    await act(async () => {});
+    fireEvent.change(name, { target: { value: 'Sam Rivera' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
+
+    expect(await screen.findByText('Personalization saved.')).toBeInTheDocument();
+    expect(updateProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        user_name: 'Sam Rivera',
+        learned_profile: '- Likes tea.\n- Likes hiking.',
+        revision: 2,
+      }),
+    );
+  });
+
   it('asks for the name and form of address first and saves them', async () => {
     const updateProfile = vi.fn(async profile => ({ ...profile }));
     render(
@@ -36,13 +77,17 @@ describe('PersonalizationPanel', () => {
     );
 
     const nameField = await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot land on top of the typed text.
+    await act(async () => {});
     const addressField = screen.getByLabelText('How Aman should address you');
     const [firstSection] = screen.getAllByRole('region');
     expect(firstSection).toHaveAccessibleName('About you');
     expect(firstSection).toContainElement(nameField);
     expect(firstSection).toContainElement(addressField);
-    // The name fields come before everything else on the page, including the assistant's own profile.
-    expect(nameField.compareDocumentPosition(screen.getByLabelText('Name'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // The page opens on the Your profile sub-tab, so the name fields come before everything
+    // else: the assistant's own profile sits behind the Assistant profile sub-tab.
+    expect(screen.getByRole('tab', { name: 'Your profile' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
 
     fireEvent.change(nameField, { target: { value: 'Sam Rivera' } });
     fireEvent.change(addressField, { target: { value: 'Sam' } });
@@ -53,6 +98,10 @@ describe('PersonalizationPanel', () => {
         expect.objectContaining({ user_name: 'Sam Rivera', address_as: 'Sam' }),
       ),
     );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Assistant profile' }));
+    expect(screen.getByRole('region', { name: 'Assistant profile' })).toContainElement(screen.getByLabelText('Name'));
+    expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument();
   });
 
   it('loads and saves the profile from Settings while updating the runtime identity', async () => {
@@ -70,10 +119,13 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
+    // The assistant's name lives on the Assistant profile sub-tab; the rail shows it either way.
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     expect(await screen.findByDisplayValue('Mira')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Mira' })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sage' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Your profile' }));
     fireEvent.change(screen.getByLabelText('Pinned preference 1'), { target: { value: 'No em dashes.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
 
@@ -120,7 +172,9 @@ describe('PersonalizationPanel', () => {
 
     render(<Host />);
 
-    await screen.findByDisplayValue('Mira');
+    await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot replace the row the click adds.
+    await act(async () => {});
     fireEvent.click(screen.getByRole('button', { name: '+ Add preference' }));
 
     const input = screen.getByLabelText('Pinned preference 1');
@@ -141,66 +195,6 @@ describe('PersonalizationPanel', () => {
     expect(input).toHaveValue(text);
   });
 
-  it('edits and clears the learned profile through the ordinary save flow', async () => {
-    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
-    render(
-      <PersonalizationProvider
-        api={{
-          getProfile: async () => ({ ...initialProfile, learned_profile: '# Learned\n\n- Enjoys woodworking.' }),
-          updateProfile,
-          deleteProfile: async () => {},
-        }}
-      >
-        <PersonalizationPanel />
-      </PersonalizationProvider>,
-    );
-
-    expect(await screen.findByRole('heading', { name: 'Learned profile' })).toBeInTheDocument();
-    // Rendered as markdown until the user chooses to edit. The heading is not gated on the
-    // loaded profile, so the document body has to be awaited separately.
-    expect(await screen.findByText('Enjoys woodworking.')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Learned profile document'), {
-      target: { value: '# Learned\n\n- Prefers plain English.' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
-    await waitFor(() =>
-      expect(updateProfile).toHaveBeenCalledWith(
-        expect.objectContaining({ learned_profile: '# Learned\n\n- Prefers plain English.' }),
-      ),
-    );
-    // Wait for the save round-trip to settle before mutating the draft again:
-    // the provider refresh resets the draft when the saved profile arrives.
-    expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Clear learned profile' }));
-    expect(screen.getByText('Nothing learned yet.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
-    await waitFor(() =>
-      expect(updateProfile).toHaveBeenLastCalledWith(expect.objectContaining({ learned_profile: null })),
-    );
-  });
-
-  it('reflects the stored learning switch and says what turning it on does', async () => {
-    render(
-      <PersonalizationProvider
-        api={{
-          getProfile: async () => ({ ...initialProfile, learning_enabled: true }),
-          updateProfile: async profile => profile,
-          deleteProfile: async () => {},
-        }}
-      >
-        <PersonalizationPanel />
-      </PersonalizationProvider>,
-    );
-
-    const toggle = await screen.findByRole('switch', { name: 'Learn from conversations' });
-    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
-    expect(screen.getByText(/a local model updates this document/)).toBeInTheDocument();
-    expect(screen.getByText(/at most once an hour/)).toBeInTheDocument();
-  });
-
   it('shows no help-area picker in Settings and keeps the help areas already saved', async () => {
     // The "What would help you most?" picker lives on the New Chat home, not in Settings.
     // Areas a person already picked stay on their profile: a Settings save carries them
@@ -218,6 +212,7 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     await screen.findByDisplayValue('Mira');
     expect(screen.queryByText('What would help you most?')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'I just moved here' })).not.toBeInTheDocument();
@@ -234,92 +229,6 @@ describe('PersonalizationPanel', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
   });
 
-  it('persists the learning switch through the ordinary save flow', async () => {
-    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
-    render(
-      <PersonalizationProvider
-        api={{ getProfile: async () => initialProfile, updateProfile, deleteProfile: async () => {} }}
-      >
-        <PersonalizationPanel />
-      </PersonalizationProvider>,
-    );
-
-    await screen.findByDisplayValue('Mira');
-    const toggle = await screen.findByRole('switch', { name: 'Learn from conversations' });
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
-
-    await waitFor(() =>
-      expect(updateProfile).toHaveBeenCalledWith(expect.objectContaining({ learning_enabled: true })),
-    );
-    expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
-
-    fireEvent.click(screen.getByRole('switch', { name: 'Learn from conversations' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
-    await waitFor(() =>
-      expect(updateProfile).toHaveBeenLastCalledWith(expect.objectContaining({ learning_enabled: false })),
-    );
-  });
-
-  it('turns the switch back off on a profile that holds nothing else', async () => {
-    // Trying the feature and changing your mind is a common path for a new toggle, and it is
-    // the one case where the saved profile carries no content but the switch. The panel must
-    // send the switch explicitly: the server tells an explicit "off" from an omitted key, and
-    // only the latter is the empty request that DELETE is for.
-    const onlyLearning: PersonalizationProfile = {
-      assistant_name: null,
-      assistant_identity: null,
-      voice_guidance: null,
-      user_name: null,
-      address_as: null,
-      user_profile: null,
-      pinned_preferences: [],
-      help_areas: [],
-      learned_profile: null,
-      learning_enabled: true,
-    };
-    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
-    render(
-      <PersonalizationProvider
-        api={{ getProfile: async () => onlyLearning, updateProfile, deleteProfile: async () => {} }}
-      >
-        <PersonalizationPanel />
-      </PersonalizationProvider>,
-    );
-
-    const toggle = await screen.findByRole('switch', { name: 'Learn from conversations' });
-    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
-
-    fireEvent.click(toggle);
-    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
-
-    await waitFor(() => expect(updateProfile).toHaveBeenCalledWith({ ...onlyLearning, learning_enabled: false }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
-    expect(screen.getByRole('switch', { name: 'Learn from conversations' })).toHaveAttribute('aria-checked', 'false');
-  });
-
-  it('surfaces the panel error affordance when saving the switch fails', async () => {
-    const updateProfile = vi.fn(async () => {
-      throw new Error('Learning could not be turned on.');
-    });
-    render(
-      <PersonalizationProvider
-        api={{ getProfile: async () => initialProfile, updateProfile, deleteProfile: async () => {} }}
-      >
-        <PersonalizationPanel />
-      </PersonalizationProvider>,
-    );
-
-    await screen.findByDisplayValue('Mira');
-    fireEvent.click(screen.getByRole('switch', { name: 'Learn from conversations' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
-
-    expect(await screen.findByRole('status')).toHaveTextContent('Learning could not be turned on.');
-  });
-
   it('clears the persisted profile and resets the form', async () => {
     const deleteProfile = vi.fn(async () => {});
     render(
@@ -334,6 +243,7 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     expect(await screen.findByDisplayValue('Mira')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
 
@@ -342,10 +252,51 @@ describe('PersonalizationPanel', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Personalization cleared.');
   });
 
-  it('renders a profile that carries no learning switch as off without inventing one', async () => {
-    // A host predating the toggle sends no switch. The panel needs a boolean to render, but the
-    // rendering default stays out of the profile: sending an invented key back would be rejected
-    // by a host that does not know it, and would fail every save the user makes.
+  it('clears only this page and keeps the learned profile, its switch and the help areas', async () => {
+    // The learned profile lives on Settings > Memory now, out of sight from this page, so
+    // Clear all here must not delete it or turn learning off.
+    const learned: PersonalizationProfile = {
+      ...initialProfile,
+      user_name: 'Sam Rivera',
+      help_areas: ['family'],
+      learned_profile: '# Learned\n\n- Enjoys woodworking.',
+      learning_enabled: true,
+    };
+    const deleteProfile = vi.fn(async () => {});
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => profile);
+    render(
+      <PersonalizationProvider api={{ getProfile: async () => learned, updateProfile, deleteProfile }}>
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    expect(await screen.findByDisplayValue('Sam Rivera')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledOnce());
+    expect(deleteProfile).not.toHaveBeenCalled();
+    expect(updateProfile.mock.calls[0]?.[0]).toEqual({
+      assistant_name: null,
+      assistant_identity: null,
+      voice_guidance: null,
+      user_name: null,
+      address_as: null,
+      user_profile: null,
+      pinned_preferences: [],
+      help_areas: ['family'],
+      learned_profile: '# Learned\n\n- Enjoys woodworking.',
+      learning_enabled: true,
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('Personalization cleared.');
+    expect(screen.getByLabelText('Your name')).toHaveValue('');
+  });
+
+  it('carries the learned profile fields through a save without inventing a learning switch', async () => {
+    // The Learned profile block lives under Settings > Memory now; this panel no longer shows
+    // it. The fields are still on the profile the panel saves, so they ride through a save
+    // unchanged, like the help areas. And a host predating the toggle sends no switch: sending
+    // an invented key back would be rejected by a host that does not know it, and would fail
+    // every save the user makes.
     const withoutSwitch: PersonalizationProfile = {
       assistant_name: 'Mira',
       assistant_identity: null,
@@ -355,7 +306,7 @@ describe('PersonalizationPanel', () => {
       user_profile: null,
       pinned_preferences: [],
       help_areas: [],
-      learned_profile: null,
+      learned_profile: '# Learned\n\n- Enjoys woodworking.',
     };
     const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
     render(
@@ -366,21 +317,56 @@ describe('PersonalizationPanel', () => {
       </PersonalizationProvider>,
     );
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Assistant profile' }));
     await screen.findByDisplayValue('Mira');
-    expect(screen.getByRole('switch', { name: 'Learn from conversations' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Learn from conversations' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledOnce());
     expect(updateProfile.mock.calls[0]?.[0]).not.toHaveProperty('learning_enabled');
-    // Let the save round-trip settle before touching the draft: the provider refresh resets it
-    // when the saved profile arrives.
+    expect(updateProfile.mock.calls[0]?.[0]).toHaveProperty('learned_profile', '# Learned\n\n- Enjoys woodworking.');
     expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
+  });
 
-    // Moving the toggle is a choice, and a choice is always sent.
-    fireEvent.click(screen.getByRole('switch', { name: 'Learn from conversations' }));
+  it('keeps one shared form across the sub-tabs and saves the learned profile through untouched', async () => {
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
+    render(
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => ({ ...initialProfile, learned_profile: '# Learned\n\n- Enjoys woodworking.' }),
+          updateProfile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    // The learned profile is edited under Settings > Memory, not here: neither sub-tab shows
+    // it, but it stays on the profile this form saves.
+    const nameField = await screen.findByLabelText('Your name');
+    // Lets the loaded profile finish filling the form, so it cannot land on top of the typed text.
+    await act(async () => {});
+    expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
+    fireEvent.change(nameField, { target: { value: 'Sam Rivera' } });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Assistant profile' }));
+    expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Learned profile' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sage' } });
+
+    // The one Save below the sub-tabs carries the edits from both in a single profile, with
+    // the learned profile riding through unchanged.
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
     await waitFor(() =>
-      expect(updateProfile).toHaveBeenLastCalledWith(expect.objectContaining({ learning_enabled: true })),
+      expect(updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_name: 'Sam Rivera',
+          assistant_name: 'Sage',
+          learned_profile: '# Learned\n\n- Enjoys woodworking.',
+        }),
+      ),
     );
   });
 });

@@ -101,13 +101,25 @@ tf_plan_detail() {
   printf '%s' "$text"
 }
 
+# ok when the app has a model added, warn when it has none, and nothing when the doctor could not tell.
+model_state_in_app() { # name
+  local out
+  out=$(run_doctor --json --instance "$1" --local --only model 2>/dev/null || true)
+  printf '%s' "$out" | grep -oE '"id":"model","state":"[a-z]+"' | head -n 1 | sed 's/.*"state":"//; s/"$//' || true
+}
+
 # The model row of the summary: a hosted model is the only one chosen at install time; otherwise models are added in the app.
 print_model_row() {
   local name=$1 cap
   if [ "$(reg_get "$name" token_factory)" = 1 ]; then
     cap=$(reg_get "$name" tf_cap)
     ui_check_row ok "Model" "Token Factory, $(reg_get "$name" tf_model)${cap:+, limit $cap tokens a day}"
-  else
-    ui_check_row todo "Model" "not set: add one in Settings $S_PROMPT Models"
+    return 0
   fi
+  # A model added in the app lives in its database, so the doctor inside the app looks; it needs nothing outside.
+  case "$(model_state_in_app "$name")" in
+    ok) ui_check_row ok "Model" "set up in Settings $S_PROMPT Models" ;;
+    warn) ui_check_row todo "Model" "not set: add one in Settings $S_PROMPT Models" ;;
+    *) ui_check_row skip "Model" "see Settings $S_PROMPT Models" ;;
+  esac
 }

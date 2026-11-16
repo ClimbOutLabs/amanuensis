@@ -97,6 +97,17 @@ export type SettingsOpenRequest = {
   nonce: number;
 };
 
+/**
+ * A host request to open one chat by id, made after the shell has mounted (for example a
+ * right-rail desk row that lives outside the shell tree). Like `SettingsOpenRequest`, the
+ * nonce is what makes it a request: the host raises it on every ask, and the shell answers
+ * only when the nonce changes, never for the value it first mounts with.
+ */
+export type OpenSessionRequest = {
+  sessionId: string;
+  nonce: number;
+};
+
 export type HistoryAgentFilter = {
   agentId?: string;
   agentName: string;
@@ -130,6 +141,9 @@ export type ShellModeContextValue = {
   closeLibraryAgent: () => void;
   schedulesOpen: boolean;
   setSchedulesOpen: (open: boolean) => void;
+  /** Reminders main-pane overlay (sidebar layout). */
+  remindersOpen: boolean;
+  setRemindersOpen: (open: boolean) => void;
   /** True while the Spaces full-page view (list or a single space) is showing instead of chat. */
   spacesOpen: boolean;
   /** The space currently open, or null when showing the spaces list. */
@@ -306,6 +320,7 @@ export function ShellModeProvider({
   const [sessionsOpenState, setSessionsOpenState] = useState(false);
   const [libraryAgentId, setLibraryAgentId] = useState<string | null>(null);
   const [schedulesOpenState, setSchedulesOpenState] = useState(false);
+  const [remindersOpenState, setRemindersOpenState] = useState(false);
   const [historyAgentFilter, setHistoryAgentFilter] = useState<HistoryAgentFilter | null>(null);
   const [pendingSessionId, setPendingSessionId] = useState<string | undefined>(undefined);
   const [pendingSessionEpoch, setPendingSessionEpoch] = useState(0);
@@ -317,6 +332,7 @@ export function ShellModeProvider({
   const sessionsEnabled = isSessionsChromeEnabled({ sessions: sessionsServer });
   const schedulesEnabled = isSchedulesChromeEnabled({ schedules: scheduleServer });
   const schedulesOpen = schedulesEnabled && schedulesOpenState;
+  const remindersOpen = remindersOpenState;
   const libraryOpen = isLibraryEnabled && libraryOpenState;
   const sessionsOpen = sessionsEnabled && sessionsOpenState;
 
@@ -344,6 +360,7 @@ export function ShellModeProvider({
         setLibraryOpenState(false);
         setLibraryAgentId(null);
         setSchedulesOpenState(false);
+        setRemindersOpenState(false);
         closeSpaces();
       } else {
         replaceSessionShareSearch({ view: null });
@@ -360,6 +377,7 @@ export function ShellModeProvider({
         setAgentConfigOpenState(false);
         setSessionsOpen(false);
         setSchedulesOpenState(false);
+        setRemindersOpenState(false);
         closeSpaces();
       }
       setLibraryAgentId(null);
@@ -374,6 +392,7 @@ export function ShellModeProvider({
       setAgentConfigOpenState(false);
       setSessionsOpen(false);
       setSchedulesOpenState(false);
+      setRemindersOpenState(false);
       closeSpaces();
       setLibraryOpenState(true);
       setLibraryAgentId(agentId);
@@ -394,6 +413,7 @@ export function ShellModeProvider({
         setLibraryAgentId(null);
         setSessionsOpen(false);
         setSchedulesOpenState(false);
+        setRemindersOpenState(false);
         closeSpaces();
       }
       setSettingsOpenState(settingsEnabled && open);
@@ -423,6 +443,7 @@ export function ShellModeProvider({
         setLibraryAgentId(null);
         setSessionsOpen(false);
         setSchedulesOpenState(false);
+        setRemindersOpenState(false);
         closeSpaces();
       }
       setAgentConfigOpenState(open);
@@ -439,9 +460,28 @@ export function ShellModeProvider({
         setSessionsOpen(false);
         closeSpaces();
       }
+      // Every path that closes schedules on the way somewhere else closes reminders too,
+      // so no transition can leave the reminders view standing over a chat.
+      setRemindersOpenState(false);
       setSchedulesOpenState(schedulesEnabled && open);
     },
     [schedulesEnabled, setSessionsOpen, closeSpaces],
+  );
+
+  const setRemindersOpen = useCallback(
+    (open: boolean) => {
+      if (open) {
+        setSettingsOpenState(false);
+        setAgentConfigOpenState(false);
+        setLibraryOpenState(false);
+        setLibraryAgentId(null);
+        setSessionsOpen(false);
+        setSchedulesOpenState(false);
+        closeSpaces();
+      }
+      setRemindersOpenState(open);
+    },
+    [setSessionsOpen, closeSpaces],
   );
 
   useEffect(() => {
@@ -474,6 +514,7 @@ export function ShellModeProvider({
       setLibraryAgentId(null);
       setSessionsOpen(false);
       setSchedulesOpenState(false);
+      setRemindersOpenState(false);
     },
     [setSessionsOpen],
   );
@@ -777,6 +818,8 @@ export function ShellModeProvider({
       closeLibraryAgent,
       schedulesOpen,
       setSchedulesOpen,
+      remindersOpen,
+      setRemindersOpen,
       spacesOpen,
       selectedSpaceId,
       openSpaces,
@@ -821,6 +864,8 @@ export function ShellModeProvider({
       closeLibraryAgent,
       schedulesOpen,
       setSchedulesOpen,
+      remindersOpen,
+      setRemindersOpen,
       spacesOpen,
       selectedSpaceId,
       openSpaces,

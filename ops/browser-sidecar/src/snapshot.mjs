@@ -45,9 +45,13 @@ function oneLine({ node, ref }) {
  * Where the view is on the page, so a scroll that moved it reads differently from one that did not,
  * and the model can tell when it has reached the end.
  */
-function viewLine({ top, bottom, height }) {
+function viewLine({ top, bottom, height, pictures }) {
   const end = bottom >= height ? ', the end of the page' : '';
-  return `In view: ${String(top)} to ${String(Math.min(bottom, height))} of ${String(height)} pixels down${end}\n`;
+  const shown =
+    typeof pictures === 'number' && pictures > 0
+      ? `Also in view: ${String(pictures)} ${pictures === 1 ? 'picture' : 'pictures'} (a chart, drawing, photo or video) the text above can't show. To see ${pictures === 1 ? 'it' : 'them'}, use browser_screenshot.\n`
+      : '';
+  return `In view: ${String(top)} to ${String(Math.min(bottom, height))} of ${String(height)} pixels down${end}\n${shown}`;
 }
 
 /**

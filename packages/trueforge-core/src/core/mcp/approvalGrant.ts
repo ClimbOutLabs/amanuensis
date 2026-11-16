@@ -3,13 +3,6 @@ import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMT
 import { BROWSER_CLICK_TOOL_NAME, BROWSER_OPEN_TOOL_NAME, isAmanBrowserCall } from '../permissions/browserToolNames';
 import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
 import {
-  BROWSER_OPEN_SITE_GRANT_REASONS,
-  CHAT_GRANTABLE_CONSEQUENCE_REASONS,
-  GRANT_BARRED_TIER_REASONS,
-  OWN_CALENDAR_CHANGE_REASONS,
-  OWN_DRIVE_WRITE_REASONS,
-} from '../permissions/tier';
-import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_MCP_SERVER_ID,
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
@@ -89,9 +82,9 @@ export function chatGrantScope(info: InternalToolCallInfo): 'site' | null {
 }
 
 /**
- * A browser open whose chat grant may cover its site: one of Aman's own browser opens, under a reason the
- * site-grant set names, with a site on its card to bind to. A barred reason never qualifies, whatever the
- * set says, and neither does a private read.
+ * A browser open whose chat grant may cover its site: one of Aman's own browser opens the classifier declared
+ * site-grantable, with a site on its card to bind to. A barred call never qualifies, whatever the declaration
+ * says, and neither does a private read.
  */
 function siteGrantableOpen(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info) || tierBarsDurableGrant(info)) {
@@ -100,7 +93,7 @@ function siteGrantableOpen(info: InternalToolCallInfo): boolean {
   if (!isAmanBrowserCall(info) || info.original_tool_name !== BROWSER_OPEN_TOOL_NAME) {
     return false;
   }
-  if (info.tier_reason === undefined || !BROWSER_OPEN_SITE_GRANT_REASONS.has(info.tier_reason)) {
+  if (info.site_grantable_open !== true) {
     return false;
   }
   const host = info.tier3_card?.destination_host ?? null;
@@ -129,7 +122,7 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (isOwnDriveWrite(info)) {
     return true;
   }
-  if (info.tier_reason !== undefined && CHAT_GRANTABLE_CONSEQUENCE_REASONS.has(info.tier_reason)) {
+  if (info.chat_grantable_consequence === true) {
     return cardNamesTarget(info);
   }
   if (chatGrantScope(info) === 'site') {
@@ -151,20 +144,25 @@ function cardNamesTarget(info: InternalToolCallInfo): boolean {
 
 /** A change to the person's own calendar with no guests; a guest change never qualifies, whatever its effect. */
 function isOwnCalendarChange(info: InternalToolCallInfo): boolean {
-  return info.tier_reason !== undefined && OWN_CALENDAR_CHANGE_REASONS.has(info.tier_reason);
+  return info.own_calendar_change === true;
 }
 
 /** A Drive write to the person's own files; it sends nothing to anyone, so it qualifies like an own-calendar change. */
 function isOwnDriveWrite(info: InternalToolCallInfo): boolean {
-  return info.tier_reason !== undefined && OWN_DRIVE_WRITE_REASONS.has(info.tier_reason);
+  return info.own_drive_write === true;
 }
 
 /** A send, destructive, install or hint-escalated call is never covered by an argument-blind grant. */
 function tierBarsDurableGrant(info: InternalToolCallInfo): boolean {
-  if (info.tier_reason === undefined) {
-    return info.tier === 3;
+  if (info.standing_grant_barred !== undefined) {
+    return info.standing_grant_barred;
   }
-  return GRANT_BARRED_TIER_REASONS.has(info.tier_reason);
+  // A card saved before the flag existed carries a tier reason and no flag. It was never stamped
+  // with the grant policy, so it fails closed rather than falling through to a grant.
+  if (info.tier_reason !== undefined) {
+    return true;
+  }
+  return info.tier === 3;
 }
 
 /**

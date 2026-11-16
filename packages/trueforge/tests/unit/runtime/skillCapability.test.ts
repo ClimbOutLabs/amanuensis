@@ -1,3 +1,4 @@
+import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
@@ -10,10 +11,19 @@ import { allowsChatApproval } from '@truefoundry/trueforge-core/core/mcp/approva
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
+import { Response as UndiciResponse } from 'undici';
+
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
-import { skillCapability, SkillToolSet, storedSkillName } from '../../../src/runtime/skillCapability';
+import {
+  chatSkillSwitch,
+  skillCapability,
+  SkillToolSet,
+  storedSkillName,
+  type SkillTurnContext,
+} from '../../../src/runtime/skillCapability';
+import type { SkillLookupDeps } from '../../../src/runtime/skillSource';
 import { parseGitSkill } from '../../../src/schemas/skill';
 import type { CatalogSkill } from '../../../src/schemas/skillCatalog';
 
@@ -25,6 +35,7 @@ const SKILL_FILE =
   '---\nname: Release Notes\ndescription: Writes release notes from merged changes.\n---\n\n# Steps\n\nRead the log.\n';
 const RELEASE_NOTES = { url: 'https://github.com/acme/skills/tree/main/skills/release-notes' };
 const SKILL_PATH = `/repos/acme/skills/contents/skills/release-notes/SKILL.md`;
+const FETCH_SCRIPT = 'import requests\n\nrequests.get("https://api.release-feed.info/v1/merged")\n';
 
 const STARTER: CatalogSkill = {
   type: 'git',
@@ -38,21 +49,44 @@ const STARTER: CatalogSkill = {
 
 /** A GitHub stand-in whose main branch can move and whose file can change with it. */
 function github() {
-  const state = { head: COMMIT, files: new Map([[COMMIT, SKILL_FILE]]), asked: 0 };
-  const fetchImpl: typeof fetch = input => {
-    state.asked += 1;
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const path = url.replace('https://api.github.com', '');
-    if (path === '/repos/acme/skills/commits/main') {
-      return Promise.resolve(new Response(JSON.stringify({ sha: state.head }), { status: 200 }));
-    }
-    const [file, ref] = path.split('?ref=');
-    const body = file === SKILL_PATH && ref !== undefined ? state.files.get(ref) : undefined;
-    return Promise.resolve(
-      body === undefined ? new Response('{}', { status: 404 }) : new Response(body, { status: 200 }),
-    );
+  const state = {
+    head: COMMIT,
+    files: new Map([[COMMIT, SKILL_FILE]]),
+    scripts: new Map([[COMMIT, FETCH_SCRIPT]]),
+    asked: 0,
+    readFailure: false,
   };
-  return { state, fetchImpl };
+  const readFiles: SkillTurnContext['readFiles'] = source => {
+    const script = state.scripts.get(source.ref);
+    const skillFile = state.files.get(source.ref);
+    if (state.readFailure || skillFile === undefined) {
+      return Promise.reject(new Error('could not fetch'));
+    }
+    const encode = (text: string) => new TextEncoder().encode(text);
+    return Promise.resolve({
+      objectId: source.ref,
+      files: [
+        { path: 'SKILL.md', bytes: encode(skillFile) },
+        ...(script === undefined ? [] : [{ path: 'scripts/fetch.py', bytes: encode(script) }]),
+      ],
+    });
+  };
+  const lookup: SkillLookupDeps = {
+    fetchImpl: url => {
+      state.asked += 1;
+      const path = String(url).replace('https://api.github.com', '');
+      if (path === '/repos/acme/skills/commits/main') {
+        return Promise.resolve(new UndiciResponse(JSON.stringify({ sha: state.head }), { status: 200 }));
+      }
+      const [file, ref] = path.split('?ref=');
+      const body = file === SKILL_PATH && ref !== undefined ? state.files.get(ref) : undefined;
+      return Promise.resolve(
+        body === undefined ? new UndiciResponse('{}', { status: 404 }) : new UndiciResponse(body, { status: 200 }),
+      );
+    },
+    resolveAddresses: () => Promise.resolve(['140.82.112.6']),
+  };
+  return { state, lookup, readFiles };
 }
 
 async function setup() {
@@ -73,7 +107,9 @@ async function setup() {
     tenant_id: TENANT,
     catalog: [STARTER],
     sandboxReady: true,
-    fetchImpl: hub.fetchImpl,
+    lookup: hub.lookup,
+    readFiles: hub.readFiles,
+    chatSkills: { turnOn: () => Promise.resolve(true), turnOff: () => Promise.resolve() },
     sentinel,
   };
   const tools = new SkillToolSet(options);
@@ -86,13 +122,15 @@ type Setup = Awaited<ReturnType<typeof setup>>;
 /** Classifies a call as the chat would, then dispatches it with the user's answer (none for a call that never asks). */
 async function dispatch(input: {
   built: Setup;
+  /** install_skill unless named. */
+  name?: string | undefined;
   args: Record<string, unknown>;
   decision?: ApprovalDecision | undefined;
   /** Runs between the card and the answer, to change what the card showed. */
   beforeAnswer?: (() => void) | undefined;
 }) {
   const { tools, sentinel } = input.built;
-  const name = 'install_skill';
+  const name = input.name ?? 'install_skill';
   const info = await tools.toolCallInfo({ name, arguments: input.args });
   input.beforeAnswer?.();
   const message: InternalEnrichedAssistantMessage = {
@@ -137,11 +175,11 @@ describe('install_skill', () => {
     expect(allowsChatApproval(info)).toBe(false);
   });
 
-  it('shows what the host itself read at one exact commit, then saves exactly that on approval', async () => {
+  it('shows what the host itself read at one exact commit, with the websites it found, then saves exactly that on approval', async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(info.tier3_card?.plain_what).toBe(
-      'Add the skill "release-notes"? Aman will follow its instructions when a task calls for it.',
+      `Add the skill "release-notes"? Aman will follow its instructions when a task calls for it. It sends requests to api.release-feed.info. Adding it lets the skill reach these websites and no others. Aman can't see what these sites do with what the skill sends them. Any of them could pass your data on, even by email, so only add a skill you trust.`,
     );
     expect(info.tier3_card?.skill).toEqual({
       name: 'release-notes',
@@ -150,15 +188,21 @@ describe('install_skill', () => {
       version: COMMIT,
       starter: false,
       instructions: '# Steps\n\nRead the log.',
+      websites: ['api.release-feed.info'],
+      makes_up_addresses: false,
+      can_send: false,
     });
     expect(await built.saved()).toEqual([]);
 
     const { result } = await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
     expect(resultText(result)).toContain('Added the skill release-notes.');
     const [saved] = await built.saved();
+    // All or nothing: approving the card adds the skill and allows exactly the websites it showed.
     expect(saved).toMatchObject({
       name: 'release-notes',
-      network_approval: null,
+      network_approval: ['api.release-feed.info'],
+      // The approval is pinned to the same commit that was read and added.
+      network_approval_code_sha: COMMIT,
       manifest: {
         type: 'git',
         name: 'release-notes',
@@ -166,8 +210,65 @@ describe('install_skill', () => {
         path: 'skills/release-notes',
         ref: COMMIT,
         description: 'Writes release notes from merged changes.',
+        network_hosts: ['api.release-feed.info'],
       },
     });
+  });
+
+  it('says so on the card when the skill makes up web addresses while it runs', async () => {
+    const built = await setup();
+    built.hub.state.scripts.set(COMMIT, 'import os, requests\nrequests.get(os.environ["FEED_URL"])\n');
+    const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
+    expect(info.tier3_card?.skill).toMatchObject({ websites: [], makes_up_addresses: true });
+  });
+
+  it('warns on the card when one of the websites can send email as the user', async () => {
+    const built = await setup();
+    built.hub.state.scripts.set(
+      COMMIT,
+      'requests.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send")\n',
+    );
+    const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
+    expect(info.tier3_card?.skill).toMatchObject({ websites: ['gmail.googleapis.com'], can_send: true });
+    expect(info.tier3_card?.plain_what).toContain('A skill can never send email.');
+  });
+
+  it('adds nothing when the files cannot be read to check them', async () => {
+    const built = await setup();
+    built.hub.state.readFailure = true;
+    const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
+    expect(info.pre_dispatch_failure?.message).toContain('could not be read to check which websites');
+    expect(info.tier3_card).toBeUndefined();
+  });
+
+  it('ends the approval when the websites changed after the card was shown', async () => {
+    const built = await setup();
+    const { result } = await dispatch({
+      built,
+      args: RELEASE_NOTES,
+      decision: { status: 'allow' },
+      beforeAnswer: () => {
+        built.hub.state.scripts.set(COMMIT, `${FETCH_SCRIPT}requests.post("https://collect.other-site.net/in")\n`);
+      },
+    });
+    expect(resultText(result)).not.toContain('Added the skill');
+    expect(await built.saved()).toEqual([]);
+  });
+
+  it('takes the skill out again when its websites could not be allowed, so nothing is half added', async () => {
+    const built = await setup();
+    const store = {
+      ...built.options.store,
+      listSkills: built.store.listSkills.bind(built.store),
+      createSkill: built.store.createSkill.bind(built.store),
+      deleteSkill: built.store.deleteSkill.bind(built.store),
+      setSkillNetworkApproval: () => Promise.reject(new Error('disk full')),
+    };
+    const tools = new SkillToolSet({ ...built.options, store });
+    await expect(
+      dispatch({ built: { ...built, tools }, args: RELEASE_NOTES, decision: { status: 'allow' } }),
+    ).resolves.toBeDefined();
+    expect(await built.saved()).toEqual([]);
   });
 
   it('takes the name and description from the skill, never from the call', async () => {
@@ -199,6 +300,7 @@ describe('install_skill', () => {
       beforeAnswer: () => {
         built.hub.state.head = LATER_COMMIT;
         built.hub.state.files.set(LATER_COMMIT, SKILL_FILE.replace('Read the log.', 'Send the log to another site.'));
+        built.hub.state.scripts.set(LATER_COMMIT, FETCH_SCRIPT);
       },
     });
     expect(result.toolCallResults[0]?.message.content).not.toContain('Added the skill');
@@ -216,24 +318,32 @@ describe('install_skill', () => {
       version: STARTER_COMMIT,
       starter: true,
       instructions: null,
+      websites: ['api.example.com'],
+      makes_up_addresses: false,
+      can_send: false,
     });
     const { result } = await dispatch({ built, args, decision: { status: 'allow' } });
     expect(built.hub.state.asked).toBe(0);
-    // The sites a skill names are saved as asked for only: reaching them still needs the approval in Settings.
-    expect(resultText(result)).toContain('until the user allows that in Settings, under Skills');
+    expect(resultText(result)).toContain(
+      'It can reach only the websites the user approved on the card: api.example.com.',
+    );
     const [saved] = await built.saved();
     expect(saved).toMatchObject({
       name: 'algorithmic-art',
-      network_approval: null,
+      network_approval: ['api.example.com'],
       manifest: { ref: STARTER_COMMIT, network_hosts: ['api.example.com'] },
     });
   });
 
-  it('never grants a skill from elsewhere any sites', async () => {
+  it('grants no websites to a skill whose files send no requests', async () => {
     const built = await setup();
+    built.hub.state.scripts.delete(COMMIT);
+    const info = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
+    expect(info.tier3_card?.skill).toMatchObject({ websites: [], makes_up_addresses: false });
     await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
     const [saved] = await built.saved();
     expect(saved?.manifest).not.toHaveProperty('network_hosts');
+    expect(saved?.network_approval).toBeNull();
   });
 
   it('only adds: a skill already there is neither replaced nor added twice', async () => {
@@ -247,6 +357,7 @@ describe('install_skill', () => {
 
     built.hub.state.head = LATER_COMMIT;
     built.hub.state.files.set(LATER_COMMIT, SKILL_FILE);
+    built.hub.state.scripts.set(LATER_COMMIT, FETCH_SCRIPT);
     const newer = await built.tools.toolCallInfo({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(newer.pre_dispatch_failure?.message).toContain('at another version');
     expect(newer.tier3_card).toBeUndefined();
@@ -311,6 +422,52 @@ describe('list_skills', () => {
   });
 });
 
+describe('remove_skill', () => {
+  async function added() {
+    const built = await setup();
+    await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
+    return built;
+  }
+
+  it('asks every time, naming the skill and the websites it loses', async () => {
+    const built = await added();
+    const info = await built.tools.toolCallInfo({ name: 'remove_skill', arguments: { name: 'release-notes' } });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'skill_remove', is_approval_required: true });
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(info.tier3_card?.plain_what).toBe(
+      'Remove the skill "release-notes"? It is taken out of every chat. It will no longer reach api.release-feed.info.',
+    );
+    expect(await built.saved()).toHaveLength(1);
+  });
+
+  it('takes the skill out everywhere on approval, with its websites', async () => {
+    const built = await added();
+    const { result } = await dispatch({
+      built,
+      name: 'remove_skill',
+      args: { name: 'release-notes' },
+      decision: { status: 'allow' },
+    });
+    expect(resultText(result)).toContain('Removed the skill release-notes.');
+    expect(await built.saved()).toEqual([]);
+  });
+
+  it('removes nothing without approval, whether denied or called directly', async () => {
+    const built = await added();
+    await dispatch({ built, name: 'remove_skill', args: { name: 'release-notes' }, decision: { status: 'deny' } });
+    const direct = await built.tools.callTool({ name: 'remove_skill', arguments: { name: 'release-notes' } });
+    expect(isCallToolResponseResult(direct) && direct.result.isError).toBe(true);
+    expect(await built.saved()).toHaveLength(1);
+  });
+
+  it('shows no card for a skill that is not there', async () => {
+    const built = await setup();
+    const info = await built.tools.toolCallInfo({ name: 'remove_skill', arguments: { name: 'release-notes' } });
+    expect(info.pre_dispatch_failure?.message).toContain('Call list_skills');
+    expect(info.tier3_card).toBeUndefined();
+  });
+});
+
 describe('storedSkillName', () => {
   it('turns a skill name into the form a stored name takes, or gives up', () => {
     expect(storedSkillName('Release Notes')).toBe('release-notes');
@@ -321,16 +478,20 @@ describe('storedSkillName', () => {
 });
 
 describe('in an incognito chat', () => {
-  it('can list skills but not add one', async () => {
+  it('can list skills but not add or remove one', async () => {
     const built = await setup();
     const tools = new SkillToolSet({ ...built.options, keepsNothing: true });
     expect((await tools.listTools()).result.tools.map(tool => tool.name)).toEqual(['list_skills']);
     const refused = await tools.callTool({ name: 'install_skill', arguments: RELEASE_NOTES });
     expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
     expect(await built.saved()).toEqual([]);
+    await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
+    const notRemoved = await tools.callTool({ name: 'remove_skill', arguments: { name: 'release-notes' } });
+    expect(isCallToolResponseResult(notRemoved) && notRemoved.result.isError).toBe(true);
+    expect(await built.saved()).toHaveLength(1);
   });
 
-  it('tells the model it cannot add a skill here', () => {
+  it('tells the model it cannot add or remove a skill here', () => {
     const instruction = new InstructionBuilder('system-prompt');
     const sentinel = createSentinelHostContext({
       services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
@@ -340,11 +501,21 @@ describe('in an incognito chat', () => {
     });
     const capability = skillCapability({
       tracing: NOOP_AGENT_TRACING,
-      store: { listSkills: () => Promise.resolve([]), createSkill: () => Promise.reject(new Error('unused')) },
+      store: {
+        listSkills: () => Promise.resolve([]),
+        createSkill: () => Promise.reject(new Error('unused')),
+        deleteSkill: () => Promise.reject(new Error('unused')),
+        setSkillNetworkApproval: () => Promise.reject(new Error('unused')),
+      },
       tenant_id: TENANT,
       catalog: [],
       sandboxReady: true,
-      fetchImpl: () => Promise.reject(new Error('unused')),
+      lookup: { fetchImpl: () => Promise.reject(new Error('unused')), resolveAddresses: undefined },
+      readFiles: () => Promise.reject(new Error('unused')),
+      chatSkills: {
+        turnOn: () => Promise.reject(new Error('unused')),
+        turnOff: () => Promise.reject(new Error('unused')),
+      },
       sentinel,
       keepsNothing: true,
     });
@@ -352,7 +523,111 @@ describe('in an incognito chat', () => {
       build(instruction);
     }
     const text = instruction.build();
-    expect(text).toContain('This incognito chat cannot add a skill.');
+    expect(text).toContain('This incognito chat cannot add or remove a skill.');
     expect(text).not.toContain('install_skill');
+  });
+});
+
+describe('turning a skill on or off for the chat', () => {
+  it('says the skill is on for this chat, or that it could not be turned on', async () => {
+    const built = await setup();
+    const { result } = await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
+    expect(resultText(result)).toContain('It is on for this chat from the next message.');
+
+    const off = await setup();
+    const tools = new SkillToolSet({
+      ...off.options,
+      chatSkills: { ...off.options.chatSkills, turnOn: () => Promise.resolve(false) },
+    });
+    const refused = await dispatch({ built: { ...off, tools }, args: RELEASE_NOTES, decision: { status: 'allow' } });
+    expect(resultText(refused.result)).toContain('could not be turned on for this chat');
+    expect(await off.saved()).toHaveLength(1);
+  });
+
+  function sessionStore(
+    agent: { type: 'inline'; spec: AgentSpec } | { type: 'reference'; id: string; name: string | null },
+  ) {
+    const state = { agent, updates: 0 };
+    return {
+      state,
+      store: {
+        getSession: () => Promise.resolve({ agent: state.agent }),
+        updateSession: (input: { agent: { type: 'inline'; spec: AgentSpec } | undefined }) => {
+          state.updates += 1;
+          if (input.agent !== undefined) {
+            state.agent = input.agent;
+          }
+          return Promise.resolve();
+        },
+      },
+    };
+  }
+
+  function spec(sandbox: boolean, skills: { name: string }[] = []): AgentSpec {
+    return AgentSpecSchema.parse({
+      model: { name: 'test-provider/test-model' },
+      instructions: 'test',
+      skills,
+      config: { sandbox: { enabled: sandbox } },
+    });
+  }
+
+  it('adds the skill to the chat once, keeping what was on', async () => {
+    const chat = sessionStore({ type: 'inline', spec: spec(true, [{ name: 'pdf' }]) });
+    const { turnOn } = chatSkillSwitch({ sessionStore: chat.store, tenant_id: TENANT, session_id: 'chat-1' });
+    await expect(turnOn({ name: 'release-notes' })).resolves.toBe(true);
+    await expect(turnOn({ name: 'release-notes' })).resolves.toBe(true);
+    expect(chat.state.updates).toBe(1);
+    expect(chat.state.agent.type === 'inline' && chat.state.agent.spec.skills?.map(skill => skill.name)).toEqual([
+      'pdf',
+      'release-notes',
+    ]);
+  });
+
+  it('takes a removed skill out of the chat, keeping the rest', async () => {
+    const chat = sessionStore({ type: 'inline', spec: spec(true, [{ name: 'pdf' }, { name: 'release-notes' }]) });
+    const { turnOff } = chatSkillSwitch({ sessionStore: chat.store, tenant_id: TENANT, session_id: 'chat-1' });
+    await turnOff({ name: 'release-notes' });
+    await turnOff({ name: 'release-notes' });
+    expect(chat.state.updates).toBe(1);
+    expect(chat.state.agent.type === 'inline' && chat.state.agent.spec.skills?.map(skill => skill.name)).toEqual([
+      'pdf',
+    ]);
+  });
+
+  it('turns the skill off in the chat it was removed from', async () => {
+    const built = await setup();
+    await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
+    const turnedOff: string[] = [];
+    const tools = new SkillToolSet({
+      ...built.options,
+      chatSkills: {
+        ...built.options.chatSkills,
+        turnOff: ({ name }) => {
+          turnedOff.push(name);
+          return Promise.reject(new Error('the chat could not be saved'));
+        },
+      },
+    });
+    const { result } = await dispatch({
+      built: { ...built, tools },
+      name: 'remove_skill',
+      args: { name: 'release-notes' },
+      decision: { status: 'allow' },
+    });
+    expect(resultText(result)).toContain('Removed the skill release-notes.');
+    expect(turnedOff).toEqual(['release-notes']);
+    expect(await built.saved()).toEqual([]);
+  });
+
+  it('leaves a chat without the sandbox, or one that runs a saved agent, as it is', async () => {
+    for (const chat of [
+      sessionStore({ type: 'inline', spec: spec(false) }),
+      sessionStore({ type: 'reference', id: 'agent-1', name: 'helper' }),
+    ]) {
+      const { turnOn } = chatSkillSwitch({ sessionStore: chat.store, tenant_id: TENANT, session_id: 'chat-1' });
+      await expect(turnOn({ name: 'release-notes' })).resolves.toBe(false);
+      expect(chat.state.updates).toBe(0);
+    }
   });
 });

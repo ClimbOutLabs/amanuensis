@@ -23,6 +23,7 @@ import {
   commandWithWorkspaceLock,
   ensureExecSuccess,
   executeVerifiedWorkspaceCommit,
+  withArgvAsCommandLine,
   workspaceTerminationCommand,
   type ExecResult,
   type SandboxBuild,
@@ -517,7 +518,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   }
 
   async exec(params: SandboxExecParams): Promise<ExecResult> {
-    const lockedParams = commandWithWorkspaceLock(params);
+    const lockedParams = commandWithWorkspaceLock(withArgvAsCommandLine(params));
     return context.with(suppressTracing(context.active()), async (): Promise<ExecResult> => {
       try {
         throwIfSignalAborted(params.signal);

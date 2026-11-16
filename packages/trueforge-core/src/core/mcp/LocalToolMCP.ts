@@ -44,6 +44,8 @@ function withValidatedInput<T extends z.ZodType>(
 }
 
 export type ToolDefinition = ListToolsResult['tools'][number] & {
+  /** The tool's own declaration, made at registration, that it needs the network. Offline mode reads it. */
+  requires_network: boolean;
   execute: (
     raw: unknown,
     approvalDecision?: ApprovalDecision,
@@ -68,6 +70,13 @@ export function defineTool<T extends z.ZodType>(config: {
    * tools from the same server-declared metadata remote tools carry.
    */
   annotations?: ToolAnnotations | undefined;
+  /**
+   * Whether this tool needs the network, declared here at registration. Offline mode reads
+   * the declaration and nothing else, so a tool that gains a network path must change its
+   * declaration in the same change. Required: a tool with no declaration is a registration
+   * error, not a default.
+   */
+  requiresNetwork: boolean;
   // Handlers may opt into the approvalDecision (forwarded by the agent loop after the
   // user approves an approval-gated tool). Handlers that don't declare it ignore it.
   handler: (
@@ -82,8 +91,12 @@ export function defineTool<T extends z.ZodType>(config: {
   return {
     name: config.name,
     description: config.description,
-    inputSchema: jsonSchema,
+    inputSchema:
+      jsonSchema.properties === undefined
+        ? jsonSchema
+        : { ...jsonSchema, properties: withoutSafeIntegerBounds(jsonSchema.properties) },
     ...(config.annotations !== undefined && { annotations: config.annotations }),
+    requires_network: config.requiresNetwork,
     execute: withValidatedInput(config.schema, config.handler, config.invalidInput),
   };
 }
@@ -125,12 +138,21 @@ export abstract class LocalToolMCP implements IToolSet {
   }
 
   listTools(): Promise<ListToolsResolvedResponse> {
+    const tools = this.getTools();
+    for (const tool of tools) {
+      if (typeof tool.requires_network !== 'boolean') {
+        throw new Error(
+          `The tool '${tool.name}' does not declare whether it needs the network. Declare requiresNetwork where the tool is registered.`,
+        );
+      }
+    }
     return Promise.resolve({
       result: {
-        tools: this.getTools().map(t => ({
+        tools: tools.map(t => ({
           name: t.name,
           description: t.description,
           inputSchema: t.inputSchema,
+          requires_network: t.requires_network,
           preload: true,
         })),
       },
@@ -197,4 +219,29 @@ export abstract class LocalToolMCP implements IToolSet {
     }
     return tool.execute(params.arguments, approvalDecision, context);
   }
+}
+
+/**
+ * Zod writes the largest safe integer as the bound of every whole-number field. It tells the model
+ * nothing and is sent on every request, so it is left out; the handler still checks the input.
+ */
+function withoutSafeIntegerBounds(properties: Record<string, object>): Record<string, object> {
+  return Object.fromEntries(Object.entries(properties).map(([name, schema]) => [name, withoutBounds(schema)]));
+}
+
+function withoutBounds(schema: object): object {
+  const inner = (value: unknown): unknown =>
+    typeof value === 'object' && value !== null ? withoutBounds(value) : value;
+  if (Array.isArray(schema)) {
+    return schema.map(inner);
+  }
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(
+        ([key, value]) =>
+          !(key === 'maximum' && value === Number.MAX_SAFE_INTEGER) &&
+          !(key === 'minimum' && value === Number.MIN_SAFE_INTEGER),
+      )
+      .map(([key, value]) => [key, inner(value)]),
+  );
 }

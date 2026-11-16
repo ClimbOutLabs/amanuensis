@@ -3,12 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
-import {
-  classifyHostToolCall,
-  classifyTier,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { classifyHostToolCall, classifyTier } from '../../../src/core/permissions/classifier';
 import { FIRST_PARTY_TOOL_REASON, isStandingTrustDecision } from '../../../src/core/permissions/connectorTrust';
 import {
   createSentinelHostContext,
@@ -20,6 +15,7 @@ import {
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { seedShellAllowlist, type ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier2ActionKind } from '../../../src/core/permissions/tier';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { TOOL_GRANT_REASON, type ToolGrantKey, type ToolGrantStore } from '../../../src/core/permissions/toolGrants';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
@@ -35,8 +31,22 @@ function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () 
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      mycmd: {
+        args: ['-l'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
+      ls: {
+        args: ['-l'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -94,6 +104,7 @@ describe('classifyTier shell matrix', () => {
     expect(decision.card).not.toBeNull();
     expect(decision.approval_token_id).not.toBeNull();
     expect(decision.shell_binding).not.toBeNull();
+    expect(decision.standing_grant_barred).toBe(false);
   });
 
   test('compound shell is Tier 3', async () => {
@@ -101,6 +112,21 @@ describe('classifyTier shell matrix', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('shell_not_allowlisted');
   });
+
+  test.each([
+    `for id in $(curl -s https://hn.example/top.json); do curl -s "https://hn.example/item/$id"; done`,
+    'cat <<EOF\nhi\nEOF',
+    "bash -c 'ls'",
+    'python3 -c "print(1)" > out.txt',
+  ])(
+    'a command the parser cannot read asks with its exact text and never takes a standing grant: %s',
+    async command => {
+      const decision = await classifyTier(action('exec', { command }), makeCtx());
+      expect(decision.tier).toBe(3);
+      expect(decision.card?.parsed_command).toBe(command);
+      expect(decision.standing_grant_barred).toBe(true);
+    },
+  );
 
   test('unrecognized tool fails closed to Tier 3', async () => {
     const decision = await classifyTier(action('some_unknown_tool', {}), makeCtx());
@@ -450,7 +476,7 @@ describe('classifyTier external services', () => {
 
 /** A grant store the test can revoke from, keyed exactly like the server store. */
 class RevocableGrantStore implements ToolGrantStore {
-  /** Grant identity to the connector host it was recorded for. */
+  /** Grant identity to the connector setup it was recorded for. */
   private readonly grants = new Map<string, string | null>();
 
   private static id(key: ToolGrantKey): string {
@@ -459,11 +485,11 @@ class RevocableGrantStore implements ToolGrantStore {
 
   hasToolGrant(key: ToolGrantKey): Promise<boolean> {
     const id = RevocableGrantStore.id(key);
-    return Promise.resolve(this.grants.has(id) && this.grants.get(id) === key.mcp_server_host);
+    return Promise.resolve(this.grants.has(id) && this.grants.get(id) === key.connector_binding);
   }
 
   recordToolGrant(key: ToolGrantKey): Promise<void> {
-    this.grants.set(RevocableGrantStore.id(key), key.mcp_server_host);
+    this.grants.set(RevocableGrantStore.id(key), key.connector_binding);
     return Promise.resolve();
   }
 
@@ -479,13 +505,14 @@ describe('classifyTier connector tools and standing grants', () => {
     created_by: 'u1',
     mcp_server_name: 'notes',
     tool_name: 'lookup_record',
-    mcp_server_host: null,
+    connector_binding: null,
   };
 
   function connectorAction(input?: {
     tool_name?: string;
     mcp_server_name?: string;
     mcp_server_host?: string | null;
+    mcp_grant_binding?: string | null;
     mcp_hints?: SentinelAction['mcp_hints'];
     canonical_params?: Record<string, unknown>;
   }): SentinelAction {
@@ -495,6 +522,7 @@ describe('classifyTier connector tools and standing grants', () => {
       tool_type: 'mcp',
       mcp_server_name: input?.mcp_server_name ?? grantKey.mcp_server_name,
       ...(input?.mcp_server_host == null ? {} : { mcp_server_host: input.mcp_server_host }),
+      ...(input?.mcp_grant_binding == null ? {} : { mcp_grant_binding: input.mcp_grant_binding }),
       mcp_hints: input?.mcp_hints ?? closedWorldRead,
     };
   }
@@ -531,33 +559,45 @@ describe('classifyTier connector tools and standing grants', () => {
     expect(decision.card).toBeNull();
   });
 
-  test('a grant binds to the connector host: the same tool on a connector that now points elsewhere asks again', async () => {
-    const bound = { ...grantKey, mcp_server_host: 'mail.example.com' };
+  test('a grant binds to the connector setup: the same tool on a connector set up differently asks again, even on the same host', async () => {
+    const bound = { ...grantKey, connector_binding: 'setup-a' };
     const { services } = grantedServices([bound]);
 
-    const sameHost = await classifyTier(
-      connectorAction({ mcp_server_host: 'mail.example.com' }),
+    const same = await classifyTier(
+      connectorAction({ mcp_server_host: 'mail.example.com', mcp_grant_binding: 'setup-a' }),
       makeCtx({ services }),
     );
-    expect(sameHost.tier).toBe(1);
-    expect(sameHost.reason).toBe(TOOL_GRANT_REASON);
+    expect(same.tier).toBe(1);
+    expect(same.reason).toBe(TOOL_GRANT_REASON);
 
-    const moved = await classifyTier(connectorAction({ mcp_server_host: 'other.example.com' }), makeCtx({ services }));
-    expect(moved.tier).toBe(3);
-    expect(moved.card).not.toBeNull();
+    const changed = await classifyTier(
+      connectorAction({ mcp_server_host: 'mail.example.com', mcp_grant_binding: 'setup-b' }),
+      makeCtx({ services }),
+    );
+    expect(changed.tier).toBe(3);
+    expect(changed.card).not.toBeNull();
   });
 
-  test('a grant made for a connector with no URL does not cover one that has a host, and the reverse', async () => {
-    const { services: noHost } = grantedServices([{ ...grantKey, mcp_server_host: null }]);
+  test('a grant made for a source with no setup binding does not cover a bound connector, and the reverse', async () => {
+    const { services: unbound } = grantedServices([{ ...grantKey, connector_binding: null }]);
     const gained = await classifyTier(
-      connectorAction({ mcp_server_host: 'mail.example.com' }),
-      makeCtx({ services: noHost }),
+      connectorAction({ mcp_server_host: 'mail.example.com', mcp_grant_binding: 'setup-a' }),
+      makeCtx({ services: unbound }),
     );
     expect(gained.tier).toBe(3);
 
-    const { services: hosted } = grantedServices([{ ...grantKey, mcp_server_host: 'mail.example.com' }]);
-    const lost = await classifyTier(connectorAction(), makeCtx({ services: hosted }));
+    const { services: bound } = grantedServices([{ ...grantKey, connector_binding: 'setup-a' }]);
+    const lost = await classifyTier(connectorAction(), makeCtx({ services: bound }));
     expect(lost.tier).toBe(3);
+  });
+
+  test('the card of a grant-eligible ask carries the binding a grant chosen on it records', async () => {
+    const decision = await classifyTier(
+      connectorAction({ mcp_server_host: 'mail.example.com', mcp_grant_binding: 'setup-a' }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.grant_binding).toBe('setup-a');
   });
 
   test('a grant is ignored once the tool omits openWorldHint, since absent means open-world', async () => {
@@ -1063,6 +1103,7 @@ describe('verifyPreDispatch', () => {
           tool_type: 'truefoundry-system',
           canonical_params: params,
           tier: 2,
+          sandbox_file_write: true,
           approval_token_id: token.token_id,
           approval_binding: null,
           shell_binding: null,
@@ -1191,7 +1232,7 @@ describe('connector reads can be always allowed', () => {
   }
 
   function grantFor(tool_name: string, mcp_server_name = mailServer): ToolGrantKey {
-    return { tenant_id: 't1', created_by: 'u1', mcp_server_name, tool_name, mcp_server_host: null };
+    return { tenant_id: 't1', created_by: 'u1', mcp_server_name, tool_name, connector_binding: null };
   }
 
   function servicesGranting(keys: ToolGrantKey[]): SentinelServices {

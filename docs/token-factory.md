@@ -9,8 +9,8 @@ With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provid
 | Main chat           | Answers you, including requests for a briefing                                                 | Main chat model                                             |
 | Coding / sub-agent  | Work the assistant hands to sub-agents                                                         | Coding / subagent model, else the main chat model           |
 | Compaction          | Summarizes old context in long conversations                                                   | Compaction model, else the main chat model                  |
-| Summarization       | Condenses each turn before it is written to memory, and names a new chat after its first reply | Summarization model, else the main chat model               |
-| Profile learning    | Rewrites the learned profile after a turn, when enabled                                        | `PROFILE_LEARNING_MODEL`, else the main chat model          |
+| Summarization       | Condenses each turn before it is written to memory, and names a new chat after its first reply | Background model, else the main chat model                  |
+| Profile learning    | Shares the Summarization call; no call of its own                                              | Background model, else the main chat model                  |
 | Knowledge relevance | Checks which library passages help answer a question                                           | The persona's model                                         |
 | Persona             | Answers as that persona                                                                        | The model bound to the persona under **Roles and Personas** |
 
@@ -34,7 +34,7 @@ These defaults are a snapshot and are meant to be edited. Set `TOKEN_FACTORY_PRI
 - With **Show agent details** on for the chat, each answer's details show a quiet line with the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Super`. Helper calls are included in the total.
 - In the same details, each role that ran appears with its model, calls, tokens and cost.
 - **Settings, Models** shows today's tokens and cost per Token Factory model and the daily cap remaining.
-- **Settings, Themes, Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.
+- **Settings, Appearance, Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.
 
 Token counts are the usage the provider reported for each call and are never estimated: if a provider reports no usage for a call, the line says `usage not reported`. Cost is an estimate from the price table above, labelled "at list price", not your bill. Usage is recorded for completed turns; a turn that errors or is cancelled shows no line, though its tokens still count toward the daily total.
 

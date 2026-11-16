@@ -75,31 +75,57 @@ interface Booted {
   exited: Promise<number | null>;
 }
 
+/** The environment one test instance runs with, kept apart from every other instance by its data folder. */
+function instanceEnv(env: Record<string, string>, dataDir: string): Record<string, string> {
+  return {
+    PATH: process.env['PATH'] ?? '',
+    HOME: dataDir,
+    NODE_OPTIONS: '--conditions=trueforge-dev',
+    NODE_ENV: 'production',
+    STANDALONE: 'true',
+    HOST: 'localhost',
+    ACCESS_LOGS: 'false',
+    MEMORY_EMBEDDINGS_ENABLED: 'false',
+    SQLITE_PATH: path.join(dataDir, 'db', 'db.sqlite'),
+    MEMORY_MARKDOWN_DIR: path.join(dataDir, 'memory'),
+    PERSONA_KNOWLEDGE_DIR: path.join(dataDir, 'persona'),
+    APP_DATA_DIR_SUFFIX: `startup-test-${path.basename(dataDir)}`,
+    ...env,
+  };
+}
+
 function boot(env: Record<string, string>, dataDir: string): Booted {
   let collected = '';
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
     cwd: PACKAGE_ROOT,
-    env: {
-      PATH: process.env['PATH'] ?? '',
-      HOME: dataDir,
-      NODE_OPTIONS: '--conditions=trueforge-dev',
-      NODE_ENV: 'production',
-      STANDALONE: 'true',
-      HOST: 'localhost',
-      ACCESS_LOGS: 'false',
-      MEMORY_EMBEDDINGS_ENABLED: 'false',
-      SQLITE_PATH: path.join(dataDir, 'db', 'db.sqlite'),
-      MEMORY_MARKDOWN_DIR: path.join(dataDir, 'memory'),
-      PERSONA_KNOWLEDGE_DIR: path.join(dataDir, 'persona'),
-      APP_DATA_DIR_SUFFIX: `startup-test-${path.basename(dataDir)}`,
-      ...env,
-    },
+    env: instanceEnv(env, dataDir),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.on('data', (chunk: Buffer) => (collected += chunk.toString()));
   child.stderr.on('data', (chunk: Buffer) => (collected += chunk.toString()));
   const exited = new Promise<number | null>(resolve => child.on('exit', code => resolve(code)));
   return { child, output: () => collected, exited };
+}
+
+/** Runs `aman create-account` against the instance's data folder, with the answers piped in. */
+async function createAccountInTerminal({
+  dataDir,
+  answers,
+}: {
+  dataDir: string;
+  answers: readonly string[];
+}): Promise<{ code: number | null; output: string }> {
+  let output = '';
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/cli/main.ts', 'create-account'], {
+    cwd: PACKAGE_ROOT,
+    env: instanceEnv({ TRUEFORGE_AUTH_MODE: 'local' }, dataDir),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
+  child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()));
+  child.stdin.end(`${answers.join('\n')}\n`);
+  const code = await new Promise<number | null>(resolve => child.on('exit', resolve));
+  return { code, output };
 }
 
 /**
@@ -160,11 +186,11 @@ describe('local sign-in startup', () => {
 
     expect(await booted.exited).toBe(1);
     expect(booted.output()).toContain(
-      'Local sign-in works on this computer or behind https. Set PUBLIC_BASE_URL to an https address, or use the Docker install.',
+      'Local sign-in works on this computer or behind https. Change every plain http address in PUBLIC_BASE_URL and ALLOWED_ORIGINS to https, or use the Docker install.',
     );
   });
 
-  it('boots on this computer with no OIDC at all and serves the create form', async () => {
+  it('boots on this computer with no OIDC at all and names the terminal command, with no form to fill', async () => {
     const port = await freePort();
     const base = `http://localhost:${String(port)}`;
     const booted = boot({ PORT: String(port), TRUEFORGE_AUTH_MODE: 'local' }, dataDir);
@@ -177,10 +203,30 @@ describe('local sign-in startup', () => {
 
     const login = await fetch(`${base}/api/v1/auth/login`);
     expect(login.status).toBe(200);
-    expect(await login.text()).toContain('Create your sign-in');
+    const html = await login.text();
+    expect(html).toContain('npx amanuensis --create-account');
+    expect(html).not.toContain('<form');
+
+    const posted = await formPost(
+      `${base}/api/v1/auth/create-account`,
+      { email: 'owner@example.com', password: 'a long enough password', password_confirm: 'a long enough password' },
+      { Origin: base },
+    );
+    expect(posted.setCookie).not.toContain('id_token=');
+    const stillNone = await fetch(`${base}/api/v1/auth/login`);
+    expect(await stillNone.text()).toContain('npx amanuensis --create-account');
   }, 180_000);
 
-  it('refuses a create with no Origin, and lets the same create through with the page own Origin', async () => {
+  it('signs in with the sign-in made in the terminal, and refuses a sign-in post with no Origin', async () => {
+    const PASSWORD = 'a long enough password';
+    const made = await createAccountInTerminal({ dataDir, answers: ['owner@example.com', PASSWORD, PASSWORD] });
+    expect(made.output).toContain('Your sign-in is set up.');
+    expect(made.code).toBe(0);
+
+    const again = await createAccountInTerminal({ dataDir, answers: ['other@example.com', PASSWORD, PASSWORD] });
+    expect(again.code).toBe(1);
+    expect(again.output).toContain('Your sign-in is already set up.');
+
     const port = await freePort();
     const base = `http://localhost:${String(port)}`;
     const booted = boot({ PORT: String(port), TRUEFORGE_AUTH_MODE: 'local' }, dataDir);
@@ -188,21 +234,12 @@ describe('local sign-in startup', () => {
 
     await waitUntilServing({ booted, base });
 
-    const fields = {
-      email: 'owner@example.com',
-      password: 'a long enough password',
-      password_confirm: 'a long enough password',
-    };
-    const refused = await formPost(`${base}/api/v1/auth/create-account`, fields, {});
+    const fields = { email: 'owner@example.com', password: PASSWORD };
+    const refused = await formPost(`${base}/api/v1/auth/login`, fields, {});
     expect(refused.status).toBe(403);
 
-    // The refused create stored nothing: the create form is still on offer.
-    const login = await fetch(`${base}/api/v1/auth/login`);
-    expect(login.status).toBe(200);
-    expect(await login.text()).toContain('Create your sign-in');
-
-    const created = await formPost(`${base}/api/v1/auth/create-account`, fields, { Origin: base });
-    expect(created.status).toBe(302);
-    expect(created.setCookie).toContain('id_token=');
+    const signedIn = await formPost(`${base}/api/v1/auth/login`, fields, { Origin: base });
+    expect(signedIn.status).toBe(302);
+    expect(signedIn.setCookie).toContain('id_token=');
   }, 180_000);
 });

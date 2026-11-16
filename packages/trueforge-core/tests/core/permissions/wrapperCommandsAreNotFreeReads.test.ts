@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import {
   parseReadOnlyList,
@@ -9,6 +9,7 @@ import {
   seedShellAllowlist,
   type ShellAllowlistConfig,
 } from '../../../src/core/permissions/shellAllowlist';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 /**
@@ -60,7 +61,14 @@ function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () 
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      mycmd: {
+        args: ['-l'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });

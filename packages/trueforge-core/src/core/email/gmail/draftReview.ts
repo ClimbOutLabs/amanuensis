@@ -19,6 +19,8 @@ export interface ReviewableDraft {
   references: string;
   /** The display name the message is sent under, which recipients see; empty when there is none. */
   fromName: string;
+  /** The address of the account the message is sent from, checked against the account before it is carried. */
+  fromAddress: string;
   /** Whether a recipient's name was left off because it looked like an address, so the card says so. */
   nameLeftOff: boolean;
   /** The address replies go to when it is not the sending account; null when replies go to the sender. */
@@ -28,4 +30,15 @@ export interface ReviewableDraft {
 /** Hash of everything a send delivers. */
 export function hashDraft(draft: ReviewableDraft): string {
   return createHash('sha256').update(stableStringify(draft)).digest('hex');
+}
+
+/** Characters of the hash a person is shown; enough to compare by eye, not a security boundary. */
+const CHECK_CODE_LENGTH = 6;
+
+/**
+ * The short code printed on a send card and again on its receipt. It is cut from the same hash the send gate
+ * binds, so a receipt carrying the card's code shows the message that was approved was the one sent.
+ */
+export function checkCodeOf(hash: string): string {
+  return hash.slice(0, CHECK_CODE_LENGTH).toUpperCase();
 }

@@ -45,10 +45,9 @@ function renderCard(card: SentinelApprovalCard) {
 }
 
 describe('the persona approval card', () => {
-  it('asks the question in plain words, and the stub says it is a new persona', () => {
+  it('asks the question in plain words', () => {
     renderCard(TRAVEL_PLANNER_CARD);
     expect(screen.getByRole('heading', { name: 'Add the persona "Travel planner"?' })).toBeInTheDocument();
-    expect(screen.getByText('New persona')).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/specialist|\bagents?\b/i);
   });
 

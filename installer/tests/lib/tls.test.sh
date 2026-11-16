@@ -154,10 +154,10 @@ test_the_plan_and_the_summary() {
   assert_no_path "$AMAN_HOME"
   RUN_ENV_EXTRA=(CLICOLOR_FORCE=1 LANG=C.UTF-8 TERM=xterm)
   install_machine
-  assert_flat_contains "$OUT" "Open https://192.168.1.20:8443"
-  assert_flat_contains "$OUT" "follow its steps: http://192.168.1.20:8791/trust"
-  assert_flat_contains "$OUT" "browser will first warn that the page is not private. Do not click past the warning."
-  assert_flat_contains "$OUT" "install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
+  assert_flat_contains "$OUT" "Open https://host.local:8443"
+  assert_flat_contains "$OUT" "Set up a new phone or computer"
+  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791/trust on it once and follow its steps, or scan the code below. Do not click past a warning that the page is not private."
+  assert_flat_contains "$OUT" "Your device shows a long code called a fingerprint. It must be this one. If it differs, stop."
   assert_not_contains "$OUT" "not encrypted"
   assert_contains "$OUT" "▀" "a code a phone can scan"
   assert_log_lacks "sudo "
@@ -174,8 +174,9 @@ test_no_code_without_colors() {
   lan
   RUN_ENV_EXTRA=(LANG=C)
   install_machine
-  assert_flat_contains "$OUT" "follow its steps: http://192.168.1.20:8791/trust"
+  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791/trust on it once"
   assert_not_contains "$OUT" "▀"
+  assert_not_contains "$(flat "$OUT")" "scan the code" "no code is promised when none is drawn"
   assert_no_path "$STUB_STATE/qr_runs"
   sandbox_drop
 }
@@ -255,36 +256,21 @@ tailnet() {
   fixture_tailscale 100.101.102.103 host.example.ts.net
 }
 
-test_a_port_tailscale_serves_is_not_picked() {
-  t_begin "an install skips the https port Tailscale serve is set up for"
+test_tailscale_serve_never_competes_for_a_port() {
+  t_begin "Tailscale serve on Aman's own ports changes nothing, because Aman never listens on the Tailscale address"
   sandbox_new
   tailnet
-  STUB_TS_SERVE_PORTS="443 8443"
+  STUB_TS_SERVE_PORTS="443 8443 8791"
   install_machine
   assert_rc 0
-  assert_eq "$(reg_value main tls_port)" 8444
-  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
-  assert_not_contains "$(compose)" ":8443:8443'"
-  sandbox_drop
-}
-
-test_an_upgrade_moves_https_off_a_port_tailscale_took() {
-  t_begin "an upgrade moves the https port before restarting when Tailscale serve was set up for it since, so the new version and the rollback both start"
-  sandbox_new
-  tailnet
-  install_machine
   assert_eq "$(reg_value main tls_port)" 8443
-  # Set up after the install, while the instance held the port: Tailscale takes it the moment the instance stops.
-  STUB_TS_SERVE_PORTS="443 8443"
+  assert_eq "$(reg_value main app_port)" 8791
+  assert_not_contains "$(compose)" "100.101.102.103"
   repo_commit_change "app change"
   run_install upgrade
   assert_rc 0
-  assert_eq "$(reg_value main tls_port)" 8444
-  assert_contains "$(env_value main ALLOWED_ORIGINS)" "https://100.101.102.103:8444"
-  assert_not_contains "$(env_value main ALLOWED_ORIGINS)" ":8443"
-  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
-  assert_not_contains "$(compose)" ":8443:8443'"
-  assert_flat_contains "$OUT" "Tailscale serve on this computer is set up for port 8443, so instance main now opens over https on port 8444"
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_not_contains "$OUT$ERR" "Tailscale"
   sandbox_drop
 }
 
@@ -295,7 +281,6 @@ test_a_failed_backup_leaves_the_https_port_as_it_was() {
   install_machine
   local origins
   origins=$(env_value main ALLOWED_ORIGINS)
-  STUB_TS_SERVE_PORTS="8443"
   STUB_BACKUP_FAIL=1
   repo_commit_change "app change"
   run_install upgrade
@@ -303,67 +288,6 @@ test_a_failed_backup_leaves_the_https_port_as_it_was() {
   assert_eq "$(reg_value main tls_port)" 8443
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "$origins"
   assert_not_contains "$OUT$ERR" "now opens over https on port"
-  sandbox_drop
-}
-
-test_rebuilding_missing_parts_moves_https_off_a_port_tailscale_took() {
-  t_begin "an upgrade that only builds missing parts again also moves https off a port Tailscale serve took, before restarting"
-  sandbox_new
-  tailnet
-  install_machine
-  local app
-  app=$(sed -n 's/.*"app_image": "\([^"]*\)".*/\1/p' "$AMAN_HOME/release/release.json")
-  grep -Fxv "$app" "$SB_STATE/images" >"$SB_STATE/images.new" || true
-  mv "$SB_STATE/images.new" "$SB_STATE/images"
-  STUB_TS_SERVE_PORTS="8443"
-  run_install upgrade
-  assert_rc 0
-  assert_flat_contains "$OUT" "Building the missing parts again"
-  assert_eq "$(reg_value main tls_port)" 8444
-  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
-  assert_not_contains "$(compose)" ":8443:8443'"
-  sandbox_drop
-}
-
-test_an_upgrade_move_to_https_skips_a_port_tailscale_serves() {
-  t_begin "an upgrade that moves a plain http instance to https picks a port Tailscale serve does not use"
-  sandbox_new
-  tailnet
-  install_machine
-  local conf="$AMAN_HOME/state/instances/main.conf" plain
-  plain=$(reg_value main origins | sed 's|https://\([^,]*\):8443|http://\1:8791|g')
-  sed -i 's/^tls=.*/tls=off/; s/^tls_port=.*/tls_port=/' "$conf"
-  sed -i "s|^origins=.*|origins=$plain|" "$conf"
-  sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$plain|" "$AMAN_HOME/instances/main/.env"
-  STUB_TS_SERVE_PORTS="443 8443"
-  repo_commit_change "app change"
-  run_install upgrade
-  assert_rc 0
-  assert_eq "$(reg_value main tls)" local
-  assert_eq "$(reg_value main tls_port)" 8444
-  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
-  assert_not_contains "$(compose)" ":8443:8443'"
-  sandbox_drop
-}
-
-test_an_app_port_tailscale_serves_stops_before_anything_changes() {
-  t_begin "an upgrade stops before the backup and the build when Tailscale serve is set up for the app port, which is never moved by itself"
-  sandbox_new
-  tailnet
-  install_machine
-  local builds
-  builds=$(log_count "docker build")
-  STUB_TS_SERVE_PORTS="8791"
-  repo_commit_change "app change"
-  : >"$STUB_LOG"
-  run_install upgrade
-  if [ "$RC" != 0 ]; then t_pass; else t_fail "the upgrade went ahead"; fi
-  assert_flat_contains "$OUT$ERR" "Tailscale serve on this computer is set up for port 8791"
-  assert_flat_contains "$OUT$ERR" "Nothing was stopped."
-  assert_log_lacks "docker build"
-  assert_log_lacks " down"
-  assert_no_path "$AMAN_HOME/backups"
-  assert_eq "$(reg_value main app_port)" 8791
   sandbox_drop
 }
 
@@ -387,7 +311,7 @@ test_an_existing_instance_moves_to_https() {
   assert_eq "$(env_value main OIDC_CLIENT_SECRET)" "$secret" "secrets stay as they were"
   assert_log_has "--force-recreate"
   assert_not_contains "$(cat "$STUB_LOG")" "volume rm" "no data was removed"
-  assert_flat_contains "$OUT" "open this page once on that device"
+  assert_flat_contains "$OUT" "/trust on it once and follow its steps"
   run_install --yes
   assert_flat_contains "$OUT" "Nothing to do."
   # An instance recorded with plain http from before moves to https on the next plain re-run.
@@ -568,7 +492,9 @@ test_the_front_end_is_locked_down() {
   caddyfile=$(cat "$AMAN_HOME/instances/main/tls.Caddyfile")
   assert_contains "$caddyfile" "protocols h1 h2"
   assert_contains "$caddyfile" "@known host 127.0.0.1 localhost 192.168.1.20 host host.local"
-  assert_contains "$caddyfile" 'respond "This address is not one Aman is set up for." 421'
+  assert_contains "$caddyfile" 'aman address add {http.request.host}" 421'
+  assert_contains "$caddyfile" "proxy_protocol"
+  assert_contains "$caddyfile" "allow 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
   assert_contains "$caddyfile" "X-Content-Type-Options nosniff"
   assert_contains "$caddyfile" "default-src 'none'"
   assert_contains "$caddyfile" "frame-ancestors 'none'"
@@ -583,7 +509,7 @@ test_the_fingerprint_is_shown_where_trust_is_given() {
   local fingerprint
   fingerprint=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
   assert_contains "$fingerprint" ":"
-  assert_flat_contains "$OUT" "Your device will show a long code called a fingerprint. It must be $fingerprint. If it differs, stop."
+  assert_flat_contains "$OUT" "Your device shows a long code called a fingerprint. It must be this one. If it differs, stop. ${fingerprint:0:48} ${fingerprint:48}"
   local page
   page=$(cat "$AMAN_HOME/tls/trust/main/index.html")
   assert_not_contains "$page" "$fingerprint" "the plain-http page does not show a value it cannot vouch for"
@@ -628,7 +554,7 @@ test_a_new_name_makes_the_authority_again_and_says_so() {
   rm -f "$AMAN_HOME/tls/ca/root.names"
   run_install tls
   assert_rc 0
-  assert_flat_contains "$OUT" "open this page once on that device"
+  assert_flat_contains "$OUT" "/trust on it once and follow its steps"
   assert_flat_contains "$OUT" "root certificate was made again"
   sandbox_drop
 }
@@ -723,12 +649,8 @@ test_tls_off_is_refused
 test_the_flag_is_checked
 test_a_computer_with_no_network_has_nothing_to_serve
 test_a_busy_https_port_moves_the_instance
-test_a_port_tailscale_serves_is_not_picked
-test_an_upgrade_moves_https_off_a_port_tailscale_took
 test_a_failed_backup_leaves_the_https_port_as_it_was
-test_rebuilding_missing_parts_moves_https_off_a_port_tailscale_took
-test_an_upgrade_move_to_https_skips_a_port_tailscale_serves
-test_an_app_port_tailscale_serves_stops_before_anything_changes
+test_tailscale_serve_never_competes_for_a_port
 test_an_existing_instance_moves_to_https
 test_a_failed_move_to_https_keeps_plain_http_and_is_tried_again
 test_a_plain_http_instance_is_told_to_run_the_installer_again

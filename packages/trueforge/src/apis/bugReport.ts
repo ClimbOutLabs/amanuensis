@@ -10,7 +10,6 @@ import { hasAdminRole, type ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import type { IAgentStore } from '../db/agentStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { PACKAGE_VERSION } from '../packageVersion';
@@ -27,7 +26,6 @@ const BUG_REPORT_MAX_EVENT_PAGES = 5;
 export interface BugReportRouterDeps<TTransaction> {
   sessions: Sessions<SessionCustom, TurnCustom>;
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
-  mcpServerStore: IMcpServerStore<TTransaction>;
   agentStore: IAgentStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
@@ -111,7 +109,6 @@ export function createBugReportRouter<TTransaction>(deps: BugReportRouterDeps<TT
       fetchRecentEvents(session),
       readLocalCapabilitiesData({
         sandboxProviderStore: deps.sandboxProviderStore,
-        mcpServerStore: deps.mcpServerStore,
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         isAdmin: hasAdminRole(requestContext),

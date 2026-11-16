@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# instance import: a kept backup is taken and the search model waited for, then the app is stopped, the CLI runs in a
+# instance import: the search model is checked and a kept backup is taken, then the app is stopped, the CLI runs in a
 # one-off container with the data volume and no network, and the app is started again whatever the outcome.
 set -euo pipefail
 # shellcheck source=../helpers.sh
@@ -107,6 +107,21 @@ test_an_import_that_runs_out_of_memory_says_so() {
   assert_rc 1
   assert_flat_contains "$ERR" "Import failed: Aman ran out of memory. Give Docker more memory, then run this again."
   assert_not_contains "$ERR" "node::Abort"
+  assert_file "$SB_STATE/up/aman-main"
+  sandbox_drop
+}
+
+test_an_import_killed_for_memory_says_so() {
+  t_begin "an import killed for memory (exit 137) says it ran out of memory and what to do, though the log has no reason"
+  sandbox_new
+  install_with_owner
+  make_export
+  export STUB_IMPORT_FAIL=killed
+  run_install instance import main "$EXPORT_FILE"
+  unset STUB_IMPORT_FAIL
+  assert_rc 1
+  assert_flat_contains "$ERR" "Import failed: Aman ran out of memory. Give Docker more memory, then run this again."
+  assert_not_contains "$ERR" "stopped without giving a reason"
   assert_file "$SB_STATE/up/aman-main"
   sandbox_drop
 }
@@ -254,53 +269,35 @@ test_an_instance_that_never_started_is_started_once() {
   sandbox_drop
 }
 
-test_import_waits_for_the_search_model() {
-  t_begin "instance import waits for the search model with one progress line, then imports"
+test_import_checks_the_search_model_once() {
+  t_begin "instance import checks once that the search model is in the image, then imports"
   sandbox_new
   install_with_owner
   make_export
-  export STUB_MODEL_DOWNLOADING=3
   run_install instance import main "$EXPORT_FILE"
-  unset STUB_MODEL_DOWNLOADING
   assert_rc 0
-  assert_eq "$(printf '%s\n' "$OUT" | grep -c 'Waiting for instance main to finish downloading its search model')" 1
-  assert_eq "$(wc -l <"$SB_STATE/model_checks" | tr -d ' ')" 4
+  assert_eq "$(wc -l <"$SB_STATE/model_checks" | tr -d ' ')" 1
   assert_eq "$(import_count)" 1
   sandbox_drop
 }
 
-test_a_stopped_instance_is_started_to_download_the_model() {
-  t_begin "a stopped instance without its search model is started so it can download it"
+test_import_stops_when_the_model_is_missing() {
+  t_begin "instance import stops before any change and says what to do when the search model is missing"
   sandbox_new
   install_with_owner
   make_export
-  rm -f "$SB_STATE/up/aman-main"
-  export STUB_MODEL_DOWNLOADING=1
+  export STUB_MODEL_MISSING=1
   run_install instance import main "$EXPORT_FILE"
-  unset STUB_MODEL_DOWNLOADING
-  assert_rc 0
-  assert_flat_contains "$OUT" "Instance main is running and answering"
-  assert_eq "$(import_count)" 1
-  sandbox_drop
-}
-
-test_import_gives_up_when_the_model_never_arrives() {
-  t_begin "instance import stops waiting, imports nothing and says what to check when the model never arrives"
-  sandbox_new
-  install_with_owner
-  make_export
-  export STUB_MODEL_DOWNLOADING=1000
-  run_install instance import main "$EXPORT_FILE"
-  unset STUB_MODEL_DOWNLOADING
+  unset STUB_MODEL_MISSING
   assert_rc 1
-  assert_flat_contains "$ERR" "did not finish downloading its search model in 20 minutes, so nothing was imported. Check this computer's internet connection, then run the import again."
+  assert_flat_contains "$ERR" "The installed Aman has no search model for instance main, so nothing was imported. Run aman upgrade, then run the import again."
   assert_eq "$(import_count)" 0
   assert_eq "$(log_count 'stop app')" 0 "the app was never stopped"
   export STUB_MODEL_BROKEN=1
   run_install instance import main "$EXPORT_FILE"
   unset STUB_MODEL_BROKEN
   assert_rc 1
-  assert_flat_contains "$ERR" "Aman could not tell whether instance main has its search model yet, so nothing was imported."
+  assert_flat_contains "$ERR" "Aman could not tell whether instance main has its search model, so nothing was imported."
   assert_eq "$(import_count)" 0
   sandbox_drop
 }
@@ -310,12 +307,12 @@ test_import_passes_the_display_name
 test_import_takes_a_kept_backup_first
 test_a_failed_backup_stops_the_import
 test_an_instance_that_never_started_is_started_once
-test_import_waits_for_the_search_model
-test_a_stopped_instance_is_started_to_download_the_model
-test_import_gives_up_when_the_model_never_arrives
+test_import_checks_the_search_model_once
+test_import_stops_when_the_model_is_missing
 test_a_failed_import_still_starts_the_app_and_fails
 test_a_refused_import_names_the_file_and_its_size_on_its_failure_line
 test_an_import_that_runs_out_of_memory_says_so
+test_an_import_killed_for_memory_says_so
 test_a_dry_run_checks_the_file_and_imports_nothing
 test_an_interrupted_import_still_starts_the_app
 test_import_needs_a_name_and_a_file

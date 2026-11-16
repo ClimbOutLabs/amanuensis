@@ -4,7 +4,7 @@ import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SpokenReplyContainer } from '@/containers/SpokenReplyContainer.js';
-import { SPEAK_VOICE_REPLIES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
+import { READ_WHOLE_MESSAGES_STORAGE_KEY, SPEAK_VOICE_REPLIES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
 import {
   armSpokenReply,
   clearDraftFromVoice,
@@ -23,8 +23,11 @@ import { RuntimeHarness } from './RuntimeHarness.js';
 
 const { threadRunning, approvals } = vi.hoisted(() => {
   const threadRunning = { value: false };
-  // Approval cards come from the sentinel provider; speech only reads the card's plain sentence.
-  const approvals: Record<string, { card: { plain_what: string } }> = {};
+  // Approval cards come from the sentinel provider; speech only reads the card's headline.
+  const approvals: Record<
+    string,
+    { card: { plain_what: string; copy?: { headline: string; consequence: string | null; reason: string | null } } }
+  > = {};
   return { threadRunning, approvals };
 });
 
@@ -242,8 +245,33 @@ describe('SpokenReplyContainer', () => {
     expect(spokenTexts(synthesis)).toEqual([`${words.slice(0, 60).join(' ')}. The rest is on screen.`]);
   });
 
+  it('reads a long answer to the end when whole messages are on', async () => {
+    window.localStorage.setItem(READ_WHOLE_MESSAGES_STORAGE_KEY, 'true');
+    const words = Array.from({ length: 80 }, (_, index) => `word${String(index)}`);
+    await sendAndFinish({ fromVoice: true, reply: [{ type: 'text', text: words.join(' ') }] });
+
+    expect(spokenTexts(synthesis)).toEqual([words.join(' ')]);
+  });
+
+  it('stops a whole-message readout early when the person switches chats', async () => {
+    window.localStorage.setItem(READ_WHOLE_MESSAGES_STORAGE_KEY, 'true');
+    const words = Array.from({ length: 80 }, (_, index) => `word${String(index)}`);
+    const rerender = await sendAndFinish({ fromVoice: true, reply: [{ type: 'text', text: words.join(' ') }] });
+    expect(synthesis.speak).toHaveBeenCalledTimes(1);
+
+    rerender(thread({ messages: [], running: false, threadId: 'chat-b' }));
+    await settle();
+
+    expect(synthesis.cancel).toHaveBeenCalled();
+  });
+
   it('speaks one short OK line for a reply that waits on an approval, and approves nothing', async () => {
-    approvals['call-approval'] = { card: { plain_what: 'Send the email to Sam Rivera.' } };
+    approvals['call-approval'] = {
+      card: {
+        plain_what: 'Send the email to Sam Rivera.',
+        copy: { headline: 'Send the email to Sam Rivera.', consequence: null, reason: null },
+      },
+    };
     const respond = vi.fn<(options: RespondToToolApprovalOptions) => void>();
     const prompt = [userMessage('Email Sam')];
     const { rerender } = render(thread({ messages: [], running: false, onRespondToToolApproval: respond }));

@@ -19,9 +19,16 @@ const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 
 
 describe('arguments', () => {
   it('defaults to the main instance and takes --instance', () => {
-    assert.deepEqual(parseArguments([]), { instance: 'main' });
-    assert.deepEqual(parseArguments(['--instance', 'demo']), { instance: 'demo' });
-    assert.deepEqual(parseArguments(['--', '--instance=demo-2']), { instance: 'demo-2' });
+    assert.deepEqual(parseArguments([]), { instance: 'main', suite: 'attachments' });
+    assert.deepEqual(parseArguments(['--instance', 'demo']), { instance: 'demo', suite: 'attachments' });
+    assert.deepEqual(parseArguments(['--', '--instance=demo-2']), { instance: 'demo-2', suite: 'attachments' });
+  });
+
+  it('takes --suite, and refuses one it does not have', () => {
+    assert.deepEqual(parseArguments(['--suite', 'coding']), { instance: 'main', suite: 'coding' });
+    assert.deepEqual(parseArguments(['--suite=coding', '--instance', 'demo']), { instance: 'demo', suite: 'coding' });
+    assert.match(parseArguments(['--suite', 'everything']).problem, /--suite must be attachments or coding/);
+    assert.match(parseArguments(['--suite']).problem, /--suite must be attachments or coding/);
   });
 
   it('refuses a name that could not be an instance and anything it does not know', () => {
@@ -63,6 +70,7 @@ describe('the throwaway container', () => {
   it("mounts the instance's control volumes read-only where the tests look for them, and the checkout at its own path", () => {
     const args = throwawayContainerArguments({
       instance: 'demo',
+      suite: 'attachments',
       slotCount: 2,
       checkout: '/home/owner/amanuensis',
       outputDir: '/tmp/out',
@@ -80,7 +88,22 @@ describe('the throwaway container', () => {
     // The tests run as the person who started them, so the checkout gets no root-owned files.
     assert.ok(args.includes('HOST_UID=1000'));
     assert.match(args.at(-1), /setpriv --reuid="\$HOST_UID"/);
+    assert.match(args.at(-1), /slots\.integration\.test\.ts -t "reading attachments"/);
     assert.equal(controlVolumeName({ instance: 'demo', slot: 4 }), 'demo_slot_ctl_4');
+  });
+
+  it('runs the coding cases for the coding suite', () => {
+    const args = throwawayContainerArguments({
+      instance: 'demo',
+      suite: 'coding',
+      slotCount: 1,
+      checkout: '/home/owner/amanuensis',
+      outputDir: '/tmp/out',
+      testImage: 'aman-slots-live:abc',
+      uid: 1000,
+      gid: 1000,
+    });
+    assert.match(args.at(-1), /sandboxCoding\.live\.test\.ts -t "coding in the sandbox"/);
   });
 });
 
@@ -90,23 +113,43 @@ describe('the report', () => {
   const report = assertionResults => ({ testResults: [{ assertionResults }] });
 
   it('prints one tick line per case and a pass verdict', () => {
-    const summary = summarizeReport(report([passed('first case'), passed('second case')]));
+    const summary = summarizeReport({
+      report: report([passed('first case'), passed('second case')]),
+      suite: 'attachments',
+    });
     assert.deepEqual(summary.lines, ['✓ first case', '✓ second case']);
     assert.equal(summary.verdict, 'PASS: 2 of 2 cases read correctly on the sandbox.');
     assert.equal(summary.ok, true);
   });
 
   it('marks a failed case with ! and its first line, and gives the one fix', () => {
-    const summary = summarizeReport(report([passed('ok case'), failed('bad case', 'Error: boom\n    at somewhere')]));
+    const summary = summarizeReport({
+      report: report([passed('ok case'), failed('bad case', 'Error: boom\n    at somewhere')]),
+      suite: 'attachments',
+    });
     assert.deepEqual(summary.lines, ['✓ ok case', '! bad case: Error: boom']);
     assert.equal(summary.verdict, `FAIL: 1 of 2 cases did not work. Run \`${FIX_COMMAND}\`, then run this again.`);
     assert.equal(summary.ok, false);
   });
 
   it('leaves out skipped cases, and is a failure when nothing ran', () => {
-    const summary = summarizeReport(report([{ title: 'other describe', status: 'pending', failureMessages: [] }]));
+    const summary = summarizeReport({
+      report: report([{ title: 'other describe', status: 'pending', failureMessages: [] }]),
+      suite: 'attachments',
+    });
     assert.deepEqual(summary.lines, ['! No attachment cases ran.']);
     assert.equal(summary.ok, false);
+  });
+
+  it('words the coding suite as coding, with its own fix', () => {
+    const good = summarizeReport({ report: report([passed('a')]), suite: 'coding' });
+    assert.equal(good.verdict, 'PASS: 1 of 1 coding cases worked on the sandbox.');
+    const bad = summarizeReport({ report: report([failed('a', 'boom')]), suite: 'coding' });
+    assert.equal(
+      bad.verdict,
+      'FAIL: 1 of 1 cases did not work. Update Aman and this checkout to the latest version, then run this again.',
+    );
+    assert.deepEqual(summarizeReport({ report: report([]), suite: 'coding' }).lines, ['! No coding cases ran.']);
   });
 });
 

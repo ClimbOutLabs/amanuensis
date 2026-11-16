@@ -59,6 +59,7 @@ function search(id: string, query: string): ModelStep {
 function card(destination: string): InternalToolCallInfo['tier3_card'] {
   return {
     plain_what: 'Do the thing.',
+    copy: null,
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,

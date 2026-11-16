@@ -1,4 +1,4 @@
-import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
+import { SpeechRateLimiter, speechPersonKey } from '../../../src/voice/speechRateLimit';
 
 describe('SpeechRateLimiter', () => {
   it('allows a fixed number of requests per rolling minute', () => {
@@ -29,6 +29,22 @@ describe('SpeechRateLimiter', () => {
     }
     expect(limiter.acquire('alice').allowed).toBe(true);
     expect(limiter.acquire('alice').allowed).toBe(false);
+  });
+
+  it('hands a freed place straight to the caller that waited longest, so a quick new request cannot take it', async () => {
+    const limiter = new SpeechRateLimiter({ maxPerWindow: 50, maxInFlight: 1 });
+    const first = limiter.acquire('alice');
+    const waiting = limiter.acquireInFlightWaiting({
+      key: 'alice',
+      signal: new AbortController().signal,
+      timeoutMs: 5_000,
+    });
+    if (first.allowed) first.release();
+    // Before the woken caller has run, the place is already its own.
+    expect(limiter.acquire('alice').allowed).toBe(false);
+    const release = await waiting;
+    release();
+    expect(limiter.acquire('alice').allowed).toBe(true);
   });
 
   it('lets a voice conversation wait for the in-flight cap it shares, without spending the minute budget', async () => {
@@ -87,5 +103,17 @@ describe('SpeechRateLimiter', () => {
     expect(limiter.acquire('alice').allowed).toBe(true);
     expect(limiter.acquire('alice').allowed).toBe(false);
     expect(limiter.acquire('bob').allowed).toBe(true);
+  });
+});
+
+describe('the key of a person at the voice service', () => {
+  it('is the same for the same person and differs between people and instances', () => {
+    expect(speechPersonKey({ tenantId: 't', personId: 'p' })).toBe(speechPersonKey({ tenantId: 't', personId: 'p' }));
+    expect(speechPersonKey({ tenantId: 't', personId: 'p' })).not.toBe(
+      speechPersonKey({ tenantId: 't', personId: 'q' }),
+    );
+    expect(speechPersonKey({ tenantId: 't', personId: 'p' })).not.toBe(
+      speechPersonKey({ tenantId: 'u', personId: 'p' }),
+    );
   });
 });

@@ -244,11 +244,12 @@ test_removing_the_last_instance_takes_the_machine_project_with_it() {
   sandbox_new
   install_machine
   assert_file "$SB_STATE/up/aman-machine"
-  assert_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
+  # A speech cache volume left behind by an older install, which uninstall still removes.
+  printf '%s\n' aman_stt_cache >>"$SB_STATE/volumes"
   mkdir -p "$AMAN_HOME/backups/one"
   run_install instance remove main
   assert_rc 0
-  assert_contains "$OUT" "shared speech-to-text service and its downloaded model are kept"
+  assert_contains "$OUT" "The shared speech-to-text service is kept too."
   assert_contains "$OUT" "instance remove main --purge-data"
   assert_file "$SB_STATE/up/aman-machine"
   assert_file "$AMAN_HOME/machine/compose.yaml"
@@ -278,7 +279,6 @@ test_removing_one_of_two_instances_leaves_the_machine_project() {
   assert_rc 0
   assert_not_contains "$OUT" "last instance"
   assert_file "$SB_STATE/up/aman-machine"
-  assert_contains "$(cat "$SB_STATE/volumes")" "aman_stt_cache"
   assert_file "$AMAN_HOME/machine/compose.yaml"
   assert_file "$AMAN_HOME/state/instances/main.conf"
   sandbox_drop
@@ -343,6 +343,18 @@ test_public_url_rules() {
   done
   # Loopback ports are still the only published ones.
   assert_contains "$(cat "$AMAN_HOME/instances/pub/compose.yaml")" "'127.0.0.1:"
+  sandbox_drop
+}
+
+test_container_network_ranges_are_written() {
+  t_begin "an instance learns the ranges of its own container networks into its settings"
+  sandbox_new
+  install_machine
+  printf '%s\n' "aman-nets_default 172.30.0.0/16" "aman-nets_calendar 172.31.0.0/16" "aman-nets_link 172.32.0.0/16" >"$SB_STATE/network_subnets"
+  add_instance nets
+  assert_rc 0
+  assert_eq "$(env_value nets CONTAINER_NETWORK_RANGES)" "172.30.0.0/16,172.31.0.0/16,172.32.0.0/16" "the app refuses the addresses of its own container networks"
+  assert_contains "$(cat "$STUB_LOG")" "--force-recreate --no-deps --wait --wait-timeout 120 app"
   sandbox_drop
 }
 
@@ -635,7 +647,7 @@ test_refresh_puts_back_lost_settings() {
       assert_eq "$(printf '%s\n' "$after" | grep "^$other=")" "$(printf '%s\n' "$before" | grep "^$other=")" "$other is unchanged"
     done
     case "$key" in
-      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET | BROWSER_SECRET | WEB_PUSH_PUBLIC_KEY | WEB_PUSH_PRIVATE_KEY) ;;
+      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY | CALENDAR_ACCOUNT_SECRET | MAIL_EMAIL_ACCOUNT_SECRET | BROWSER_SECRET | WEB_PUSH_PUBLIC_KEY | WEB_PUSH_PRIVATE_KEY) ;;
       *) assert_eq "$(printf '%s\n' "$after" | grep "^$key=")" "$(printf '%s\n' "$before" | grep "^$key=")" "$key comes back as it was" ;;
     esac
   done
@@ -710,6 +722,7 @@ test_add_warns_when_the_installed_version_differs
 test_add_without_a_name_asks_for_one
 test_add_without_a_name_and_no_terminal_is_a_usage_error
 test_public_url_rules
+test_container_network_ranges_are_written
 test_url_validation
 test_a_new_instance_points_to_settings_for_a_model
 test_add_before_install_is_refused

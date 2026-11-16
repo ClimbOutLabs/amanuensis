@@ -18,16 +18,17 @@ EM_PASSWORD=
 EM_TARGET=
 EM_SKIP=
 
-# One preset per line: key, incoming host, port, mode, outgoing host, port, mode.
+# One preset per line: key, incoming host, port, mode, outgoing host, port, mode, and whether the provider
+# shows app passwords in groups split by spaces (strip-spaces) or not (keep-spaces).
 # A mode is ssl (encrypted from the start) or starttls (upgraded after connecting). The certificate is always checked.
-EMAIL_PRESETS='gmail imap.gmail.com 993 ssl smtp.gmail.com 465 ssl
-yahoo imap.mail.yahoo.com 993 ssl smtp.mail.yahoo.com 465 ssl
-aol imap.aol.com 993 ssl smtp.aol.com 465 ssl
-icloud imap.mail.me.com 993 ssl smtp.mail.me.com 587 starttls
-fastmail imap.fastmail.com 993 ssl smtp.fastmail.com 465 ssl
-zoho imap.zoho.com 993 ssl smtp.zoho.com 465 ssl
-gmx imap.gmx.net 993 ssl mail.gmx.net 465 ssl
-webde imap.web.de 993 ssl smtp.web.de 587 starttls'
+EMAIL_PRESETS='gmail imap.gmail.com 993 ssl smtp.gmail.com 465 ssl strip-spaces
+yahoo imap.mail.yahoo.com 993 ssl smtp.mail.yahoo.com 465 ssl strip-spaces
+aol imap.aol.com 993 ssl smtp.aol.com 465 ssl strip-spaces
+icloud imap.mail.me.com 993 ssl smtp.mail.me.com 587 starttls strip-spaces
+fastmail imap.fastmail.com 993 ssl smtp.fastmail.com 465 ssl strip-spaces
+zoho imap.zoho.com 993 ssl smtp.zoho.com 465 ssl keep-spaces
+gmx imap.gmx.net 993 ssl mail.gmx.net 465 ssl keep-spaces
+webde imap.web.de 993 ssl smtp.web.de 587 starttls keep-spaces'
 
 # The one sign-in check after saving. It runs from this computer, so the Email connector does not have to be running.
 # Its five input lines (server, port, mode, address, password) come on stdin, never on the command line.
@@ -112,13 +113,14 @@ email_port_problem() {
   echo "A port is a number from 1 to 65535, for example 993."
 }
 
-# Some providers show an app password in groups split by spaces; the spaces are not part of it. Other passwords are
-# kept as typed.
+# Some providers show an app password in groups split by spaces; the spaces are not part of it. The preset row
+# for the provider says which it is (strip-spaces or keep-spaces); a provider with no row keeps its password as typed.
 email_clean_password() { # key password
-  case "$1" in
-    gmail | icloud | yahoo | aol | fastmail) printf '%s' "${2// /}" ;;
-    *) printf '%s' "$2" ;;
-  esac
+  if email_preset "$1" && [ "$EM_APP_PASSWORD_SPACES" = "strip-spaces" ]; then
+    printf '%s' "${2// /}"
+  else
+    printf '%s' "$2"
+  fi
 }
 
 email_secret_problem() {
@@ -135,8 +137,8 @@ email_preset() {
   local row
   row=$(printf '%s\n' "$EMAIL_PRESETS" | sed -n "/^$1 /p")
   [ -n "$row" ] || return 1
-  # shellcheck disable=SC2034 # the key column is only there to find the row
-  read -r _key EM_IMAP_HOST EM_IMAP_PORT EM_IMAP_MODE EM_SMTP_HOST EM_SMTP_PORT EM_SMTP_MODE <<<"$row"
+  # shellcheck disable=SC2034 # the key and app-password columns are only there to find the row and clean the password
+  read -r _key EM_IMAP_HOST EM_IMAP_PORT EM_IMAP_MODE EM_SMTP_HOST EM_SMTP_PORT EM_SMTP_MODE EM_APP_PASSWORD_SPACES <<<"$row"
 }
 
 # The encryption of a server the person typed: port 993 and 465 are encrypted from the start, others upgrade.
@@ -412,6 +414,37 @@ email_link_remove() { # env file
   return 0
 }
 
+# Moves an account an older installer kept in the instance folder into the connector's own storage, then deletes the
+# old file. An account already saved in the connector (connected again in Settings) is newer, so it is kept and the
+# old file is only deleted. Returns 1 when the account could not be moved, and then keeps the file.
+email_migrate_old_file() { # name
+  local name=$1 dir old answer
+  dir=$(instance_dir "$name")
+  old=$dir/.env.mail-email
+  [ -s "$old" ] || return 0
+  grep -q "^  $EMAIL_SERVICE:" "$dir/compose.yaml" 2>/dev/null || return 1
+  # The look below needs the agent this checkout brings, which an instance not drawn again by this run may not have yet.
+  write_if_changed "$dir/mail-account-agent.py" 644 <"$REPO_ROOT/ops/compose/mail-email/account_agent.py" || true
+  answer=$(dc "$name" run --rm --no-deps --entrypoint python3 "$EMAIL_SERVICE" /usr/local/bin/aman-mail-account-agent --has-account 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+  # The old file goes only once the connector is known to hold an account: it already had one, or the old one was
+  # just saved. An empty or unknown answer means the look did not run, so the file stays.
+  case "$answer" in
+    none)
+      dc "$name" run --rm --no-deps --entrypoint python3 "$EMAIL_SERVICE" /usr/local/bin/aman-mail-account-agent --write-stdin <"$old" >/dev/null 2>&1 || return 1
+      rm -f -- "$old"
+      # The app finds the connector through this line; an instance set up before it had none.
+      if email_link_add "$dir/.env"; then
+        instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+        instance_up "$name" recreate >/dev/null 2>&1 || return 1
+      else
+        email_restart "$name"
+      fi
+      ;;
+    saved) rm -f -- "$old" ;;
+    *) return 1 ;;
+  esac
+}
+
 # Restarts only the email connector, so it picks up the new account file or drops the old one.
 email_restart() { # name
   local name=$1
@@ -431,10 +464,14 @@ cmd_instance_email() {
   load_installed_release
   warn_if_installed_older
   dir=$(instance_dir "$name")
+  # The connector's compose settings need the shared secret, so an instance from before it gets one first.
+  env_secret_backfill "$name" MAIL_EMAIL_ACCOUNT_SECRET
   if [ "$OPT_REMOVE" = 1 ]; then
     # The saved password is deleted for good from the connector's volume, through its account agent.
     # An empty account in the volume means no account is connected.
     email_agent_remove "$name"
+    # The file an older installer kept in the instance folder goes too.
+    rm -f -- "$dir/.env.mail-email"
     if email_link_remove "$dir/.env"; then changed=1; fi
     if [ "$changed" = 1 ]; then
       instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"

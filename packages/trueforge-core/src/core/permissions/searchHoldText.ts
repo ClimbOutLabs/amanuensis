@@ -1,8 +1,7 @@
 /** Wording of held web search, page and map cards and their audit rows. Browser-safe: the UI reads it too. */
 import { TAVILY_API_HOST, TAVILY_CONNECTOR_HOST } from '../search/TavilyClient.js';
-import { escapeDisplayText } from './displayText.js';
 import type { OutboundGuardRule } from './outboundGuard.js';
-import type { ReadOrigin, ReadSource } from './provenance.js';
+import type { ReadSource } from './provenance.js';
 
 /** Clause for a held key in other tools' outbound reasons; search cards use SECRET_SAY instead. */
 export const SERVER_SECRET_REASON = "it contains one of this computer's keys";
@@ -70,8 +69,8 @@ export function holdSay(assistant: string) {
   } as const;
 }
 
-/** The place an address or link was read, as a card names it. The assistant's own reply has its own sentence. */
-const READ_PLACE: Record<Exclude<ReadSource, 'reply'>, string> = {
+/** The place an address or link was read, as a card names it. Memory and the assistant's own reply have their own sentences. */
+const READ_PLACE: Record<Exclude<ReadSource, 'memory' | 'reply'>, string> = {
   email_sender: 'an email',
   email: 'an email',
   event: 'a calendar event',
@@ -84,51 +83,40 @@ const READ_PLACE: Record<Exclude<ReadSource, 'reply'>, string> = {
 
 /**
  * Says who a send goes to and where the assistant read that address or link, in plain words and without alarm. `who`
- * is already escaped for display: `Name (address)`, an address, or a link.
+ * is already escaped for display: `Name (address)`, an address, or a link. `site`, also escaped, is the site of the
+ * page a link was read on, when that read named the page; no title for a page is kept, so its site names it.
  */
 export function steeredDestinationSay(input: {
   assistant: string;
-  destinations: readonly { who: string; kind: 'address' | 'link'; source: ReadSource }[];
+  destinations: readonly {
+    who: string;
+    kind: 'address' | 'link';
+    source: ReadSource;
+    site?: string | null | undefined;
+  }[];
 }): string {
   const { assistant } = input;
-  const sentences = input.destinations.map(({ who, kind, source }) => {
+  // The card already shows every link it sends to, so one link is not named again; several are, to say which.
+  const oneLink = input.destinations.filter(({ kind }) => kind === 'link').length === 1;
+  const sentences = input.destinations.map(({ who, kind, source, site }) => {
+    if (source === 'memory') {
+      return kind === 'link'
+        ? `This goes to ${who}, which ${assistant} read earlier and saved to memory.`
+        : `This goes to ${who}, whose address ${assistant} read earlier and saved to memory.`;
+    }
     if (source === 'reply') {
       const what = kind === 'link' ? 'which' : 'whose address';
       return `This goes to ${who}, ${what} was only in an earlier reply from ${assistant}, not in your own words.`;
     }
     if (kind === 'link') {
-      return `This goes to ${who}, which was in ${READ_PLACE[source]} ${assistant} read.`;
+      const where = site === undefined || site === null ? '' : ` on ${site}`;
+      return `${assistant} found ${oneLink ? 'this link' : who} in ${READ_PLACE[source]} it read${where}, not from you.`;
     }
     return source === 'email_sender'
       ? `This goes to ${who}, who sent the email ${assistant} just read.`
       : `This goes to ${who}, whose address was in ${READ_PLACE[source]} ${assistant} read.`;
   });
   return [...new Set(sentences)].join(' ');
-}
-
-/**
- * The body of a card for an open whose address read content chose: whose idea it was not, and where the
- * assistant read the link, in one plain line. The page is named by its host when the read named it, since
- * no title for it is kept. `origin.site` is the host of the page the link was read on, taken from that
- * page's own address when the read named it, and it is escaped for display like the destination host is.
- */
-export function steeredOpenSay(input: { assistant: string; origin: ReadOrigin }): string {
-  const { assistant, origin } = input;
-  const read =
-    origin.source === 'page' || origin.source === 'browser_page'
-      ? origin.site === null
-        ? `A page ${assistant} read`
-        : `A page on ${escapeDisplayText(origin.site)} that ${assistant} read`
-      : origin.source === 'email' || origin.source === 'email_sender'
-        ? `An email ${assistant} read`
-        : origin.source === 'event'
-          ? `A calendar event ${assistant} read`
-          : origin.source === 'file'
-            ? `A file ${assistant} read`
-            : origin.source === 'tool_result'
-              ? `A tool result ${assistant} read`
-              : `Something ${assistant} read`;
-  return `You did not ask for this. ${read} linked to this address.`;
 }
 
 /** Which sentence each rule the outbound secret guard can trip on says. */
@@ -156,12 +144,17 @@ export function withHoldSay(text: string, say: string): string {
   return `${text}${/[.!?]$/.test(text) ? '' : '.'} ${say}`;
 }
 
+/** The question a held lookup's card leads with, before its reason joins it; the summary is already masked where it must be. A page read says it opens a page. */
+export function searchHoldQuestion({ summary, page }: { summary: string; page: boolean }): string {
+  if (page) {
+    return summary === '' ? 'Open this web page?' : `Open ${summary}?`;
+  }
+  return summary === '' ? 'Search the web?' : `Search the web for ${summary}?`;
+}
+
 /** Card question for a held lookup; the summary is already masked where it must be. A page read says it opens a page. */
 export function searchHoldCardText({ summary, say, page }: { summary: string; say: string; page: boolean }): string {
-  if (page) {
-    return withHoldSay(summary === '' ? 'Open this web page?' : `Open ${summary}?`, say);
-  }
-  return withHoldSay(summary === '' ? 'Search the web?' : `Search the web for ${summary}?`, say);
+  return withHoldSay(searchHoldQuestion({ summary, page }), say);
 }
 
 /** Audit row text for a held lookup: the rule that fired, never the query. */

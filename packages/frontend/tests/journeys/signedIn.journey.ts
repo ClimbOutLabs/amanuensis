@@ -19,8 +19,20 @@ const PROVIDER_NAME = 'scripted';
 const MODEL_ID = 'scripted-model';
 const MESSAGE = 'Hello from the signed-in journey';
 
-async function shot({ page, surface, step }: { page: Page; surface: string; step: string }): Promise<void> {
-  await page.screenshot({ path: await featureShotPath({ surface, step }) });
+async function shot({
+  page,
+  surface,
+  step,
+  did,
+  expect,
+}: {
+  page: Page;
+  surface: string;
+  step: string;
+  did: string;
+  expect: string;
+}): Promise<void> {
+  await page.screenshot({ path: await featureShotPath({ surface, step, did, expect }) });
 }
 
 function signInButton(page: Page) {
@@ -32,7 +44,7 @@ test('a person signs in on the built app, adds a model, chats and signs out', { 
   let app: Awaited<ReturnType<typeof startBuiltApp>> | undefined;
   let browser: Browser | undefined;
   try {
-    app = await startBuiltApp();
+    app = await startBuiltApp({ localModelEndpoints: [new URL(model.baseUrl).host] });
     browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     page.setDefaultTimeout(STEP_TIMEOUT_MS);
@@ -41,13 +53,25 @@ test('a person signs in on the built app, adds a model, chats and signs out', { 
     await page.goto(app.origin);
     await signInButton(page).waitFor();
     assert.equal((await page.request.get(`${app.origin}/api/v1/auth/me`)).status(), 401, 'signed out, the API refuses');
-    await shot({ page, surface: 'route:auth', step: 'signed-out' });
+    await shot({
+      page,
+      surface: 'route:auth',
+      step: 'signed-out',
+      did: 'Opened the built app without signing in.',
+      expect: 'Only the Sign in button shows, and the app refuses to answer requests.',
+    });
 
     // The sign-in service's own page, then back into the app.
     await signInButton(page).click();
     await page.locator('#login').fill(LOGIN_USER_EMAIL);
     await page.locator('#password').fill(LOGIN_USER_PASSWORD);
-    await shot({ page, surface: 'route:auth', step: 'sign-in-page' });
+    await shot({
+      page,
+      surface: 'route:auth',
+      step: 'sign-in-page',
+      did: "Pressed Sign in and typed a test email and password on the sign-in service's page.",
+      expect: "The sign-in service's own page shows with both boxes filled.",
+    });
     await page.locator('#submit-login').click();
 
     // First run with no model: the app opens Settings on Models.
@@ -55,7 +79,13 @@ test('a person signs in on the built app, adds a model, chats and signs out', { 
     const addProvider = page.getByRole('button', { name: 'Add custom provider' });
     await addProvider.waitFor();
     assert.equal(await page.getByText('CONFIGURED', { exact: true }).count(), 0, 'a fresh install has no model yet');
-    await shot({ page, surface: 'settings:models', step: 'first-run-no-model' });
+    await shot({
+      page,
+      surface: 'settings:models',
+      step: 'first-run-no-model',
+      did: 'Signed in for the first time on a fresh install.',
+      expect: 'The app opens Settings on Models, with no model set up yet.',
+    });
 
     await addProvider.click();
     const form = page.getByRole('dialog');
@@ -65,15 +95,33 @@ test('a person signs in on the built app, adds a model, chats and signs out', { 
     await form.locator('#custom-provider-model-0-id').fill(MODEL_ID);
     await form.locator('#custom-provider-model-0-context-length').fill('128000');
     await form.locator('#custom-provider-model-0-max-output-tokens').fill('4096');
-    await shot({ page, surface: 'route:modelProvider', step: 'custom-provider-form' });
+    await shot({
+      page,
+      surface: 'route:modelProvider',
+      step: 'custom-provider-form',
+      did: 'Pressed Add custom provider and filled in a scripted test model.',
+      expect: 'The form shows the provider name, address, key and model details, ready to add.',
+    });
     await form.getByRole('button', { name: 'Add provider' }).click();
     await page.getByText('Connected', { exact: true }).waitFor();
-    await shot({ page, surface: 'settings:models', step: 'model-added' });
+    await shot({
+      page,
+      surface: 'settings:models',
+      step: 'model-added',
+      did: 'Pressed Add provider.',
+      expect: 'The provider shows as Connected.',
+    });
 
     // Home now offers the model, and the first-run guide counts it.
     await page.goto(app.origin);
     await page.getByText(`${PROVIDER_NAME}/${MODEL_ID}`).first().waitFor();
-    await shot({ page, surface: 'screen:first-run', step: 'built-app-model-added' });
+    await shot({
+      page,
+      surface: 'screen:first-run',
+      step: 'built-app-model-added',
+      did: 'Went back to home.',
+      expect: 'Home offers the new model, and the first-run guide counts it as done.',
+    });
 
     // A chat reaches the model and its answer comes back.
     await page.getByRole('textbox', { name: 'Message input' }).fill(MESSAGE);
@@ -84,13 +132,25 @@ test('a person signs in on the built app, adds a model, chats and signs out', { 
       model.requests().some(request => JSON.stringify(request).includes(MESSAGE)),
       'the model was sent the message',
     );
-    await shot({ page, surface: 'route:turn', step: 'built-app-first-reply' });
+    await shot({
+      page,
+      surface: 'route:turn',
+      step: 'built-app-first-reply',
+      did: 'Typed "Hello from the signed-in journey" and pressed Send.',
+      expect: 'A chat opens, the model was sent the message, and its answer shows.',
+    });
 
     // Coming back later: still signed in, and the chat was kept.
     await page.reload();
     await page.getByText(FINAL_TEXT).first().waitFor();
     await page.getByText(MESSAGE).first().waitFor();
-    await shot({ page, surface: 'route:session', step: 'built-app-chat-kept' });
+    await shot({
+      page,
+      surface: 'route:session',
+      step: 'built-app-chat-kept',
+      did: 'Reloaded the page.',
+      expect: 'Still signed in, and the chat shows the message and the answer.',
+    });
 
     // Signing out ends it: the way in shows again and the API refuses.
     await page.getByRole('button', { name: 'More' }).click();
@@ -100,7 +160,13 @@ test('a person signs in on the built app, adds a model, chats and signs out', { 
     assert.equal((await page.request.get(`${app.origin}/api/v1/auth/me`)).status(), 401, 'signed out, the API refuses');
     await page.goto(`${app.origin}/settings`);
     await signInButton(page).waitFor();
-    await shot({ page, surface: 'route:auth', step: 'signed-out-again' });
+    await shot({
+      page,
+      surface: 'route:auth',
+      step: 'signed-out-again',
+      did: 'Chose More, Sign out, confirmed, then tried to open Settings.',
+      expect: 'Only the Sign in button shows again, and the app refuses to answer requests.',
+    });
   } catch (error) {
     await saveFailureShots({ browser, surface: 'screen:signed-in-journey' });
     throw error;

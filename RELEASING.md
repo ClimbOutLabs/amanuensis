@@ -15,6 +15,18 @@ Cut a new release when:
 
 Do not cut a release on an unverified head. If verification fails, fix `main` first.
 
+## Publish the images first
+
+The installer downloads Aman's images instead of building them when `installer/release.json` pins a copy published for the same source. Publish them on the commit you are about to release:
+
+1. In Actions, run the **Images** workflow on `main` with **Publish** on. It builds every Aman image for amd64 and arm64, each on a runner of its own kind, joins the two under the source id the installer computes (`pnpm images:ids`), and checks that each tag holds both.
+2. The run pushes a branch `release/pin-images-<run number>` that writes each image's digest into `installer/release.json`. Its summary links to the comparison. Open a pull request from it, let CI pass, and merge it.
+3. Cut the release on the commit that merged the pins. The pin changes no image's source id, so the tag's checkout matches what was published.
+
+The first time, make the six packages public in the organization's package settings (`aman-app`, `aman-stt`, `aman-tts`, `aman-calendar-caldav`, `aman-browser`, `aman-browser-gateway`), and check that a logged-out `docker pull` of one pinned reference works. Each later run reuses the same packages.
+
+A dry run (Publish off) builds both architectures and pushes nothing. A pull request that changes `.github/workflows/images.yml` runs it that way.
+
 ## How to cut a release
 
 A release is made in three steps: a tag, a signature, and a publish. Only the signature happens on your own machine, because the release key never goes to GitHub.
@@ -94,6 +106,7 @@ Tags use `vMAJOR.MINOR.PATCH`:
 
 ## Checklist for the release PR
 
+- [ ] The Images workflow published this source and its pin is merged
 - [ ] New tag exists at https://github.com/ClimbOutLabs/amanuensis/releases
 - [ ] Tag points at a verified `main` HEAD
 - [ ] README install section names the new tag

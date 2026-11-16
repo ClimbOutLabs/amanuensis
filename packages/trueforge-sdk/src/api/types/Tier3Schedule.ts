@@ -18,6 +18,8 @@ export interface Tier3Schedule {
     task: string;
     /** IANA time zone the times are in. */
     timeZone: string;
+    /** What a new schedule runs with; absent for a delete and on an older card. */
+    tools?: TrueForge.Tier3ScheduleTools | null;
     /** When it runs, in plain words. */
     when: string;
 }

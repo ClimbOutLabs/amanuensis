@@ -1,11 +1,5 @@
 import type { AuditLogWriter, AuditRecordInput } from '../../../src/core/permissions/audit';
-import {
-  classifyHostToolCall,
-  classifyTier,
-  mapsDestinationHosts,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { classifyHostToolCall, classifyTier, mapsDestinationHosts } from '../../../src/core/permissions/classifier';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
@@ -19,6 +13,7 @@ import {
   MAPS_SILENT_REASON,
 } from '../../../src/core/permissions/mapsToolNames';
 import { recordPersonText } from '../../../src/core/permissions/provenance';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import {
   createWebSearchTurnState,
   NO_HOST_STAMP,
@@ -101,6 +96,14 @@ describe('maps classifier branch', () => {
   it('names the place string verbatim on the card', async () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Eiffel Tower' }), makeCtx());
     expect(decision.card?.plain_what).toContain('"Eiffel Tower"');
+  });
+
+  it('gives the card copy from the maps wording, with why maps asks as the reason', async () => {
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Eiffel Tower' }), makeCtx());
+    expect(decision.card?.copy?.headline).toBe(decision.card?.plain_what);
+    expect(decision.card?.copy?.headline).toContain('"Eiffel Tower"');
+    expect(decision.card?.copy?.consequence).toBeNull();
+    expect(decision.card?.copy?.reason).toBe('Maps are set to ask, so Aman is checking with you first.');
   });
 
   it('names both place strings verbatim for render_route', async () => {

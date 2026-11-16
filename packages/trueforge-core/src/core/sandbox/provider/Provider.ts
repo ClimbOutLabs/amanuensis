@@ -25,6 +25,18 @@ export function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * For a provider whose service only takes a command line: an `argv` call becomes that program and its
+ * arguments, each quoted, so the shell still starts nothing else.
+ */
+export function withArgvAsCommandLine(params: SandboxExecParams): SandboxExecParams {
+  if (params.argv === undefined) {
+    return params;
+  }
+  const { argv, ...rest } = params;
+  return { ...rest, command: argv.map(shellEscape).join(' ') };
+}
+
 /** Throws if the exec result indicates failure (infra error or non-zero exit code). */
 export function ensureExecSuccess(result: ExecResult): void {
   if (!result.success) {
@@ -43,7 +55,13 @@ export interface SandboxFileInfo {
 /** Parameters for a single sandbox command. */
 export interface SandboxExecParams {
   sandboxId: string;
+  /** The shell command to run. With `argv` set, only a readable copy of it for logs and results. */
   command: string;
+  /**
+   * The program and its arguments, run as given with no shell in between. Set only by the host for a
+   * command it built itself.
+   */
+  argv?: readonly string[] | undefined;
   cwd?: string | undefined;
   env?: Record<string, string> | undefined;
   /** Cancels the owning host operation and any provider I/O that supports cancellation. */

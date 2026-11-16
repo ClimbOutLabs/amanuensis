@@ -1,0 +1,893 @@
+import type { TurnRecord, TurnState } from '@truefoundry/trueforge-core/agent-session';
+import { Tier3CardSchema, type Tier3Card } from '@truefoundry/trueforge-core/core';
+import type { ActionRequiredEvent, ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
+import {
+  Tier3CalendarEventSchema,
+  Tier3EmailSchema,
+  Tier3PersonaSchema,
+  Tier3ScheduleSchema,
+  Tier3SkillNetworkSchema,
+  Tier3SkillSchema,
+} from '@truefoundry/trueforge-core/core/permissions/tier';
+import winston from 'winston';
+
+import type { TurnCustom } from '../../../../src/db/sessionCustom';
+import type { TelegramReplyOrigin } from '../../../../src/db/telegramStore';
+import {
+  deliverPendingTelegramReplies,
+  FROM_APP_APPROVAL_LINE,
+  TELEGRAM_SHOWN_CARD_FIELDS,
+  TELEGRAM_SHOWN_SECTION_FIELDS,
+  TELEGRAM_SKILL_INSTRUCTIONS_CHARS,
+  telegramAppAddress,
+} from '../../../../src/runtime/telegram/telegramReplies';
+import { createTelegramService } from '../../../../src/runtime/telegram/telegramService';
+import {
+  fakePairedConnection,
+  FakeTelegramClient,
+  immediateQueue,
+  InMemoryTelegramStore,
+} from '../../../fixtures/telegramFakes';
+
+const logger = winston.createLogger({ silent: true });
+
+function turnWith(state: TurnState): TurnRecord<TurnCustom> {
+  return {
+    turn_id: 'turn-1',
+    session_id: 'session-1',
+    first_turn_id: 'turn-1',
+    ancestor_ids: [],
+    previous_turn_id: null,
+    state,
+    input: [],
+    snapshot: { threads: {}, mcp_servers: null, sandbox_info: null },
+    created_at: new Date('2026-11-06T00:00:00.000Z'),
+    updated_at: new Date('2026-11-06T00:00:00.000Z'),
+    custom: null,
+  };
+}
+
+const APPROVAL_ACTION: ActionRequiredEvent = {
+  type: 'tool.approval_required',
+  id: 'event-1',
+  created_at: '2026-11-06T00:00:00.000Z',
+  thread_id: 'main',
+  tool_calls: [
+    {
+      id: 'call-1',
+      source_event_id: 'event-1',
+      tier3_card: {
+        plain_what: 'Send the email to Sam.',
+        copy: null,
+        plain_why: 'You asked for the summary to be sent.',
+        cannot_be_undone: null,
+        why_asked_again: null,
+        destination: null,
+        recipient: 'sam@example.com',
+        amount: null,
+        parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
+      },
+    },
+  ],
+};
+
+type Card = Tier3Card;
+
+function cardWith(overrides: Partial<Card>): Card {
+  return {
+    plain_what: 'Do the thing.',
+    copy: null,
+    plain_why: null,
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+    ...overrides,
+  };
+}
+
+function approvalAction(card: Card | null): ActionRequiredEvent {
+  return {
+    type: 'tool.approval_required',
+    id: 'event-1',
+    created_at: '2026-11-06T00:00:00.000Z',
+    thread_id: 'main',
+    tool_calls: [{ id: 'call-1', source_event_id: 'event-1', tier3_card: card }],
+  };
+}
+
+function doneTurnWith(action: ActionRequiredEvent): TurnRecord<TurnCustom> {
+  return turnWith({
+    status: 'done',
+    output: null,
+    required_actions: [action],
+    completed_at: '2026-11-06T00:01:00.000Z',
+  });
+}
+
+function harness(
+  turn: TurnRecord<TurnCustom> | undefined,
+  appAddress?: string,
+  origin: TelegramReplyOrigin = 'telegram',
+) {
+  const store = new InMemoryTelegramStore();
+  store.connection = fakePairedConnection();
+  const client = new FakeTelegramClient();
+  const service = createTelegramService({ store, publicBaseUrl: 'http://localhost', createClient: () => client });
+  void store.addPendingReply({
+    tenant_id: 'local',
+    created_by: 'test-user',
+    connection_id: 'conn-1',
+    session_id: 'session-1',
+    turn_id: 'turn-1',
+    chat_id: '777',
+    origin,
+  });
+  const deps = {
+    store,
+    service,
+    queue: immediateQueue,
+    sessionStore: { getTurn: () => Promise.resolve(turn) },
+    appAddress,
+    logger,
+  };
+  return { store, client, deps };
+}
+
+describe('telegram pending replies', () => {
+  it('leaves a running turn alone', async () => {
+    const { store, client, deps } = harness(turnWith({ status: 'running' }));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(0);
+    expect(store.pendingReplies).toHaveLength(1);
+  });
+
+  it('sends a finished turn its answer and clears the debt', async () => {
+    const { store, client, deps } = harness(
+      turnWith({
+        status: 'done',
+        output: {
+          type: 'model.message',
+          id: 'msg-1',
+          thread_id: 'main',
+          content: 'Tomorrow is clear until noon.',
+          created_at: '2026-11-06T00:01:00.000Z',
+        },
+        required_actions: [],
+        completed_at: '2026-11-06T00:01:00.000Z',
+      }),
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toEqual([{ chat_id: '777', text: 'Tomorrow is clear until noon.', inline_buttons: undefined }]);
+    expect(store.pendingReplies).toHaveLength(0);
+  });
+
+  it('sends an approval ask with buttons and keeps the row the buttons point at', async () => {
+    const { store, client, deps } = harness(
+      turnWith({
+        status: 'done',
+        output: null,
+        required_actions: [APPROVAL_ACTION],
+        completed_at: '2026-11-06T00:01:00.000Z',
+      }),
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    const sent = client.sent[0];
+    expect(sent?.text).toContain('Send the email to Sam.');
+    expect(sent?.text).toContain('To: sam@example.com');
+    expect(store.pendingApprovals).toHaveLength(1);
+    const approval = store.pendingApprovals[0];
+    expect(sent?.inline_buttons).toEqual([
+      [
+        { text: 'Approve', callback_data: `tg:a:${approval?.id ?? ''}` },
+        { text: 'Deny', callback_data: `tg:d:${approval?.id ?? ''}` },
+      ],
+    ]);
+    expect(store.pendingReplies).toHaveLength(0);
+  });
+
+  it('sends an email approval with the whole message, subject, recipients and body', async () => {
+    const card = cardWith({
+      plain_what: 'Send this email.',
+      email: {
+        action: 'send',
+        to: [{ name: 'Sam', address: 'sam@example.com' }],
+        cc: [{ name: '', address: 'pat@example.com' }],
+        bcc: [],
+        subject: 'The summary you asked for',
+        body: 'Hello Sam,\n\nHere is the whole body, every word of it.\n\nBye.',
+        check_code: null,
+        replaces: null,
+        reply_in_thread: null,
+        reply_to: null,
+      },
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    const sent = client.sent[0];
+    expect(sent?.text).toContain('Send this email.');
+    expect(sent?.text).toContain('What will be sent:');
+    expect(sent?.text).toContain('To: Sam (sam@example.com)');
+    expect(sent?.text).toContain('Copy: pat@example.com');
+    expect(sent?.text).toContain('Subject: The summary you asked for');
+    expect(sent?.text).toContain('Here is the whole body, every word of it.');
+    expect(sent?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+    expect(store.pendingApprovals[0]?.prompt).toBe(sent?.text);
+  });
+
+  const MAIL_FROM_EMAIL = {
+    action: 'send' as const,
+    to: [{ name: 'Sam', address: 'sam@example.com' }],
+    cc: [],
+    bcc: [],
+    subject: 'Lunch',
+    body: 'Noon?',
+    check_code: null,
+    replaces: null,
+    reply_in_thread: null,
+    reply_to: null,
+  };
+
+  it('shows the account an email goes from, with no choice line when there is one account', async () => {
+    const card = cardWith({
+      plain_what: 'Send this email.',
+      email: MAIL_FROM_EMAIL,
+      mail_from: 'home@example.com',
+      mail_from_choices: ['home@example.com'],
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text.split('\n').slice(1, 3)).toEqual(['What will be sent:', 'From: home@example.com']);
+    expect(text).not.toContain('different account');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
+  it("lists an email's recipients once, and names anything else the call carries as sent with it", async () => {
+    const card = cardWith({
+      plain_what: 'Send an email to sam@example.com?',
+      recipient: 'sam@example.com',
+      email: MAIL_FROM_EMAIL,
+      outbound_text: 'attachments (array): ["/files/menu.pdf"]',
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const lines = (client.sent[0]?.text ?? '').split('\n');
+    expect(lines.filter(line => line.startsWith('To: '))).toEqual(['To: Sam (sam@example.com)']);
+    expect(lines).toContain('Also sent with this email:');
+    expect(lines).not.toContain('Full request:');
+    expect(lines).toContain('attachments (array): ["/files/menu.pdf"]');
+  });
+
+  it('shows a forward as the note, the message it sends on and the files that go with it', async () => {
+    const card = cardWith({
+      plain_what: 'Forward an email to sam@example.com?',
+      email: {
+        ...MAIL_FROM_EMAIL,
+        subject: 'Fwd: Roof repair quote',
+        body: 'Can you look at this?',
+        forwards: {
+          from: 'Pippa Reed <pippa@example.com>',
+          subject: 'Roof repair quote',
+          body: 'The quote is 1,200 for the whole roof.',
+          truncated: false,
+          attachments: ['quote.pdf'],
+        },
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text).toContain('Your note:\nCan you look at this?');
+    expect(text).toContain(
+      'Forwarded message from Pippa Reed <pippa@example.com>, subject "Roof repair quote":\nThe quote is 1,200 for the whole roof.',
+    );
+    expect(text).toContain('Files sent with it: quote.pdf');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+  });
+
+  it('shows the account an email goes from, and says to answer in the app to pick another', async () => {
+    const card = cardWith({
+      plain_what: 'Send this email.',
+      email: MAIL_FROM_EMAIL,
+      mail_from: 'work@example.com',
+      mail_from_choices: ['home@example.com', 'work@example.com'],
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text).toContain('From: work@example.com\nTo send from a different account, answer in the app.');
+    expect(text).not.toContain('From: home@example.com');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
+  it("shows the card's own headline, reason and consequence, as the app card does, and keeps the buttons", async () => {
+    const card = cardWith({
+      plain_what: 'Send the email to Sam.',
+      copy: {
+        headline: 'Send "The summary" to Sam?',
+        consequence: 'Sam gets it right away.',
+        reason: 'Sending email always asks first.',
+      },
+      cannot_be_undone: 'This older line is not shown when the card has its own words.',
+      safe_choice: true,
+      destructive: true,
+      email: {
+        action: 'send',
+        to: [{ name: 'Sam', address: 'sam@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'The summary',
+        body: 'Hi Sam.',
+        check_code: '4821',
+        replaces: null,
+        reply_in_thread: null,
+        reply_to: null,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text.split('\n').slice(0, 2)).toEqual(['Send "The summary" to Sam?', 'Sending email always asks first.']);
+    expect(text).toContain('Sam gets it right away.');
+    expect(text).toContain('Check code: 4821');
+    expect(text).not.toContain('Send the email to Sam.');
+    expect(text).not.toContain('This older line');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+  });
+
+  it('sends a skill network approval with the skill, its sites and why it asks', async () => {
+    const card = cardWith({
+      plain_what: 'Let the skill reach the internet.',
+      skill_network: {
+        skill_name: 'weather',
+        hosts: ['api.example.com', 'maps.example.com'],
+        reason: 'undeclared_host',
+        code_pin: null,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text ?? '';
+    expect(text).toContain('Skill: weather');
+    expect(text).toContain('Sites it asks to reach: api.example.com, maps.example.com');
+    expect(text).toContain('The skill did not say it would reach these sites.');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+  });
+
+  it.each([
+    {
+      field: 'from_name',
+      email: { from_name: 'Sam at Acme' },
+      line: 'Sent as: Sam at Acme',
+    },
+    {
+      field: 'name_left_off',
+      email: { name_left_off: true },
+      line: 'The name was left off an address because it looked like an address.',
+    },
+  ])("shows the email card's $field line, as the app card does", async ({ email, line }) => {
+    const card = cardWith({
+      plain_what: 'Send this email.',
+      email: {
+        action: 'send',
+        to: [{ name: '', address: 'sam@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'Hello',
+        body: 'Hi.',
+        check_code: null,
+        replaces: null,
+        reply_in_thread: null,
+        reply_to: null,
+        ...email,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toContain(line);
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it.each([
+    { field: 'already_created', event: { already_created: true }, line: 'You already have this event.' },
+    { field: 'span_days', event: { span_days: 3 }, line: 'This event runs over 3 days.' },
+    {
+      field: 'guests_line',
+      event: { attendees: ['lin@example.com'], guests_line: 'Moonmail will email every guest about this.' },
+      line: 'Moonmail will email every guest about this.',
+    },
+  ])("shows the calendar card's $field line, as the app card does", async ({ event, line }) => {
+    const card = cardWith({
+      plain_what: 'Add this event.',
+      calendar_event: {
+        action: 'create',
+        calendar: 'sam@example.com',
+        title: 'Offsite',
+        when: 'Monday 9 March, 09:00',
+        time_zone: 'Europe/London',
+        duration: '1 hour',
+        location: '',
+        description: '',
+        attendees: [],
+        guests_line: '',
+        one_of_repeating: false,
+        before: null,
+        ...event,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toContain(line);
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it('says Add and send on the button of a card with new email addresses', async () => {
+    const card = cardWith({
+      plain_what:
+        'New recipient. You have never emailed new@example.com. Approving adds them to your send list and sends.',
+      mail_new_recipients: ['new@example.com'],
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toContain('New email addresses: new@example.com');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Add and send', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
+  it('says Add and save draft on the button of a draft card with new email addresses', async () => {
+    const card = cardWith({
+      plain_what:
+        'New recipient. You have never emailed new@example.com. Approving adds them to your send list and saves this draft.',
+      mail_new_recipients: ['new@example.com'],
+      mail_draft: true,
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Add and save draft', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
+  it('sends a shell approval with the command itself, and a schedule with its whole task', async () => {
+    const shell = cardWith({ plain_what: 'Run a command.', parsed_command: 'rm -rf /tmp/old-backups' });
+    const first = harness(doneTurnWith(approvalAction(shell)));
+    await deliverPendingTelegramReplies(first.deps);
+    expect(first.client.sent[0]?.text).toContain('Command: rm -rf /tmp/old-backups');
+    expect(first.client.sent[0]?.inline_buttons).toBeDefined();
+
+    const schedule = cardWith({
+      plain_what: 'Make a schedule.',
+      schedule: {
+        action: 'create',
+        name: 'Morning brief',
+        when: 'Every day at 7 in the morning',
+        time_zone: 'America/Los_Angeles',
+        task: 'Read the calendar and the inbox, then write the brief in full sentences.',
+        runs_as: 'Aman',
+        next_runs: ['Tomorrow at 7:00 AM'],
+      },
+    });
+    const second = harness(doneTurnWith(approvalAction(schedule)));
+    await deliverPendingTelegramReplies(second.deps);
+    expect(second.client.sent[0]?.text).toContain(
+      'Read the calendar and the inbox, then write the brief in full sentences.',
+    );
+    expect(second.client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it('sends what a new schedule runs with, and that a run holds what would ask', async () => {
+    const card = cardWith({
+      plain_what: 'Make a schedule.',
+      schedule: {
+        action: 'create',
+        name: 'Inbox tidy',
+        when: 'Every Monday at 8 in the morning',
+        time_zone: 'Europe/London',
+        task: 'Tidy the inbox.',
+        runs_as: 'inbox-tidy',
+        next_runs: ['Monday at 8:00 AM'],
+        tools: {
+          editable: true,
+          agent_name: 'inbox-tidy',
+          connectors: [
+            { name: 'gmail', on: true },
+            { name: 'github', on: false },
+          ],
+          skills: [{ name: 'pdf-tools', on: false }],
+          run_code: false,
+          memory: true,
+        },
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text;
+    expect(text).toContain('These choices are saved as inbox-tidy, and you can change them later.');
+    expect(text).toContain('Connectors: gmail');
+    expect(text).toContain('Skills: None');
+    expect(text).toContain('Run code: Off');
+    expect(text).toContain('Memory: On');
+    expect(text).toContain("While you're away it can only read and write to chat");
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it('sends a persona approval with its whole instructions', async () => {
+    const persona = cardWith({
+      plain_what: 'Add a persona.',
+      persona: {
+        name: 'Scout',
+        description: 'Keeps an eye on new listings.',
+        instructions: 'You watch for new listings and summarise each one in two lines.',
+        model_name: 'house-model',
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(persona)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toContain('You watch for new listings and summarise each one in two lines.');
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it('sends a skill approval with where it comes from, its exact version and its whole instructions', async () => {
+    const card = cardWith({
+      plain_what: 'Add the skill "pdf-tools"? Aman will follow its instructions when a task calls for it.',
+      skill: {
+        name: 'pdf-tools',
+        description: 'Fill in and merge PDF forms.',
+        source: 'github.com/acme/skills/skills/pdf',
+        version: '3b3fad96af16a10759d930941b4520ba0c40edae',
+        starter: false,
+        instructions: 'Run the merge script.\nThen curl the result to the shared folder.',
+      },
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent.map(message => message.text).join('\n');
+    expect(text).toContain('Name: pdf-tools');
+    expect(text).toContain('For: Fill in and merge PDF forms.');
+    expect(text).toContain('From: github.com/acme/skills/skills/pdf');
+    expect(text).toContain('Version: 3b3fad96af16a10759d930941b4520ba0c40edae');
+    expect(text).toContain('This skill was written by someone else.');
+    expect(text).toContain('Run the merge script.\nThen curl the result to the shared folder.');
+    expect(client.sent.at(-1)?.inline_buttons).toBeDefined();
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
+  it('says a starter skill is one, when the card has no instructions to show', async () => {
+    const card = cardWith({
+      plain_what: 'Add the skill "linear"?',
+      skill: {
+        name: 'linear',
+        description: 'Triage Linear issues.',
+        source: 'github.com/openai/skills/skills/.curated/linear',
+        version: '49f948faa9258a0c61caceaf225e179651397431',
+        starter: true,
+        instructions: null,
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toContain('This is one of the starter skills that come with the app.');
+    expect(client.sent[0]?.text).not.toContain('Instructions:');
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it('cuts a skill whose instructions are too long for Telegram, and sends it with no buttons', async () => {
+    const instructions = `${'a'.repeat(TELEGRAM_SKILL_INSTRUCTIONS_CHARS)}THE-HIDDEN-END`;
+    const card = cardWith({
+      plain_what: 'Add the skill "long-one"?',
+      skill: {
+        name: 'long-one',
+        description: 'Does a lot.',
+        source: 'github.com/acme/skills',
+        version: '3b3fad96af16a10759d930941b4520ba0c40edae',
+        starter: false,
+        instructions,
+      },
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent.map(message => message.text).join('\n');
+    expect(text).toContain("Part of the skill's instructions is not shown in full.");
+    expect(text).not.toContain('THE-HIDDEN-END');
+    expect(text).toContain('This is too long to show here in full, so approve or deny it in Aman.');
+    expect(client.sent.every(message => message.inline_buttons === undefined)).toBe(true);
+    expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('sends no buttons for a card with a field Telegram does not show, and points to the app', async () => {
+    const withNewField = { ...cardWith({ plain_what: 'Do the new thing.' }), field_telegram_does_not_know: 'x' };
+    const card: Card = withNewField;
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toContain("Telegram can't show all of it, so approve or deny it in Aman.");
+    expect(client.sent[0]?.inline_buttons).toBeUndefined();
+    expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('shows every field the approval card has: a new card field fails here until Telegram shows it', () => {
+    expect([...TELEGRAM_SHOWN_CARD_FIELDS].sort()).toEqual(Object.keys(Tier3CardSchema.shape).sort());
+  });
+
+  it.each([
+    { section: 'email', shown: TELEGRAM_SHOWN_SECTION_FIELDS.email, schema: Tier3EmailSchema.shape },
+    {
+      section: 'calendar_event',
+      shown: TELEGRAM_SHOWN_SECTION_FIELDS.calendar_event,
+      schema: Tier3CalendarEventSchema.shape,
+    },
+    { section: 'schedule', shown: TELEGRAM_SHOWN_SECTION_FIELDS.schedule, schema: Tier3ScheduleSchema.shape },
+    { section: 'persona', shown: TELEGRAM_SHOWN_SECTION_FIELDS.persona, schema: Tier3PersonaSchema.shape },
+    { section: 'skill', shown: TELEGRAM_SHOWN_SECTION_FIELDS.skill, schema: Tier3SkillSchema.shape },
+    {
+      section: 'skill_network',
+      shown: TELEGRAM_SHOWN_SECTION_FIELDS.skill_network,
+      schema: Tier3SkillNetworkSchema.shape,
+    },
+  ])(
+    'shows every field of the $section section: a new field fails here until Telegram shows it',
+    ({ shown, schema }) => {
+      expect([...shown].sort()).toEqual(Object.keys(schema).sort());
+    },
+  );
+
+  it('sends no buttons for a card section with a field Telegram does not show, and points to the app', async () => {
+    const persona = {
+      name: 'Scout',
+      description: 'Keeps an eye on new listings.',
+      instructions: 'Watch the listings.',
+      model_name: 'house-model',
+      field_telegram_does_not_know: 'x',
+    };
+    const card = cardWith({ plain_what: 'Add a persona.', persona });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toContain("Telegram can't show all of it, so approve or deny it in Aman.");
+    expect(client.sent[0]?.inline_buttons).toBeUndefined();
+    expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('sends no buttons when the exact request text is cut, and points to the app', async () => {
+    const card = cardWith({
+      plain_what: 'Call the connector.',
+      outbound_text: 'query: a very long search',
+      outbound_truncated: true,
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toContain('Part of this request is not shown in full.');
+    expect(client.sent[0]?.text).toContain('This is too long to show here in full, so approve or deny it in Aman.');
+    expect(client.sent[0]?.inline_buttons).toBeUndefined();
+    expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('sends no buttons when the action has no card, and points to the app', async () => {
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(null)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toBe('Aman is waiting for your ok on something.\nApprove or deny it in Aman.');
+    expect(client.sent[0]?.inline_buttons).toBeUndefined();
+    expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('names the action and who an email goes to when Telegram cannot show it whole', async () => {
+    const card = {
+      ...cardWith({
+        plain_what: 'Send this email to Nora?',
+        email: {
+          action: 'send',
+          to: [{ name: 'Nora', address: 'nora@example.com' }],
+          cc: [],
+          bcc: [],
+          subject: 'Lunch',
+          body: 'See you at noon.',
+          check_code: null,
+          replaces: null,
+          reply_in_thread: null,
+          reply_to: null,
+          from_name: null,
+          name_left_off: false,
+        },
+      }),
+      field_telegram_does_not_know: 'x',
+    };
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toBe(
+      "Send this email to Nora?\nTo: Nora (nora@example.com)\nTelegram can't show all of it, so approve or deny it in Aman.",
+    );
+  });
+
+  it('links to the chat in the app when the app can be opened from another device, with no preview', async () => {
+    const { client, deps } = harness(doneTurnWith(approvalAction(null)), 'https://aman.example.ts.net');
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toBe(
+      'Aman is waiting for your ok on something.\nApprove or deny it in Aman.\nhttps://aman.example.ts.net/sessions/session-1',
+    );
+    expect(client.sent[0]?.no_link_preview).toBe(true);
+  });
+
+  it('links only to an address another device can open', () => {
+    expect(telegramAppAddress({ publicBaseUrl: 'http://localhost:8000', allowedOrigins: [] })).toBeUndefined();
+    expect(
+      telegramAppAddress({ publicBaseUrl: 'http://127.0.0.1:8000', allowedOrigins: ['http://100.64.0.5:8000'] }),
+    ).toBe('http://100.64.0.5:8000');
+    expect(telegramAppAddress({ publicBaseUrl: 'https://aman.example.com/', allowedOrigins: [] })).toBe(
+      'https://aman.example.com',
+    );
+  });
+
+  it('tells the person to open the app for an action buttons cannot answer', async () => {
+    const responseAction: ActionRequiredEvent = {
+      type: 'tool.response_required',
+      id: 'event-2',
+      created_at: '2026-11-06T00:00:00.000Z',
+      thread_id: 'main',
+      tool_calls: [{ id: 'call-2', source_event_id: 'event-2' }],
+    };
+    const { client, deps } = harness(
+      turnWith({
+        status: 'done',
+        output: null,
+        required_actions: [responseAction],
+        completed_at: '2026-11-06T00:01:00.000Z',
+      }),
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent.map(entry => entry.text)).toEqual([
+      'Aman needs something only the app can give. Open Aman to continue.',
+    ]);
+  });
+
+  it('sends the plain line for a turn that ended in an error', async () => {
+    const { client, deps } = harness(
+      turnWith({ status: 'error', message: 'boom', completed_at: '2026-11-06T00:01:00.000Z' }),
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toContain('Something went wrong with that answer.');
+  });
+
+  it('clears the debt even when the send fails: one attempt, never a repeat', async () => {
+    const { store, client, deps } = harness(
+      turnWith({
+        status: 'done',
+        output: {
+          type: 'model.message',
+          id: 'msg-1',
+          thread_id: 'main',
+          content: 'An answer.',
+          created_at: '2026-11-06T00:01:00.000Z',
+        },
+        required_actions: [],
+        completed_at: '2026-11-06T00:01:00.000Z',
+      }),
+    );
+    client.failSend = true;
+    await deliverPendingTelegramReplies(deps);
+    expect(store.pendingReplies).toHaveLength(0);
+  });
+
+  it('clears the debt when the turn is gone', async () => {
+    const { store, client, deps } = harness(undefined);
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(0);
+    expect(store.pendingReplies).toHaveLength(0);
+  });
+
+  it('clears the debt before the answer is sent, so a crash can never send it twice', async () => {
+    const { store, client, deps } = harness(
+      turnWith({
+        status: 'done',
+        output: {
+          type: 'model.message',
+          id: 'msg-1',
+          thread_id: 'main',
+          content: 'An answer.',
+          created_at: '2026-11-06T00:01:00.000Z',
+        },
+        required_actions: [],
+        completed_at: '2026-11-06T00:01:00.000Z',
+      }),
+    );
+    // What the pass still owed at the moment each send went out: by then the debt must
+    // already be cleared, so a crash after the send leaves nothing for a next pass to repeat.
+    const owedAtSendTime: number[] = [];
+    const send = client.sendMessage.bind(client);
+    client.sendMessage = input => {
+      owedAtSendTime.push(store.pendingReplies.length);
+      return send(input);
+    };
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(owedAtSendTime).toEqual([0]);
+    expect(store.pendingReplies).toHaveLength(0);
+
+    // A second pass, as after a restart, sends nothing again.
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+  });
+});
+
+describe('telegram replies for a message typed in the app', () => {
+  const answer: ModelMessageEvent = {
+    type: 'model.message',
+    id: 'msg-1',
+    thread_id: 'main',
+    content: 'Tuesday is clear.',
+    created_at: '2026-11-06T00:01:00.000Z',
+  };
+
+  function typedInApp(state: TurnState, input: TurnRecord<TurnCustom>['input']): TurnRecord<TurnCustom> {
+    return { ...turnWith(state), input };
+  }
+
+  it("sends the person's own words first, then the answer", async () => {
+    const { store, client, deps } = harness(
+      typedInApp({ status: 'done', output: answer, required_actions: [], completed_at: '2026-11-06T00:01:00.000Z' }, [
+        { type: 'user.message', content: 'Am I free on Tuesday?' },
+      ]),
+      undefined,
+      'app',
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent.map(message => message.text)).toEqual([
+      'You, in Aman: Am I free on Tuesday?',
+      'Tuesday is clear.',
+    ]);
+    expect(store.pendingReplies).toHaveLength(0);
+  });
+
+  it('says a file stays in the app, and sends only the text', async () => {
+    const { client, deps } = harness(
+      typedInApp({ status: 'done', output: answer, required_actions: [], completed_at: '2026-11-06T00:01:00.000Z' }, [
+        {
+          type: 'user.message',
+          content: [
+            { type: 'text', text: 'What does this say?' },
+            { type: 'file', name: 'letter.pdf', data: 'data:application/pdf;base64,AAAA' },
+          ],
+        },
+      ]),
+      undefined,
+      'app',
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toBe('You, in Aman: What does this say?\nIt came with a file, which stays in Aman.');
+  });
+
+  it('never offers buttons for an ask raised in the app: it is answered there', async () => {
+    const { store, client, deps } = harness(
+      typedInApp(
+        { status: 'done', output: null, required_actions: [APPROVAL_ACTION], completed_at: '2026-11-06T00:01:00.000Z' },
+        [{ type: 'user.message', content: 'Email Sam the plan.' }],
+      ),
+      'https://aman.example',
+      'app',
+    );
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent.map(message => message.text)).toEqual([
+      'You, in Aman: Email Sam the plan.',
+      `${FROM_APP_APPROVAL_LINE}\nhttps://aman.example/sessions/session-1`,
+    ]);
+    expect(client.sent.every(message => message.inline_buttons === undefined)).toBe(true);
+    expect(client.sent.some(message => message.text.includes('sam@example.com'))).toBe(false);
+    expect(store.pendingApprovals).toHaveLength(0);
+  });
+});

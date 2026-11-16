@@ -13,17 +13,18 @@ export interface ToolGrantIdentity {
 }
 
 /**
- * A grant binds to the connector's host as well. A connector whose URL now points elsewhere has a
- * different host, so its grants no longer match and the next call asks again. Null for a connector
- * with no URL (a local process).
+ * A grant binds to the connector as it was set up when the user chose "Always allow": a digest of its address
+ * (path and query included) and its sign-in settings, which the host computes and never shows. A connector that
+ * now points elsewhere, even on the same host, or signs in another way, has a different binding, so its grants no
+ * longer match and the next call asks again. Null for a source the host set up with no address of its own.
  */
 export interface ToolGrantKey extends ToolGrantIdentity {
-  mcp_server_host: string | null;
+  connector_binding: string | null;
 }
 
 export interface ToolGrantStore {
   hasToolGrant(key: ToolGrantKey): Promise<boolean>;
-  /** Idempotent: recording the same grant again leaves it unchanged; a new host replaces the binding. */
+  /** Idempotent: recording the same grant again leaves it unchanged; a new binding replaces the old one. */
   recordToolGrant(key: ToolGrantKey): Promise<void>;
 }
 
@@ -36,15 +37,15 @@ function grantId(identity: ToolGrantIdentity): string {
 
 /** Process-local grants for tests and hosts without durable storage. */
 export class InMemoryToolGrantStore implements ToolGrantStore {
-  private readonly hosts = new Map<string, string | null>();
+  private readonly bindings = new Map<string, string | null>();
 
   hasToolGrant(key: ToolGrantKey): Promise<boolean> {
     const id = grantId(key);
-    return Promise.resolve(this.hosts.has(id) && this.hosts.get(id) === key.mcp_server_host);
+    return Promise.resolve(this.bindings.has(id) && this.bindings.get(id) === key.connector_binding);
   }
 
   recordToolGrant(key: ToolGrantKey): Promise<void> {
-    this.hosts.set(grantId(key), key.mcp_server_host);
+    this.bindings.set(grantId(key), key.connector_binding);
     return Promise.resolve();
   }
 }

@@ -22,7 +22,7 @@ import { actionIdFor, verifyApprovalToken, type ApprovalToken } from './approval
 import { canonicalShellFormFor } from './classifier';
 import type { SentinelCallIdentity, SentinelServices } from './context';
 import { extractCardFields } from './extractorRegistry';
-import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { requiresNetwork } from './networkRequirements';
 import {
   hashArgv,
   matchAllowlist,
@@ -51,11 +51,18 @@ import {
 export interface VerifiableCall {
   tool_name: string;
   tool_type: 'truefoundry-system' | 'mcp';
+  /** Whether the tool needs the network, as its own registration declared it. Absent reads as needing it. */
+  requires_network?: boolean | undefined;
   canonical_params: Record<string, unknown>;
   tier: Tier;
   approval_token_id: string | null;
   approval_binding: TrackedExecutionBinding | null;
   shell_binding: ShellApprovalBinding | null;
+  /**
+   * Whether the call's own tool set declares that this tool writes files, read from its
+   * registration at dispatch. Absent when the tool set declares no such thing.
+   */
+  sandbox_file_write?: boolean | undefined;
   /** The connector as it is now, rebuilt at dispatch; absent when the call has no connector binding. */
   connector?: ConnectorBinding | undefined;
 }
@@ -101,7 +108,7 @@ function offlineViolation(call: VerifiableCall, ctx: DispatchCheckContext): stri
     }
     return undefined;
   }
-  if (requiresNetwork({ tool_name: call.tool_name, provenance: provenanceForToolType(call.tool_type) })) {
+  if (requiresNetwork({ declared: call.requires_network })) {
     return 'Auto-denied: offline mode is on and this tool needs network access.';
   }
   if (extractCardFields({ tool_name: call.tool_name, canonical_params: call.canonical_params }).external_service) {
@@ -151,7 +158,7 @@ function verifyTier2Containment(input: {
   const separator = resolution === 'remote' ? '/' : path.sep;
   const insideRoot = (identity: string): boolean => isUnderRoot({ identity, root: containingRoot, separator });
 
-  if (call.tool_name === 'write_file' || call.tool_name === 'apply_patch' || call.tool_name === 'replace_text') {
+  if (call.sandbox_file_write === true) {
     const callDirectory = callCwd({ params: call.canonical_params, workspace_root, resolution });
     // An apply_patch changes the files its patch names; a path argument on it is not a target.
     const patchTargets =
@@ -231,9 +238,6 @@ function verifyTier2Containment(input: {
   return undefined;
 }
 
-/** File-write tools whose sandbox writes can run without a card, so they are re-checked at dispatch. */
-export const SANDBOX_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(['write_file', 'apply_patch', 'replace_text']);
-
 /**
  * Returns an error message when the call must not execute, or undefined when
  * it is cleared to run. Tier 3 calls and Tier 2 calls that asked are verified
@@ -250,7 +254,7 @@ export async function verifyPreDispatch(input: {
 
   if (call.tier === 1) {
     // Only shell commands and sandbox file writes are silent because of a containment rule that can change underfoot.
-    if (call.tool_name !== 'exec' && !SANDBOX_FILE_WRITE_TOOLS.has(call.tool_name)) {
+    if (call.tool_name !== 'exec' && call.sandbox_file_write !== true) {
       return undefined;
     }
     const workspaceRoot = ctx.workspace_cwd;

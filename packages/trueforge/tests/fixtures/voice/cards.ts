@@ -4,6 +4,7 @@ import type { PendingApproval } from '../../../src/voice/transport';
 
 const BASE_CARD: Tier3Card = {
   plain_what: 'Send an email to Victor.',
+  copy: { headline: 'Send this reply to Victor?', consequence: "Once this is sent, it can't be unsent.", reason: null },
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,
@@ -27,6 +28,7 @@ export function sendReplyCard(body = 'Thursday at three works for me. See you th
       bcc: [],
       subject: 'Re: Thursday',
       body,
+      check_code: 'A7F39C',
       replaces: null,
       reply_in_thread: { subject: 'Thursday', from: 'Victor' },
       reply_to: null,
@@ -73,7 +75,7 @@ const dentist: NonNullable<Tier3Card['calendar_event']> = {
   location: '',
   description: '',
   attendees: [],
-  guests_emailed: false,
+  guests_line: '',
   one_of_repeating: false,
   already_created: false,
   span_days: 1,
@@ -102,7 +104,14 @@ export const typedOnlyCards: [string, Tier3Card][] = [
   ],
   [
     'guests on an event',
-    { ...BASE_CARD, calendar_event: { ...dentist, attendees: ['bob@example.com'], guests_emailed: true } },
+    {
+      ...BASE_CARD,
+      calendar_event: {
+        ...dentist,
+        attendees: ['bob@example.com'],
+        guests_line: 'Google will email every guest about this.',
+      },
+    },
   ],
   [
     'a new schedule',

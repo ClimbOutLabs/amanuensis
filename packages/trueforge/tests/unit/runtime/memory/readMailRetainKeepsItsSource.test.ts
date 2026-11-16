@@ -14,6 +14,7 @@ import type { TurnToolResult } from '../../../../src/runtime/memory/memoryNotesS
 import { MEMORY_ORIGIN_METADATA_KEY } from '../../../../src/runtime/memory/memoryOrigin';
 import { submitRetain } from '../../../../src/runtime/memory/memoryRetain';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 /** The next scripted answer for each of the two model calls a turn can make. */
@@ -59,6 +60,7 @@ jest.mock('../../../../src/runtime/memory/memoryNotesSummarize', () => {
 });
 
 const unusedStore: IModelProviderStore = {
+  managedElsewhere: false,
   listProviders: jest.fn(),
   getProvider: jest.fn(),
   getProviderForUpdate: jest.fn(),
@@ -66,6 +68,7 @@ const unusedStore: IModelProviderStore = {
   upsertProvider: jest.fn(),
   listModels: jest.fn(),
   deleteProvider: jest.fn(),
+  recordProviderCheck: jest.fn(),
 };
 
 const CLAIMED_ADDRESS = 'recovery@elsewhere.example';
@@ -103,6 +106,7 @@ describe('a turn that only read an email', () => {
       summarize: {
         tenantId: 't1',
         modelProviderStore: unusedStore,
+        globalSettingsStore: inMemoryGlobalSettingsStore(),
         summarizationModelFqn: 'provider/model',
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         modelUsage: discardedModelUsage,
@@ -165,6 +169,7 @@ describe('a turn that only read an email', () => {
       summarize: {
         tenantId: 't1',
         modelProviderStore: unusedStore,
+        globalSettingsStore: inMemoryGlobalSettingsStore(),
         summarizationModelFqn: 'provider/model',
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         modelUsage: discardedModelUsage,

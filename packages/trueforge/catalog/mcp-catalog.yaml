@@ -32,8 +32,9 @@ mcp_servers:
     description: Search the web, fetch page contents, and find similar pages.
     search_tools:
       - web_search_exa
-      - web_fetch_exa
       - web_search_advanced_exa
+    page_read_tools:
+      - web_fetch_exa
   - type: remote
     name: parallel-web
     url: https://search.parallel.ai/mcp
@@ -41,6 +42,7 @@ mcp_servers:
     search_provider: true
     search_tools:
       - web_search
+    page_read_tools:
       - web_fetch
     search_plumbing_fields:
       - session_id
@@ -63,7 +65,9 @@ mcp_servers:
     search_provider: true
     search_tools:
       - tavily_search
+    page_read_tools:
       - tavily_extract
+    search_in_process: true
     auth:
       type: header
       headers:
@@ -106,20 +110,6 @@ mcp_servers:
     description: Query product analytics, run SQL, and manage feature flags.
     auth:
       type: dcr
-  # Self-hosted, so the URL here is a placeholder: no logo either, since there is no hosted asset.
-  - type: remote
-    name: hindsight
-    url: https://your-hindsight-host:8449/mcp/your-bank
-    description: >-
-      A self-hosted Hindsight long-term memory bank. The URL here is a placeholder: add it with
-      Add MCP Server using your own Hindsight URL, which must have the shape {apiBase}/mcp/{bank}
-      naming exactly one bank, or memory cannot use it. Put the API key in the Authorization
-      header, and use one Hindsight accepts on its REST API as well as its MCP surface, because
-      memory calls the REST API.
-    auth:
-      type: header
-      headers:
-        Authorization: Bearer YOUR_HINDSIGHT_API_KEY
   # The person's own Home Assistant, so the URL here is a placeholder: the connect form asks for
   # their address and long-lived access token, and builds this endpoint and the header itself.
   - type: remote

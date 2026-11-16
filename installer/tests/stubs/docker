@@ -119,6 +119,11 @@ case "$cmd" in
     echo "$1" >>"$S/images"
     exit 0
     ;;
+  tag)
+    grep -Fxq "$1" "$S/images" || { echo "Error response from daemon: No such image: $1" >&2; exit 1; }
+    echo "$2" >>"$S/images"
+    exit 0
+    ;;
   logs)
     printf '%s\n' "${STUB_UP_FAIL_LOG:-}"
     exit 0
@@ -175,6 +180,11 @@ case "$cmd" in
           *--format*Containers*)
             grep -Fxq "$1" "$S/networks" || { echo "network $1 not found" >&2; exit 1; }
             awk -v n="$1" '$1 == n { printf "%s ", $2 }' "$S/network_links"
+            echo
+            exit 0
+            ;;
+          *--format*Subnet*) # The subnets of a network: lines "name subnet" in $S/network_subnets.
+            [ -f "$S/network_subnets" ] && awk -v n="$1" '$1 == n { printf "%s ", $2 }' "$S/network_subnets"
             echo
             exit 0
             ;;
@@ -483,11 +493,11 @@ case "$cmd" in
         exit 0
         ;;
       *"aman import-data --check-ready"*)
-        # Downloading for the first STUB_MODEL_DOWNLOADING looks, then ready; STUB_MODEL_BROKEN answers nothing.
+        # Missing with STUB_MODEL_MISSING, otherwise ready; STUB_MODEL_BROKEN answers nothing.
         [ -n "${STUB_MODEL_BROKEN:-}" ] && exit 1
         echo x >>"$S/model_checks"
-        if [ "$(wc -l <"$S/model_checks")" -le "${STUB_MODEL_DOWNLOADING:-0}" ]; then
-          echo '{"search_model":"downloading"}'
+        if [ -n "${STUB_MODEL_MISSING:-}" ]; then
+          echo '{"search_model":"missing"}'
         else
           echo '{"search_model":"ready"}'
         fi
@@ -527,6 +537,10 @@ case "$cmd" in
           exit 130
         fi
         if [ -n "${STUB_IMPORT_FAIL:-}" ]; then
+          if [ "$STUB_IMPORT_FAIL" = killed ]; then
+            # How a container ends when the machine kills it for memory: it just stops, exit 137.
+            exit 137
+          fi
           # The CLI's JSON log lines come first; its error is the last plain line.
           echo '{"level":"warn","message":"Data import rejected an export section"}' >&2
           if [ "$STUB_IMPORT_FAIL" = heap ]; then
@@ -629,6 +643,11 @@ case "$cmd" in
           printf 'dex-%s\n' "$(cat "$S/db_gen" 2>/dev/null || true)" >"$S/tarsrc/TAR-OF-$vol"
           tar -C "$S/tarsrc" -cf - "TAR-OF-$vol"
         fi
+        exit 0
+        ;;
+      *"-d /run/aman-local-model"*)
+        # Whether the app image has the local model bridge's folder: an image built before it does not.
+        [ -n "${STUB_OLD_APP_IMAGE:-}" ] && exit 1
         exit 0
         ;;
       *host-report*)
@@ -774,8 +793,15 @@ case "$cmd" in
             if [ "$svc" = calendar-caldav ] && [ "$(printf '%s\n' "$text" | grep -c '^CALDAV_\(URL\|USERNAME\|PASSWORD\|USER_EMAIL\)=.')" -lt 4 ]; then
               exit 2
             fi
+            # The mail agent refuses text that holds no complete account.
+            if [ "$svc" != calendar-caldav ] && [ "$(printf '%s\n' "$text" | grep -c '^MCP_EMAIL_SERVER_\(EMAIL_ADDRESS\|PASSWORD\|IMAP_HOST\|IMAP_PORT\|SMTP_HOST\|SMTP_PORT\)=.')" -lt 6 ]; then
+              exit 2
+            fi
             printf '%s\n' "$text" >"$store"
             echo "saved"
+            ;;
+          *--has-account*)
+            if [ -s "$store" ]; then echo saved; else echo none; fi
             ;;
           *--remove*)
             : >"$store"

@@ -156,6 +156,8 @@ const TruefoundrySettingsBuilder = () => {
     if (!settingsOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      // A window open on top of Settings takes Escape for itself, so one press closes only that window.
+      if (document.querySelector('dialog[open]') !== null) return;
       event.stopImmediatePropagation();
       closeSettings();
     };
@@ -172,7 +174,7 @@ const TruefoundrySettingsBuilder = () => {
       // Not gated on a capability: memory is configured by pointing at a bank, so the section has
       // to be reachable while none is configured. It reads as off until one is.
       { id: 'memory', label: 'Memory', icon: 'box-archive' },
-      { id: 'themes', label: 'Themes', icon: 'palette' },
+      { id: 'themes', label: 'Appearance', icon: 'palette' },
     ];
     if (hasSkills) {
       baseSections.push({ id: 'skills', label: 'Skills', icon: 'lightbulb' });
@@ -185,7 +187,7 @@ const TruefoundrySettingsBuilder = () => {
     }
     if (hasSentinel) {
       baseSections.push({ id: 'permissions', label: 'Permissions', icon: 'lock' });
-      baseSections.push({ id: 'audit', label: 'Audit', icon: 'clock-rotate-left' });
+      baseSections.push({ id: 'audit', label: 'Activity log', icon: 'clock-rotate-left' });
     }
     if (hasDeliveries) {
       baseSections.push({ id: 'reach-me', label: 'Reach me', icon: 'bell' });

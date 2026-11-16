@@ -96,6 +96,8 @@ interface RunInput {
   guest: BridgeGuest;
   sandboxId: string;
   cwd: string | undefined;
+  /** Name and email for a commit the command writes in the sandbox, such as the merge of a pull. */
+  commitIdentityEnv: Readonly<Record<string, string>> | undefined;
   timeoutSeconds: number | undefined;
   signal: AbortSignal | undefined;
 }
@@ -409,7 +411,7 @@ export class GitBridge {
         .join(' ');
       return await guest.exec({
         command,
-        env: undefined,
+        env: input.input.commitIdentityEnv === undefined ? undefined : { ...input.input.commitIdentityEnv },
         cwd: input.input.cwd,
         timeoutSeconds: input.input.timeoutSeconds,
         signal,

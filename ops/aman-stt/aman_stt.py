@@ -1,13 +1,19 @@
 """Local speech-to-text sidecar: Whisper `small` int8 via faster-whisper.
 
 Model weights are pinned to exact Hugging Face revisions with SHA-256
-hashes (see PINNED_MODELS). On first start the pinned revision is
-downloaded and every file is hash-verified before loading; later starts
-reuse the verified cache without network access and re-verify at load.
+hashes (see PINNED_MODELS). The image ships the pinned files; every start
+hash-verifies them before loading and never downloads anything.
 
 HTTP contract:
   GET  /healthz       -> {"status": "ok", "model_loaded": bool, "model_error": str | None}
   POST /v1/transcribe -> {"text", "language", "duration_ms", "model"}
+
+Every call except `/healthz` must carry the shared secret from `SPEECH_SECRET`
+in the `x-speech-secret` header, the same check the browser sidecar uses; a
+missing or wrong value is refused with 401. Without a secret of at least 32
+characters the service does not start. `/healthz` stays open because the
+Docker health check carries no secret and the reply says only whether the
+model loaded.
 
 Accepts `audio/wav` (16 kHz mono 16-bit PCM) or `audio/x-raw-pcm` with
 `sample_rate`/`channels`/`sample_width` query params (defaults 16000/1/2).
@@ -19,10 +25,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import io
 import logging
 import os
-import shutil
 import time
 import wave
 from collections.abc import Callable
@@ -31,7 +37,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 LOGGER = logging.getLogger("aman_stt")
@@ -41,6 +47,10 @@ CHANNELS = 1
 SAMPLE_WIDTH_BYTES = 2
 WAV_CONTENT_TYPE = "audio/wav"
 RAW_PCM_CONTENT_TYPE = "audio/x-raw-pcm"
+# The header the shared secret travels in, and the shortest secret accepted; both match the
+# browser sidecar, so one value guards every sidecar the app talks to.
+SECRET_HEADER = "x-speech-secret"
+MIN_SECRET_LENGTH = 32
 
 
 def _env_int(name: str, default: int) -> int:
@@ -63,6 +73,28 @@ class Settings:
     cpu_threads: int = field(default_factory=lambda: _env_int("AMAN_STT_CPU_THREADS", 4))
     max_body_bytes: int = field(default_factory=lambda: _env_int("AMAN_STT_MAX_BODY_BYTES", 30 * 1024 * 1024))
     model_dir: str | None = field(default_factory=lambda: os.environ.get("AMAN_STT_MODEL_DIR") or None)
+    shared_secret: str | None = field(default_factory=lambda: os.environ.get("SPEECH_SECRET") or None)
+
+
+def secret_matches(given: str | None, secret: str) -> bool:
+    """Checks a presented secret against the shared one in constant time, whatever their lengths."""
+    if given is None:
+        return False
+    return hmac.compare_digest(
+        hashlib.sha256(given.encode("utf-8")).digest(),
+        hashlib.sha256(secret.encode("utf-8")).digest(),
+    )
+
+
+def require_usable_secret(settings: Settings) -> str:
+    """No secret, or a short one, would leave the service open, so it refuses to start without a usable one."""
+    secret = settings.shared_secret
+    if secret is None or len(secret) < MIN_SECRET_LENGTH:
+        raise ValueError(
+            f"SPEECH_SECRET must be set to a random value of at least {MIN_SECRET_LENGTH} characters,"
+            " the same value the app sends. Set it, then start the service again."
+        )
+    return secret
 
 
 class ModelVerificationError(Exception):
@@ -80,7 +112,7 @@ class PinnedModel:
 
 # Every model the sidecar may load, pinned in one place. The primary and
 # the fallback go through the same verify-before-load path; a size with no
-# entry here is refused rather than downloaded unpinned.
+# entry here is refused.
 #
 # The loader (faster-whisper) also reads `preprocessor_config.json` when it
 # exists in the model directory. The pinned revisions below do not ship that
@@ -109,9 +141,6 @@ PINNED_MODELS: dict[str, PinnedModel] = {
     ),
 }
 
-# Download seam: (pinned_model, cache_dir) -> snapshot directory holding the
-# revision's files. Injected in tests so they never touch the network.
-Downloader = Callable[[PinnedModel, str], str]
 
 
 # Files the faster-whisper loader may read from the model directory.
@@ -172,8 +201,8 @@ def verify_model_files(snapshot_dir: str, expected_files: dict[str, str]) -> Non
 def _offline_snapshot_dir(pinned: PinnedModel, cache_dir: str) -> str | None:
     """Return the cached snapshot dir for the pinned revision, or None.
 
-    Mirrors the huggingface_hub cache layout, so a warm cache starts with no
-    network access. Pure local check.
+    Mirrors the huggingface_hub cache layout the image is built with. Pure
+    local check.
     """
     snapshot_dir = os.path.join(
         cache_dir,
@@ -184,66 +213,31 @@ def _offline_snapshot_dir(pinned: PinnedModel, cache_dir: str) -> str | None:
     return snapshot_dir if os.path.isdir(snapshot_dir) else None
 
 
-def _default_downloader(pinned: PinnedModel, cache_dir: str) -> str:
-    """Download the pinned revision from the model hub (network)."""
-    from huggingface_hub import snapshot_download
-
-    try:
-        return snapshot_download(
-            repo_id=pinned.repo, revision=pinned.revision, cache_dir=cache_dir
-        )
-    except Exception as exc:
-        raise ModelVerificationError(
-            f"could not download pinned {pinned.repo}@{pinned.revision[:12]}: {exc}"
-        ) from exc
-
-
 def ensure_verified_model_dir(
     *,
     model_size: str,
     cache_dir: str,
-    downloader: Downloader | None = None,
 ) -> str:
-    """Return a local directory holding the verified pinned model files.
+    """Return the local directory holding the verified pinned model files.
 
-    Uses the warm cache when present (no network); otherwise downloads the
-    pinned revision and verifies every file hash before returning. Raises
-    ModelVerificationError when the size is not pinned, the revision does
-    not match, or any file is missing or tampered. Never downloads unpinned.
-
-    A warm cache with a missing file (for example an interrupted first
-    download) is removed and downloaded again, once. A hash mismatch is
-    always a hard refusal and is never retried.
+    Nothing is downloaded: the image ships the pinned files. Raises
+    ModelVerificationError when the size is not pinned, its files are not in
+    cache_dir, or any file is missing, unpinned or tampered.
     """
     pinned = PINNED_MODELS.get(model_size)
     if pinned is None:
         raise ModelVerificationError(
             f"model size {model_size!r} has no pinned revision; refusing "
-            f"unpinned download (pinned sizes: {sorted(PINNED_MODELS)})"
+            f"(pinned sizes: {sorted(PINNED_MODELS)})"
         )
-    resolve = downloader or _default_downloader
     snapshot_dir = _offline_snapshot_dir(pinned, cache_dir)
-    downloaded = False
     if snapshot_dir is None:
-        snapshot_dir = resolve(pinned, cache_dir)
-        downloaded = True
-    _check_revision_dir(snapshot_dir, pinned)
-    try:
-        verify_model_files(snapshot_dir, pinned.files)
-    except ModelVerificationError as exc:
-        if downloaded or "pinned file missing from snapshot" not in str(exc):
-            raise
-        # Partial snapshot from an interrupted download: drop it and fetch
-        # the pinned revision again, exactly once.
-        LOGGER.warning(
-            "Partial snapshot for %s (%s); removing and re-downloading once",
-            pinned.repo,
-            exc,
+        raise ModelVerificationError(
+            f"{pinned.repo}@{pinned.revision[:12]} is not in {cache_dir}, and this "
+            "service never downloads models. Rebuild the speech image, or set "
+            "AMAN_STT_MODEL_DIR to a folder that holds the pinned files"
         )
-        shutil.rmtree(snapshot_dir, ignore_errors=True)
-        snapshot_dir = resolve(pinned, cache_dir)
-        _check_revision_dir(snapshot_dir, pinned)
-        verify_model_files(snapshot_dir, pinned.files)
+    verify_model_files(snapshot_dir, pinned.files)
     LOGGER.info(
         "model verified: %s@%s (%d files)",
         pinned.repo,
@@ -251,16 +245,6 @@ def ensure_verified_model_dir(
         len(pinned.files),
     )
     return snapshot_dir
-
-
-def _check_revision_dir(snapshot_dir: str, pinned: PinnedModel) -> None:
-    """Raise unless the snapshot directory is for the pinned revision."""
-    revision_dir = os.path.basename(os.path.normpath(snapshot_dir))
-    if revision_dir != pinned.revision:
-        raise ModelVerificationError(
-            f"revision mismatch for {pinned.repo}: downloader returned "
-            f"{revision_dir!r}, pinned revision is {pinned.revision!r}"
-        )
 
 
 def _default_cache_dir() -> str:
@@ -272,7 +256,6 @@ def _default_cache_dir() -> str:
 def _load_first_verified(
     sizes: tuple[str, ...],
     cache_dir: str,
-    downloader: Downloader | None,
     model_factory: Callable[[str], object],
 ) -> tuple[object, str, str | None]:
     """Load the first size whose pinned files verify; raise if none do.
@@ -285,9 +268,7 @@ def _load_first_verified(
     failures: list[str] = []
     for size in sizes:
         try:
-            snapshot_dir = ensure_verified_model_dir(
-                model_size=size, cache_dir=cache_dir, downloader=downloader
-            )
+            snapshot_dir = ensure_verified_model_dir(model_size=size, cache_dir=cache_dir)
             primary_error = failures[0] if failures else None
             return model_factory(snapshot_dir), size, primary_error
         except Exception as exc:
@@ -316,11 +297,7 @@ class Transcriber(Protocol):
 class FasterWhisperTranscriber:
     """faster-whisper backend. Imported lazily so tests can inject a fake."""
 
-    def __init__(
-        self,
-        settings: Settings,
-        downloader: Downloader | None = None,
-    ) -> None:
+    def __init__(self, settings: Settings) -> None:
         from faster_whisper import WhisperModel
 
         cache_dir = settings.model_dir or _default_cache_dir()
@@ -336,7 +313,6 @@ class FasterWhisperTranscriber:
         self._model, self._size, self.primary_error = _load_first_verified(
             (settings.model_size, settings.fallback_model_size),
             cache_dir,
-            downloader,
             _factory,
         )
         self.model_label = f"whisper-{self._size}-int8"
@@ -404,6 +380,7 @@ def create_app(
     transcriber_factory: "type[Transcriber] | None" = None,
 ) -> FastAPI:
     settings = settings or Settings()
+    shared_secret = require_usable_secret(settings)
     state = ServiceState()
 
     @asynccontextmanager
@@ -424,6 +401,12 @@ def create_app(
 
     app = FastAPI(title="aman-stt", lifespan=lifespan)
 
+    def require_shared_secret(request: Request) -> None:
+        # A route dependency rather than middleware, so the request stream and its
+        # disconnect watching reach the handler exactly as before.
+        if not secret_matches(request.headers.get(SECRET_HEADER), shared_secret):
+            raise HTTPException(status_code=401, detail="Wrong or missing secret")
+
     @app.get("/healthz")
     def healthz() -> dict:
         return {
@@ -432,7 +415,7 @@ def create_app(
             "model_error": state.model_error,
         }
 
-    @app.post("/v1/transcribe")
+    @app.post("/v1/transcribe", dependencies=[Depends(require_shared_secret)])
     async def transcribe(
         request: Request,
         language: str | None = Query(default=None, description="Optional language hint, e.g. 'en'"),

@@ -156,8 +156,9 @@ test_a_rerun_with_nothing_to_do_still_checks_run_code() {
   unset STUB_SANDBOX_DOCTOR_EXIT
   run_install --yes --email owner@example.invalid
   assert_rc 0
-  assert_flat_contains "$OUT" "Run code"
-  assert_flat_contains "$OUT" "on, in a sandbox"
+  assert_not_contains "$(flat "$OUT")" "Run code not ready" "a sandbox that answers again is no longer a row"
+  run_install status
+  assert_flat_contains "$OUT" "Run code on, in a sandbox"
   sandbox_drop
 }
 

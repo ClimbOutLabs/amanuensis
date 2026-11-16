@@ -11,7 +11,10 @@
 #   aman restore [NAME] [TIME | --latest]
 #   aman upgrade [--check] [--force]
 #   aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
+#   aman local-model PORT [--instance NAME] [--remove]
+#   aman address list | add ADDRESS | remove ADDRESS [--instance NAME]
 #   aman migrate --from-compose FOLDER [--user ID]
+#   aman help [COMMAND]
 #
 # --json never loads the terminal style and is the same document as before.
 #
@@ -49,6 +52,8 @@ AS_JSON=0
 UI_VERBOSE=0
 SUMMARY=0
 PROBLEMS_ONLY=0
+# Set once a repair has run: a check that still fails after it is not sent back to a repair that does the same.
+REPAIR_TRIED=0
 DEEP=0
 LOCAL=0
 ONLY=""
@@ -81,27 +86,21 @@ DOCKER_VERSION=""
 DOCKER_MEM=""
 APP_CONTAINER=""
 
-usage() {
-  cat >&2 <<'USAGE'
-Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
-       aman doctor instance|network [--fix [--yes]] [--instance NAME]
-       aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
-       aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
-       aman backup [NAME]
-       aman restore [NAME] [TIME | --latest]
-       aman upgrade [--check] [--force]
-       aman password [--instance NAME] [--password-stdin]
-         sets a new owner password; run it on the computer where Aman is installed
-       aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
-         --dry-run checks the file and imports nothing; an instance that has never started is started once first
-       aman migrate --from-compose FOLDER [--user ID]
-USAGE
+die_usage() {
+  printf '%s\nRun aman help to see what each command does.\n' "$1" >&2
+  exit 2
 }
 
-die_usage() {
-  printf '%s\n' "$1" >&2
-  usage
-  exit 2
+# aman help [COMMAND]: the overview, or the page of one command, on the standard output.
+run_help() {
+  load_ui
+  require_lib help
+  if [ -z "${1:-}" ]; then
+    help_overview
+  elif ! help_command "$1"; then
+    printf 'There is no command called %s.\nRun aman help to see the commands.\n' "$1" >&2
+    exit 2
+  fi
 }
 
 # Helper files sit in ../lib beside this file's folder, installed and in a checkout alike.
@@ -139,6 +138,11 @@ checkout_dir() {
 checkout_installer() {
   local repo
   repo=$(checkout_dir) || return 1
+  # A pull under Ubuntu's umask leaves new installer files writable by the person's own group; that alone is put right
+  # here, as the installer itself would, instead of refusing.
+  if checkout_only_own_group_writes "$repo" && tighten_checkout "$repo"; then
+    printf 'Made %s private to you again, so only you can change what the installer runs.\n' "$repo" >&2
+  fi
   if checkout_problem "$repo" >/dev/null; then return 1; fi
   printf '%s' "${repo}/installer/install.sh"
 }
@@ -234,22 +238,28 @@ record() { # scope id state detail fix
 
 # One command fixes a stopped, unhealthy or wrongly published instance; it never asks the person to read container logs.
 INSTANCE_FIX="Run aman doctor instance --fix"
+# --force lets the upgrade run while an instance has a problem, which is what needs it here.
+UPDATE_FIX="Get the newest Aman with: aman upgrade --force"
 
 # A value from the instance's record in the installer's state directory.
 registry_value() { # instance key
   sed -n "s/^$2=//p" "${AMAN_HOME}/state/instances/${1}.conf" 2>/dev/null | head -n 1
 }
 
-# The cause of a container failure in one sentence (starting with a space), or nothing when the log does not say.
+# Sets CAUSE to the cause of a container failure in one sentence (starting with a space), or nothing when the log does
+# not say, and CAUSE_FIX to the one thing to do: a restart, or a newer Aman when only a new image can fix it.
 # CAUSE_IDS holds the containers that are not running or not healthy.
-container_cause_sentence() {
-  local id log="" cause
+container_cause() {
+  local id log="" text
+  CAUSE=""
+  CAUSE_FIX=$INSTANCE_FIX
   for id in $CAUSE_IDS; do
     log="${log}$(bounded "$PROBE_SECONDS" docker logs --tail 50 "$id" 2>&1)"$'\n'
   done
   [ -n "$log" ] || return 0
-  cause=$(printf '%s' "$log" | container_failure_cause_stdin)
-  if [ -n "$cause" ]; then printf ' %s' "$cause"; fi
+  text=$(printf '%s' "$log" | container_failure_cause_stdin)
+  if [ -n "$text" ]; then CAUSE=" $text"; fi
+  if printf '%s\n' "$log" | grep -Eq "$MISSING_FILE_PATTERN"; then CAUSE_FIX=$UPDATE_FIX; fi
 }
 
 # Days-from-civil arithmetic, so no GNU or BSD date flags are needed.
@@ -818,6 +828,15 @@ check_instance_config() {
       "$INSTANCE_FIX"
     return
   fi
+  # An older installer kept the email or calendar app password in a file here. Nothing reads it now, and an upgrade
+  # moves it into the connector and deletes it, so one that is still here holds a password for no reason.
+  for file in .env.mail-email .env.calendar; do
+    if [ -s "${dir}/${file}" ]; then
+      record "$name" config warn "An old file, ${file}, still holds an app password that Aman no longer uses." \
+        "Run aman upgrade to move it into the connector and delete it"
+      return
+    fi
+  done
   record "$name" config ok "The settings files exist and are private to you." ""
 }
 
@@ -844,7 +863,7 @@ join_words() {
 }
 
 check_instance_containers() { # name; sets APP_CONTAINER
-  local name=$1 line id cname state status service bad="" unhealthy="" starting="" found=0 ports exposed="" count=0 words
+  local name=$1 line id cname state status service bad="" unhealthy="" starting="" found=0 ports exposed="" count=0 words CAUSE CAUSE_FIX
   APP_CONTAINER=""
   CAUSE_IDS=""
   local lines
@@ -892,10 +911,12 @@ check_instance_containers() { # name; sets APP_CONTAINER
   fi
   if [ -n "$bad" ]; then
     words=$(join_words "$bad")
-    record "$name" containers fail "$(capitalize "$words") $(is_are "$bad") not running.$(container_cause_sentence)" "$INSTANCE_FIX"
+    container_cause
+    record "$name" containers fail "$(capitalize "$words") $(is_are "$bad") not running.$CAUSE" "$CAUSE_FIX"
   elif [ -n "$unhealthy" ]; then
     words=$(join_words "$unhealthy")
-    record "$name" containers fail "$(capitalize "$words") $(is_are "$unhealthy") not healthy.$(container_cause_sentence)" "$INSTANCE_FIX"
+    container_cause
+    record "$name" containers fail "$(capitalize "$words") $(is_are "$unhealthy") not healthy.$CAUSE" "$CAUSE_FIX"
   elif [ -n "$starting" ]; then
     words=$(join_words "$starting")
     record "$name" containers warn "$(capitalize "$words") $(is_are "$starting") still starting." "Wait a minute, then run aman doctor."
@@ -1039,13 +1060,20 @@ check_instance() {
   check_instance_network "$1"
 }
 
-# An instance opened on the network lists the addresses it answers at; a new address of this computer (another
-# network, a changed DHCP lease, Tailscale coming up) is not on the list until the instance is refreshed, and sign-in
-# is refused there. Nothing is recorded for an instance that is open on this computer only.
+# An instance opened on the network listens on the private addresses this computer had when it was last set up. An
+# address the computer no longer has (a new address from the router, a network it left) stops other devices reaching
+# it there; a new address is not on the list until the instance is refreshed, and sign-in is refused there. Nothing is
+# recorded for an instance that is open on this computer only.
 check_instance_network() {
-  local name=$1 origins port host missing='' count expected tls_port=''
+  local name=$1 origins port host missing='' stale='' count expected tls_port='' gone refused
   origins=$(registry_value "$name" origins)
   [ -n "$origins" ] || return 0
+  gone=$(network_gone_addresses "$(registry_value "$name" listen_addresses)" | tr '\n' ' ')
+  if [ -n "$gone" ]; then
+    record "$name" network fail "This computer's network address changed, so other devices cannot reach Aman. It no longer has: ${gone% }." \
+      "Run aman doctor network --fix"
+    return
+  fi
   port=$(registry_value "$name" app_port)
   case "$origins" in *https://*) tls_port=$(registry_value "$name" tls_port) ;; esac
   # shellcheck disable=SC2046,SC2086 # the extra hosts are checked names without spaces
@@ -1061,8 +1089,43 @@ check_instance_network() {
       "Run aman doctor network --fix"
     return
   fi
+  # An address an older version found by itself that this one leaves out, such as a VPN address, is read away again.
+  while IFS= read -r host; do
+    case ",${expected}," in
+      *",${host},"*) ;;
+      *) stale="${stale} $(origin_host "$host")" ;;
+    esac
+  done < <(printf '%s\n' "$origins" | tr ',' '\n')
+  if [ -n "$stale" ]; then
+    record "$name" network warn "Aman is still set up for addresses it would not use today:${stale}. Use aman address add for any you want to keep." \
+      "Run aman doctor network --fix"
+    return
+  fi
   count=$(printf '%s\n' "$origins" | tr ',' '\n' | wc -l | tr -d ' ')
+  refused=$(refused_addresses "$name")
+  if [ -n "$refused" ]; then
+    # Not a fault of the instance, so --fix has nothing to do for it; the line says how to allow one.
+    record "$name" network ok "Aman opens at ${count} addresses of this computer, and sign-in works at each. In the last week it refused:${refused}. To allow one you opened yourself, run: aman address add ADDRESS" ""
+    return
+  fi
   record "$name" network ok "Aman opens at ${count} addresses of this computer, and sign-in works at each." ""
+}
+
+# The hosts the app refused in the last week, space-separated with a leading space, read from its running container.
+# The app writes them; nothing is listed when the app is not running or keeps no list.
+refused_addresses() { # name
+  local id since line at host out=''
+  id=$(bounded "$PROBE_SECONDS" docker ps -q --filter "label=com.docker.compose.project=aman-$1" --filter "label=com.docker.compose.service=$APP_SERVICE" 2>/dev/null | head -n 1)
+  [ -n "$id" ] || return 0
+  since=$(($(now_epoch) - 7 * 24 * 3600))
+  while IFS= read -r line; do
+    at=${line%% *}
+    host=${line#* }
+    case "$at" in '' | *[!0-9]*) continue ;; esac
+    [[ $host =~ ^[a-z0-9.:-]+$ ]] || continue
+    if [ "$at" -ge "$since" ]; then out="$out $host"; fi
+  done < <(bounded "$PROBE_SECONDS" docker exec "$id" cat /data/refused-addresses.txt 2>/dev/null || true)
+  printf '%s' "$out"
 }
 
 check_instance_core() {
@@ -1156,6 +1219,7 @@ text_checks() { # scope
     if [ "$state" = ok ] && [ "$UI_VERBOSE" != 1 ] && in_list "$id" "runtime credentials checkout"; then continue; fi
     label=$detail
     if [ "$UI_VERBOSE" = 1 ]; then label="$detail ($id)"; fi
+    if [ "$REPAIR_TRIED" = 1 ] && is_refresh_fix "$fix"; then fix=""; fi
     case "$state" in
       ok) ui_ok "$label" ;;
       warn) ui_warn "$label" "$fix" ;;
@@ -1164,6 +1228,20 @@ text_checks() { # scope
   done < <(visible_records "$1")
   flush_skipped
 }
+
+# Whether a failing check of these scopes can only be fixed by a newer Aman.
+records_want_update() { # scope...
+  local scope _id state _detail fix want
+  for want in "$@"; do
+    while IFS=$'\t' read -r scope _id state _detail fix; do
+      if [ "$state" = fail ] && [ "$fix" = "$UPDATE_FIX" ]; then return 0; fi
+    done < <(visible_records "$want")
+  done
+  return 1
+}
+
+# Both repairs render the instance again from its record and restart it.
+is_refresh_fix() { [ "$1" = "$INSTANCE_FIX" ] || [ "$1" = "Run aman doctor network --fix" ]; }
 
 # Counts of the visible checks of a scope: sets N_OK, N_WARN, N_FAIL and N_OFF.
 count_checks() { # scope
@@ -1187,6 +1265,32 @@ plural() { # count word
   if [ "$1" = 1 ]; then printf '1 %s' "$2"; else printf '%s %ss' "$1" "$2"; fi
 }
 
+# What a part of the report found, for the right end of its heading: "4 ok, 1 problem, 2 skipped".
+section_counts() { # scope
+  local parts=''
+  count_checks "$1"
+  if [ "$N_OK" -gt 0 ]; then parts="$(_ui_s 32 "$N_OK ok")"; fi
+  if [ "$N_FAIL" -gt 0 ]; then parts="${parts:+$parts, }$(_ui_s 31 "$(plural "$N_FAIL" problem)")"; fi
+  if [ "$N_WARN" -gt 0 ]; then parts="${parts:+$parts, }$(_ui_s 33 "$(plural "$N_WARN" warning)")"; fi
+  if [ "$N_OFF" -gt 0 ]; then parts="${parts:+$parts, }$(_ui_s 2 "$N_OFF skipped")"; fi
+  printf '%s' "$parts"
+}
+
+# Every problem, then every warning, each with the one thing to do next, so the end of a long report says it all.
+list_problems() {
+  local want scope id state detail fix label
+  for want in fail warn; do
+    for scope in machine "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+      while IFS=$'\t' read -r scope id state detail fix; do
+        [ "$state" = "$want" ] || continue
+        label=$detail
+        if [ "$scope" != machine ]; then label="Instance $scope: $detail"; fi
+        if [ "$want" = fail ]; then ui_fail "$label" "$fix"; else ui_warn_again "$label" "$fix"; fi
+      done < <(visible_records "$scope")
+    done
+  done
+}
+
 # The closing block: how many problems and warnings there are, or that all is well.
 print_verdict() {
   local scope fails=0 warns=0 parts=""
@@ -1197,12 +1301,13 @@ print_verdict() {
   done
   if [ "$fails" -gt 0 ]; then parts="$(plural "$fails" problem)"; fi
   if [ "$warns" -gt 0 ]; then parts="${parts:+$parts, }$(plural "$warns" warning)"; fi
-  if [ "$fails" -gt 0 ]; then
-    ui_summary fail "$parts."
-    ui_line "Run the Next command for each, then run aman doctor again."
-  elif [ "$warns" -gt 0 ]; then
-    ui_summary warn "$parts."
-    ui_line "Run the Next command for each, then run aman doctor again."
+  if [ "$fails" -gt 0 ] || [ "$warns" -gt 0 ]; then
+    if [ "$fails" -gt 0 ]; then ui_summary fail "$parts"; else ui_summary warn "$parts"; fi
+    list_problems
+    # Listed just above with what to do, so the closing block does not repeat them.
+    UI_WARNS=
+    ui_gap
+    ui_line "Do the Next step of each, then run aman doctor again."
   else
     ui_summary ok "All checks passed."
   fi
@@ -1230,10 +1335,11 @@ print_text() {
     print_summary
     return
   fi
-  ui_phase "Checking this computer"
+  ui_title "Checks this computer and each instance." "AMAN DOCTOR"
+  ui_section "Checking this computer" "$(section_counts machine)"
   text_checks machine
   for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
-    ui_phase "Checking instance $name"
+    ui_section "Checking instance $name" "$(section_counts "$name")"
     text_checks "$name"
   done
   print_verdict
@@ -1367,6 +1473,13 @@ doctor_sandbox() {
       --yes) yes=1 ;;
       --verbose) UI_VERBOSE=1 ;;
       --no-hard-disk-limit) passthru+=(--no-hard-disk-limit) ;;
+      --add | --remove | --add-python | --remove-python)
+        # Each changes what is in the sandbox, so it rebuilds it the way --fix does.
+        [ $# -ge 2 ] || die_usage "$1 needs a comma-separated list."
+        passthru+=("$1" "$2")
+        fix=1
+        shift
+        ;;
       --disk-gb)
         [ $# -ge 2 ] || die_usage "--disk-gb needs a number."
         passthru+=(--disk-gb "$2")
@@ -1378,7 +1491,7 @@ doctor_sandbox() {
         shift
         ;;
       -h | --help)
-        usage
+        run_help doctor
         exit 0
         ;;
       *) die_usage "Unknown argument: $1" ;;
@@ -1530,7 +1643,7 @@ check_machine() {
 # aman doctor instance|network [--fix [--yes]] [--instance NAME]: show the check and, with --fix, let the installer
 # render the instance again from its record and restart it, then check again and say fixed only when no check fails.
 doctor_repair() { # kind
-  local kind=$1 fix=0 yes=0 name installer failed=0 question args=()
+  local kind=$1 fix=0 yes=0 name installer failed=0 question args=() not_fixed="" needs_update=0
   shift
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1543,7 +1656,7 @@ doctor_repair() { # kind
         shift
         ;;
       -h | --help)
-        usage
+        run_help doctor
         exit 0
         ;;
       *) die_usage "Unknown argument: $1" ;;
@@ -1594,13 +1707,29 @@ doctor_repair() { # kind
       question="Restart instance $name now?"
     fi
     if ui_confirm "$question" y; then
+      REPAIR_TRIED=1
       if bash "$installer" "${args[@]}" && doctor_recheck "$name"; then
         ui_ok "Instance $name is fixed"
       else
         failed=1
+        not_fixed="${not_fixed}|${name}"
+        if records_want_update machine "$name"; then needs_update=1; fi
       fi
     fi
   done
+  # The run always ends with its panel closed, so it never looks like it is still waiting for an answer.
+  if [ -n "$not_fixed" ]; then
+    ui_summary fail "Restarting did not fix instance $(join_words "$not_fixed"), so restarting again will not help."
+    # Only a missing file is fixed by a newer Aman; a full disk or a busy port has its own fix in the problem above.
+    if [ "$needs_update" = 1 ]; then
+      ui_line "$UPDATE_FIX"
+    else
+      ui_line "Fix the problem shown above, then run aman doctor."
+    fi
+    ui_summary_end
+  else
+    ui_panel_end
+  fi
   exit "$failed"
 }
 
@@ -1645,7 +1774,7 @@ doctor_machine_repair() { # kind
       --yes) yes=1 ;;
       --verbose) UI_VERBOSE=1 ;;
       -h | --help)
-        usage
+        run_help doctor
         exit 0
         ;;
       *) die_usage "Unknown argument: $1" ;;
@@ -1752,6 +1881,96 @@ run_import() {
     fi
   fi
   run_installer instance import "$instance" "$file" ${rest[@]+"${rest[@]}"}
+}
+
+# aman address list|add|remove [ADDRESS]: the addresses the one instance on this computer, or the one --instance names,
+# answers at besides the ones it finds by itself.
+run_address() {
+  local action="" value="" instance="" name count=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        instance=$2
+        shift
+        ;;
+      -*) die_usage "Unknown argument: $1" ;;
+      *)
+        if [ -z "$action" ]; then
+          action=$1
+        elif [ -z "$value" ]; then
+          value=$1
+        else
+          die_usage "Unexpected argument: $1"
+        fi
+        ;;
+    esac
+    shift
+  done
+  case "$action" in
+    list) [ -z "$value" ] || die_usage "aman address list takes no address." ;;
+    add | remove) [ -n "$value" ] || die_usage "aman address $action needs an address, for example: aman address $action https://aman.example.com" ;;
+    *) die_usage "Run aman address list, aman address add ADDRESS or aman address remove ADDRESS." ;;
+  esac
+  if [ -z "$instance" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      count=$((count + 1))
+      instance=$name
+    done < <(list_instances)
+    if [ "$count" = 0 ]; then
+      printf 'This computer has no Aman instance yet. Run install.sh first.\n' >&2
+      exit 1
+    fi
+    if [ "$count" -gt 1 ]; then
+      printf 'This computer has %s instances, so Aman cannot tell which one you mean. Add --instance NAME.\n' "$count" >&2
+      exit 2
+    fi
+  fi
+  if [ -n "$value" ]; then
+    run_installer instance address "$instance" "$action" "$value"
+  else
+    run_installer instance address "$instance" "$action"
+  fi
+}
+
+# aman local-model PORT: the installer's local model bridge for the one instance on this computer, or the one --instance
+# names.
+run_local_model() {
+  local port="" instance="" name count=0 rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        instance=$2
+        shift
+        ;;
+      --remove) rest+=("$1") ;;
+      -*) die_usage "Unknown argument: $1" ;;
+      *)
+        [ -z "$port" ] || die_usage "Unexpected argument: $1"
+        port=$1
+        ;;
+    esac
+    shift
+  done
+  [ -n "$port" ] || die_usage "aman local-model needs the port your model server listens on. Run aman local-model PORT."
+  if [ -z "$instance" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      count=$((count + 1))
+      instance=$name
+    done < <(list_instances)
+    if [ "$count" = 0 ]; then
+      printf 'This computer has no Aman instance yet. Run install.sh first.\n' >&2
+      exit 1
+    fi
+    if [ "$count" -gt 1 ]; then
+      printf 'This computer has %s instances, so Aman cannot tell which one should reach the model. Run aman local-model %s --instance NAME.\n' "$count" "$port" >&2
+      exit 2
+    fi
+  fi
+  run_installer instance local-model "$instance" "$port" ${rest[@]+"${rest[@]}"}
 }
 
 # Any aman command renews an https certificate that has 60 days or fewer left, quietly; the installer does it, so it needs
@@ -1871,28 +2090,74 @@ write_host_reports() {
   done
 }
 
+# One line on the error output when an instance listens on an address this computer no longer has: other devices cannot
+# reach it, and nothing else would say so. The network doctor says it in its own words.
+warn_if_address_gone() {
+  local name gone
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    gone=$(network_gone_addresses "$(registry_value "$name" listen_addresses)")
+    [ -n "$gone" ] || continue
+    printf "This computer's network address changed, so other devices can't reach Aman (instance %s). Run: aman doctor network --fix\n" "$name" >&2
+  done < <(list_instances)
+}
+
 # ---------------------------------------------------------------- main
 
+case "${1:-} ${2:-}" in
+  "doctor network" | *--json*) ;;
+  *) warn_if_address_gone ;;
+esac
+
+# `aman COMMAND --help` shows the command's page; doctor reads its own arguments, so it is left out here.
+case "${2:-}" in
+  -h | --help)
+    case "${1:-}" in
+      status | upgrade | backup | restore | password | import | migrate | local-model | address)
+        run_help "$1"
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+
 case "${1:-}" in
-  doctor | backup | upgrade | import | migrate) renew_tls_if_due ;;
+  doctor | backup | upgrade | import | migrate | local-model | address) renew_tls_if_due ;;
 esac
 
 case "${1:-}" in
   doctor) shift ;;
-  backup | restore | upgrade | migrate) run_installer "$@" ;;
+  backup | restore | upgrade | migrate | status) run_installer "$@" ;;
   import)
     shift
     run_import "$@"
+    ;;
+  local-model)
+    shift
+    run_local_model "$@"
+    ;;
+  address)
+    shift
+    run_address "$@"
     ;;
   password)
     shift
     run_installer instance password "$@"
     ;;
-  -h | --help)
-    usage
+  help)
+    shift
+    run_help "$@"
     exit 0
     ;;
-  *) die_usage "Unknown command: ${1:-(none)}" ;;
+  -h | --help)
+    run_help
+    exit 0
+    ;;
+  '')
+    run_help
+    exit 0
+    ;;
+  *) die_usage "Unknown command: $1" ;;
 esac
 
 case "${1:-}" in
@@ -1933,7 +2198,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h | --help)
-      usage
+      run_help doctor
       exit 0
       ;;
     *) die_usage "Unknown argument: $1" ;;

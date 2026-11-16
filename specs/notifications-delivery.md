@@ -2,7 +2,7 @@
 
 **Status:** approved
 
-**Scope note:** This spec covers the delivery feed, reminders moved onto it, the in-app bell, Web Push, Activity records and data import. Text messages and phone calls are later work and use the same feed. Quiet hours, the call rules and per-kind notice settings are covered by [Noticing](noticing.md).
+**Scope note:** This spec covers the delivery feed, reminders moved onto it, the in-app bell, Web Push, Activity records and data import. Phone calls use the same feed (see [Phone Calls](phone-calls.md)). Text messages are covered in [Text Messages](text-messages.md). Quiet hours, the call rules and per-kind notice settings are covered by [Noticing](noticing.md).
 
 ## Problem
 
@@ -16,7 +16,11 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Server owns seen state.** Seen on one device is seen on every device. Every read and write is scoped to the tenant and the person who owns the delivery.
 
-**Kinds and channels grow without migrations.** Kind, level and channel are plain text columns. The API validates kind with a discriminated union, so later parts add kinds and channels in code only.
+**A deleted chat takes its Open away, not the words.** When the feed is read, the chats a page of items links to are checked in one ownership lookup. An item whose chat no longer exists, or belongs to someone else, is served without the link; its text and reason stay in the feed, and there is no Open to fail. An item waiting on an approval in such a chat can never be answered, so it is resolved and leaves the feed. Opening an item looks its chat up first, and the panel stays open until the chat opens; when it cannot open, the panel says so in plain words instead of showing a raw error. Items already in the feed heal on their own, because the check happens when the feed is read, not when the item is written.
+
+**Kinds and channels grow without migrations.** Kind, level and channel are plain text columns. The API validates kind with a discriminated union, so later parts add kinds and channels in code only. A channel sender names its channel (`web_push`, `sms`), so a failure is recorded under the right one. A Try it test names its channel as `test`, so the service tries just that sender and tells it the delivery is a test.
+
+**A finished brief is a quiet note.** When a scheduled morning brief finishes with an answer, one `note` delivery at the `note` level goes to the bell. Its text is the brief's digest sentence, or "Your morning brief is ready." when the answer holds none, and it links to the brief's chat. The run id fixes the delivery id, so a run seen twice makes one item. A failed, stopped or empty run makes nothing. As a note it is never pushed or texted, and the daily nudge limit counts only nudges, so it never uses that up. No new kind is needed: the bell already shows a note in plain words.
 
 **Push carries no content.** The push payload is the delivery id and a short title such as "Reminder". It never holds the reminder text, the reason or the assistant's name. The page fetches details after the person opens it.
 
@@ -42,8 +46,10 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 - Routes under `/api/v1/user/deliveries`: list (newest first, paged), unread count, mark seen, get one
 - Reminders create a delivery, then write their line into the chat the reminder was set in, and the delivery links to that chat; a reply running in that chat holds the line, never the delivery; the old browser polling and per-browser storage are removed
 - A reminder set outside a chat, one saved before the origin chat was recorded, and one whose origin chat has been deleted create a delivery with no link and no chat line; no chat is made for them, and there is no shared Reminders chat anymore
-- A bell with the unread count in the main headers and a panel that lists deliveries; opening an item marks it seen
+- A bell with the unread count in the left panel and a panel that lists deliveries; opening an item marks it seen
+- A reminder becomes a delivery only when it goes off. One still to come today shows in the right rail's Due list on Home, never in the bell, and the Reminders page stays the full list for managing reminders
 - Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers, and for each kind of failure while turning notices on or off
+- A scheduled morning brief that finishes leaves one note in the bell, linked to its chat
 - Every delivery and every channel attempt is written to the Activity log in plain words
 - Deliveries are included in data export and import, with an upgrade step and an older-shape fixture; push subscriptions are not exported
 
@@ -53,7 +59,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 - Push payloads hold only an id and a generic title, so the push service never sees reminder text
 - The push service (Google, Apple or Mozilla, by browser) sees this computer's address and the project page as contact, and nothing about the person
 - Push subscriptions are not exported, since they are tied to one browser
-- Nothing in this spec texts or calls anyone
+- Nothing in this spec texts or calls anyone. Texts, if the person sets them up, are in [Text Messages](text-messages.md)
 
 ## Testing
 
@@ -78,6 +84,6 @@ All tests use synthetic data, never a person's real data.
 
 ## Out of Scope
 
-- Text messages and phone calls
+- Phone calls (see [Phone Calls](phone-calls.md))
 - Pruning old deliveries
 - Quiet hours and per-kind notice settings (see [Noticing](noticing.md))

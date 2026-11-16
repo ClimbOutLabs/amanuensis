@@ -53,7 +53,12 @@ test(
           const panel = page.locator('[data-aui-compact-layout]');
           await panel.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
           await page.screenshot({
-            path: await featureShotPath({ surface: 'screen:chat-layout', step: `side-panel-edge-${preset}-${mode}` }),
+            path: await featureShotPath({
+              surface: 'screen:chat-layout',
+              step: `side-panel-edge-${preset}-${mode}`,
+              did: `Opened the side panel beside a chat in the ${preset} look, ${mode} mode.`,
+              expect: 'The panel has an edge you can see against the chat next to it.',
+            }),
           });
 
           const edge = await panel.evaluate(element => {

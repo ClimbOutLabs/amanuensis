@@ -1,5 +1,5 @@
 import type { IScheduleStore, ScheduleRecord } from '../../../../src/db/scheduleStore';
-import { personTimezoneFor } from '../../../../src/runtime/noticing/personTimezone';
+import { knownPersonTimezoneFor } from '../../../../src/runtime/noticing/personTimezone';
 import { ScheduleManifestSchema } from '../../../../src/schemas/schedule';
 
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
@@ -25,8 +25,8 @@ function schedule(timezone: string): ScheduleRecord {
   };
 }
 
-describe('personTimezoneFor', () => {
-  it('uses the person’s schedules first, then their own calendar’s time zone, and UTC only when neither says', async () => {
+describe('knownPersonTimezoneFor', () => {
+  it('uses the person’s schedules first, then their own calendar’s time zone, and nothing when neither says', async () => {
     const listSchedules = jest.fn<
       ReturnType<IScheduleStore<unknown>['listSchedules']>,
       Parameters<IScheduleStore<unknown>['listSchedules']>
@@ -36,7 +36,7 @@ describe('personTimezoneFor', () => {
     const later = () => {
       at = new Date(at.getTime() + 7 * 3_600_000);
     };
-    const timezoneFor = personTimezoneFor({ scheduleStore: { listSchedules }, calendarTimezone, now: () => at });
+    const timezoneFor = knownPersonTimezoneFor({ scheduleStore: { listSchedules }, calendarTimezone, now: () => at });
 
     await expect(timezoneFor(OWNER)).resolves.toBe('Pacific/Auckland');
     expect(listSchedules.mock.calls[0]?.[0]).toMatchObject({
@@ -51,10 +51,10 @@ describe('personTimezoneFor', () => {
 
     later();
     calendarTimezone.mockResolvedValue(undefined);
-    await expect(timezoneFor(OWNER)).resolves.toBe('UTC');
+    await expect(timezoneFor(OWNER)).resolves.toBeUndefined();
     later();
     calendarTimezone.mockRejectedValue(new Error('Google is not reachable'));
-    await expect(timezoneFor(OWNER)).resolves.toBe('UTC');
+    await expect(timezoneFor(OWNER)).resolves.toBeUndefined();
   });
 
   it('asks the calendar again only after a few hours', async () => {
@@ -64,7 +64,7 @@ describe('personTimezoneFor', () => {
     >(() => Promise.resolve({ data: [], pagination: { limit: 1 } }));
     const calendarTimezone = jest.fn((): Promise<string | undefined> => Promise.resolve('Europe/Paris'));
     let at = new Date('2026-11-06T00:00:00.000Z');
-    const timezoneFor = personTimezoneFor({ scheduleStore: { listSchedules }, calendarTimezone, now: () => at });
+    const timezoneFor = knownPersonTimezoneFor({ scheduleStore: { listSchedules }, calendarTimezone, now: () => at });
 
     await expect(timezoneFor(OWNER)).resolves.toBe('Europe/Paris');
     calendarTimezone.mockResolvedValue('Asia/Tokyo');

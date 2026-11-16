@@ -73,7 +73,8 @@ function storedCursor(cursor: MailCursor): string {
  * passes keep failing and cleared by a pass that works. `stuck_*` name the one message a pass keeps failing on and how
  * many passes failed on it and since when, so a message that never reads can be passed over. `imap_cursor` is the last
  * message of an IMAP mailbox that was read or passed over, with the mailbox's UIDVALIDITY. `source` is where mail was
- * read from.
+ * read from, and `sender_confirmation` is whether that source reports sender confirmation, as 1 or 0. It is null on
+ * checkpoints written before the fact was recorded, which says nothing either way.
  */
 export interface NoticingCheckpointTable {
   tenant_id: string;
@@ -87,6 +88,7 @@ export interface NoticingCheckpointTable {
   stuck_since: string | Date | null;
   imap_cursor: string | null;
   source: string | null;
+  sender_confirmation: number | null;
 }
 
 /** Who is deciding how loudly to reach one person right now, and until when. */
@@ -157,6 +159,8 @@ export interface WatcherCheckpoint {
   /** Where IMAP mail was read to, so the next pass starts at the next message. */
   cursor?: MailCursor | undefined;
   source: MailSourceKind | undefined;
+  /** Whether the mail source of these passes reports sender confirmation, as it states about itself. */
+  sender_confirmation?: boolean | undefined;
 }
 
 export interface INoticingStore {
@@ -508,6 +512,7 @@ export class NoticingStore implements INoticingStore {
             },
       cursor: parseCursor(row.imap_cursor),
       source: source.success ? source.data : undefined,
+      sender_confirmation: row.sender_confirmation === null ? undefined : row.sender_confirmation === 1,
     };
   }
 
@@ -529,6 +534,7 @@ export class NoticingStore implements INoticingStore {
       stuck_since: input.stuck?.since.toISOString() ?? null,
       imap_cursor: input.cursor === undefined ? null : storedCursor(input.cursor),
       source: input.source ?? null,
+      sender_confirmation: input.sender_confirmation === undefined ? null : input.sender_confirmation ? 1 : 0,
     };
     await this.#db
       .insertInto('noticing_checkpoint')

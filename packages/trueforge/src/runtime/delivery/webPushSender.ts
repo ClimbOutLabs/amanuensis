@@ -78,7 +78,10 @@ function attempt({
   return { channel: 'web_push', outcome, detail, target, attempted_at: at.toISOString() };
 }
 
-/** Sends one push per device the person turned notices on for. A note stays in the app. */
+/**
+ * Sends one push per device the person turned notices on for, for a nudge. A note stays in the app, and a call is
+ * the phone channel's to place: a call that is not answered falls back to one push then.
+ */
 export function createWebPushSender({
   subscriptions,
   settings,
@@ -171,8 +174,9 @@ export function createWebPushSender({
   }
 
   return {
+    channel: 'web_push',
     async send({ delivery, tenant_id, created_by }) {
-      if (delivery.level === 'note') {
+      if (delivery.level !== 'nudge') {
         return [];
       }
       const owner = { tenant_id, created_by };

@@ -596,59 +596,33 @@ describe('T8 sharp sandbox tools', () => {
   });
 
   it.each([
-    ['cat source.txt > new.txt', 'write_file'],
-    ['cat <<EOF\nnew\nEOF', 'write_file'],
-    // The interpreter guard fires before the unstructured-edit screening and redirects to run_code.
-    ["python3 -c \"open('new.txt', 'w').write('new')\"", 'use the run_code tool instead'],
-  ])('names the blocking tool for an unstructured edit write: %s', async (command, expected) => {
+    ['inspect', 'cat source.txt > new.txt'],
+    ['inspect', 'cat <<EOF\nnew\nEOF'],
+    ['inspect', 'cat source.txt | tee new.txt'],
+    ['inspect', 'python3 -c "print(1)"'],
+    ['edit', "python3 -c \"open('new.txt', 'w').write('new')\""],
+    ['execute', 'cat source.txt > new.txt'],
+    ['execute', 'bash -c "ls"'],
+    [
+      'execute',
+      `for id in $(curl -s "https://hn.example/top.json" | jq -r '.[:10]'); do curl -s "https://hn.example/item/$id.json"; done`,
+    ],
+  ])('asks before a %s command whatever its shape, then runs exactly that text: %s', async (purpose, command) => {
     const exec = makeExec(() => readyExec());
     const sandbox = makeSandbox(makeProvider({ exec }));
     const call = {
       name: SANDBOX_EXEC_TOOL_NAME,
-      arguments: { intent: 'Write a new file', purpose: 'edit', cwd: '/repo', command },
+      arguments: { intent: 'Run a skill step', purpose, cwd: '/repo', command },
     };
 
-    await expect(sandbox.toolCallInfo(call)).resolves.toEqual(expect.objectContaining({ is_approval_required: false }));
-    expect(resultText(await sandbox.callTool(call))).toContain(expected);
-    expect(exec).not.toHaveBeenCalled();
-  });
+    const info = await sandbox.toolCallInfo(call);
+    expect(info.pre_dispatch_failure).toBeUndefined();
+    expect(info.is_approval_required).toBe(true);
+    expect(info.effect).not.toBe('inspect');
 
-  it.each([
-    ['cat source.txt > new.txt', 'write_file'],
-    ['cat <<EOF\nnew\nEOF', 'write_file'],
-    ['cat source.txt | tee new.txt', 'write_file'],
-    // The interpreter guard fires before the unstructured-operation screening and redirects to run_code.
-    ["python3 -c \"open('new.txt', 'w').write('new')\"", 'use the run_code tool instead'],
-    ['python3 -c "print(1)"', 'use the run_code tool instead'],
-  ])('rejects an unstructured inspect-purpose operation without dispatch: %s', async (command, expected) => {
-    const exec = makeExec(() => readyExec());
-    const sandbox = makeSandbox(makeProvider({ exec }));
-    const call = {
-      name: SANDBOX_EXEC_TOOL_NAME,
-      arguments: { intent: 'Inspect a generated file', purpose: 'inspect', cwd: '/repo', command },
-    };
-
-    await expect(sandbox.toolCallInfo(call)).resolves.toEqual(expect.objectContaining({ is_approval_required: false }));
-    expect(resultText(await sandbox.callTool(call))).toContain(expected);
-    expect(exec).not.toHaveBeenCalled();
-  });
-
-  it('does not allow execute purpose to bypass structured write admission', async () => {
-    const exec = makeExec(() => readyExec());
-    const sandbox = makeSandbox(makeProvider({ exec }));
-    const call = {
-      name: SANDBOX_EXEC_TOOL_NAME,
-      arguments: {
-        intent: 'Run a build command',
-        purpose: 'execute',
-        cwd: '/repo',
-        command: 'cat source.txt > new.txt',
-      },
-    };
-
-    await expect(sandbox.toolCallInfo(call)).resolves.toEqual(expect.objectContaining({ is_approval_required: false }));
-    expect(resultText(await sandbox.callTool(call))).toContain('write_file');
-    expect(exec).not.toHaveBeenCalled();
+    const response = await sandbox.callTool(call, { status: 'allow', scope: 'once' });
+    expect(isCallToolResponseResult(response) && response.result.isError).toBe(false);
+    expect(exec.mock.calls.some(callArgs => callArgs[0].command.includes(command))).toBe(true);
   });
 
   it('bounds exec output on the host while retaining complete raw output durably', async () => {

@@ -46,7 +46,7 @@ describe('SentinelSettings Always allow everywhere', () => {
         <SentinelSettings />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: Write files' });
     await waitFor(() => {
       expect(fileToggle).toBeEnabled();
     });
@@ -59,7 +59,7 @@ describe('SentinelSettings Always allow everywhere', () => {
     });
     // The saved settings come back through the provider, so the switch follows them.
     await waitFor(() => {
-      expect(screen.getByRole('switch', { name: 'Always allow everywhere: file_write' })).toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Always allow everywhere: Write files' })).toBeChecked();
     });
   });
 
@@ -79,7 +79,7 @@ describe('SentinelSettings Always allow everywhere', () => {
         <SentinelSettings />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: Write files' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });
@@ -105,7 +105,7 @@ describe('SentinelSettings Always allow everywhere', () => {
         <SentinelSettings />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: Write files' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });

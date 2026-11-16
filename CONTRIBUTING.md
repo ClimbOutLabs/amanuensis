@@ -166,6 +166,7 @@ Workspace tasks go through `package.json` scripts - if a repeatable workflow is 
 | `pnpm test` / `pnpm typecheck`                       | Workspace checks                                      |
 | `pnpm lint` / `pnpm format`                          | ESLint (with fixes) / Prettier                        |
 | `pnpm smoke` / `pnpm smoke:down`                     | Full Docker Compose stack + health check              |
+| `pnpm ui:sweep`                                      | Picture and measure every screen (see below)          |
 | `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`         |
 | `pnpm smoke:npx:amanuensis`                          | Pack `amanuensis` and start it with `npx`; CI runs it |
 | `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                               |
@@ -200,6 +201,18 @@ pnpm smoke:down
 ```
 
 Open [http://localhost:8791](http://localhost:8791). Credentials come from `packages/trueforge/.env`. The app is on host `:8791` (offset from local `pnpm dev` on `:8790`); Postgres and Redis stay on the compose network only.
+
+### Looking over every screen
+
+```bash
+pnpm ui:sweep                  # every screen
+pnpm ui:sweep reminders spaces # only these screens
+pnpm ui:sweep --out=/tmp/look  # save into this folder
+```
+
+This opens every screen of the app with made-up demo data, at a computer size, two phone sizes and in dark colours. It saves a picture of each one and a `report.md` that lists what it measured: sideways scrolling, parts that stick out of the window, cut-off words, controls with no name, small tap targets, page errors and failed requests. The folder it saved to is printed at the end. The report is a list of places to look, not a pass or fail. To cover a new screen, add it to `packages/frontend/scripts/uiSweep/surfaces.ts`.
+
+The **UI look-over** workflow runs this once a week on `main`. Its last four runs are on the same docs website page as the nightly pictures.
 
 ## Dependency licenses
 
@@ -242,6 +255,7 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 1. Fork (or branch) and create a topic branch: `git checkout -b my-fix`.
 2. Make your change, with tests where it makes sense. Do not commit generated OpenAPI/SDK output (forks: source only; `main` regenerates after merge).
 3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass. CI also runs the root script tests (`pnpm test:repo-policy`, `pnpm lint:theme` and the other root `test:*` scripts), the layout rules (`pnpm check:repo-rules`), a check that the PR adds no `as T` or non-null `!` assertions (`pnpm check:new-assertions`), and, when `installer/` changes, `pnpm lint:installer` and `pnpm test:installer`. If you added or changed a dependency, also run `pnpm licenses:check`.
+   CI also installs, typechecks and builds on arm64, runs each changed package's tests on both x64 and arm64, and builds the Docker images the installer builds natively for arm64 (the app image is also started and must become healthy). An arm64-only failure usually means a native dependency, Python wheel, downloaded binary or base image without an arm64 build.
 4. If the PR changes a screen people see, update the help topic that covers it under `packages/trueforge/guide/topics`. When no topic needs to change, add the label `help: no change needed` and say why in the PR. The **Help changed with screens** check enforces this.
 5. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
 6. Keep the description, commit messages and added lines free of AI-tool attribution: no generated-by footers, no AI `Co-Authored-By` or session trailers, and no links to private assistant workspaces. Leave out privacy or license checklists too; CI checks dependency licenses. The **PR hygiene** check fails on any of these and runs again when you edit the description.
@@ -252,6 +266,7 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 
 A pull request runs only the test suites its changed files select. The **Nightly** workflow ([`.github/workflows/nightly.yml`](.github/workflows/nightly.yml)) runs every suite on `main` each night, including all the browser tests, whatever changed that day. It reuses the CI workflow, so a suite added to CI is in the nightly run too.
 
+- The nightly run also upgrades the last release. It builds the newest `vX.Y.Z` tag, fills it with one of each thing a person keeps (a skill, an agent, a schedule, a persona, a space, a chat, a memory and settings), then starts the new code on the same data folder. Everything must still be there, and one more of each must save. Other suites start from empty tables, so this is the run that catches a database change that only works on an empty install. It also runs on a pull request that changes a database migration. To run it yourself: `pnpm nightly:upgrade-from-release`.
 - When a nightly run fails, it opens an issue titled **Nightly tests failed** that lists the failed jobs and links the run. Later failures are added to the same issue. The next run that passes closes it. A cancelled run changes nothing.
 - To start a run by hand, open the **Actions** tab, pick **Nightly**, and choose **Run workflow**. A run started on a branch other than `main` does not open or close the issue.
 - The run uses a scripted model and needs no keys or accounts.
@@ -268,7 +283,9 @@ When you add a feature, add its row and its test in the same PR. Add it to `not_
 
 ### Screenshots
 
-Browser tests save a picture at each named step with `featureShotPath({ surface, step })` from [`packages/frontend/tests/support/featureShots.ts`](packages/frontend/tests/support/featureShots.ts). The feature's id picks the folder, so pictures land in one folder per feature set. A failing test saves a picture of every open page with `FAILED` in its name.
+Browser tests save a picture at each named step with `featureShotPath({ surface, step, did, expect })` from [`packages/frontend/tests/support/featureShots.ts`](packages/frontend/tests/support/featureShots.ts). The feature's id picks the folder, so pictures land in one folder per feature set. A failing test saves a picture of every open page with `FAILED` in its name.
+
+Every picture needs two plain sentences: `did` says what the test did to reach the picture, and `expect` says what the picture should show. They are saved beside the picture with the test's name and whether the test passed, and the contact sheet shows all four under the picture. A picture with no context tells a reader nothing, so both are required.
 
 In CI the pictures go in a folder named for the run's date and time in UTC, such as `2026/11/10/0917/chat/`. The folder gets an `index.html` contact sheet and a `results.json`, and the run keeps it for 30 days as the **screenshots** download on the run's page. To see the same on your machine:
 
@@ -276,6 +293,8 @@ In CI the pictures go in a folder named for the run's date and time in UTC, such
 AMAN_SCREENSHOT_DIR=/tmp/aman-shots pnpm test:frontend
 pnpm nightly:gallery /tmp/aman-shots
 ```
+
+The pictures of the last 14 nightly runs are also on the docs website, newest first, at <https://climboutlabs.github.io/amanuensis/test-screenshots/>. The page is not in the docs menu or the help. It is rebuilt after each nightly run by the **Docs site** workflow, which fetches each run's **screenshots** download. The three pages share one look, kept in `scripts/screenshot-pages.mjs`.
 
 ### The signed-in journey
 

@@ -1,0 +1,196 @@
+// `pnpm eval:models:fresh`: starts a throwaway eval Aman from this checkout, signs in to it, runs the
+// model eval against it, then stops it and deletes its data. Token Factory models need NEBIUS_API_KEY,
+// and each provider in evals/eval-providers.json needs the key it names. Keys go only to the instance.
+import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { URLSearchParams } from 'node:url';
+import { DEFAULT_ROOT_DIR } from '../eval-tokens/cli.mjs';
+import { main as runModels } from './cli.mjs';
+import { addEvalProviders, loadEvalProviders, providerPrices } from './providers.mjs';
+
+const START_TIMEOUT_MS = 5 * 60 * 1000;
+const EVAL_EMAIL = 'eval@example.com';
+/** Settings the throwaway instance may take from the caller, besides the fixed ones below. */
+const PASSED_SETTINGS = [
+  'NEBIUS_API_KEY',
+  'TOKEN_FACTORY_BASE_URL',
+  'TOKEN_FACTORY_MODEL',
+  'TOKEN_FACTORY_PRICES',
+  'SANDBOX_BACKEND',
+  'SANDBOX_SLOTS_DIR',
+  'SANDBOX_SLOTS',
+  'PATH',
+  'HOME',
+];
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * The caller's environment without any model key: the Token Factory key and every key named in
+ * eval-providers.json. Only the instance, and the request that adds a provider to it, see a key.
+ * @param {{ env: Record<string, string | undefined>, providers: import('./providers.mjs').EvalProvider[] }} options
+ */
+export function withoutKeys({ env, providers }) {
+  const keys = new Set(['NEBIUS_API_KEY', ...providers.map(provider => provider.api_key_env)]);
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !keys.has(name)));
+}
+
+async function freePort() {
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  await new Promise(resolve => server.close(resolve));
+  if (address === null || typeof address === 'string') {
+    throw new Error('Could not find a free port for the eval instance. Close other servers and try again.');
+  }
+  return address.port;
+}
+
+function run(command, args, options) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: 'inherit', ...options });
+    child.once('error', reject);
+    child.once('exit', code =>
+      code === 0 ? resolve() : reject(new Error(`${command} ${args.join(' ')} stopped with code ${String(code)}.`)),
+    );
+  });
+}
+
+async function waitForHealth({ origin, child }) {
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error('The eval instance stopped while starting. Read its log above for the reason.');
+    }
+    try {
+      const response = await fetch(`${origin}/healthz`);
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // Not listening yet.
+    }
+    await sleep(1000);
+  }
+  throw new Error('The eval instance did not start within 5 minutes. Read its log above for the reason.');
+}
+
+/** Makes the instance's one sign-in the way a person does, at the terminal, with the answers piped in. */
+function createAccount({ cwd, env, password }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('pnpm', ['run', 'create-account'], { cwd, env, stdio: ['pipe', 'ignore', 'inherit'] });
+    child.once('error', reject);
+    child.once('exit', code =>
+      code === 0
+        ? resolve()
+        : reject(new Error('The eval instance has no sign-in. Start from a fresh instance and try again.')),
+    );
+    child.stdin.end(`${EVAL_EMAIL}\n${password}\n${password}\n`);
+  });
+}
+
+/** Signs in to the instance and returns its session token. The token is never printed. */
+export async function signIn({ origin, password, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${origin}/api/v1/auth/login`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', origin },
+    body: new URLSearchParams({ email: EVAL_EMAIL, password }).toString(),
+  });
+  const cookie = response.headers.getSetCookie().find(line => line.startsWith('id_token='));
+  const token = cookie?.slice('id_token='.length).split(';')[0];
+  if (token === undefined || token === '') {
+    throw new Error(
+      `The eval instance did not sign in (HTTP ${String(response.status)}). Start from a fresh instance and try again.`,
+    );
+  }
+  return token;
+}
+
+/**
+ * @param {{ argv: readonly string[], env?: Record<string, string | undefined>, stdout: (text: string) => void, stderr: (text: string) => void, rootDir?: string }} options
+ */
+export async function main({ argv, env = process.env, stdout, stderr, rootDir = DEFAULT_ROOT_DIR }) {
+  const args = argv[0] === '--' ? argv.slice(1) : [...argv];
+  if (args.includes('--instance')) {
+    stderr('eval:models:fresh starts its own instance. Leave out --instance, or use pnpm eval:models instead.\n');
+    return 2;
+  }
+  if (args.includes('--help') || args.includes('-h')) {
+    return runModels({ argv: ['--help'], env, stdout, stderr, rootDir });
+  }
+  const skills = args.includes('--skills');
+  if (skills && (env.SANDBOX_BACKEND !== 'slots' || (env.SANDBOX_SLOTS_DIR ?? '').trim() === '')) {
+    stderr(
+      '--skills needs a sandbox. Start one with pnpm sandbox:slots, then set SANDBOX_BACKEND=slots and SANDBOX_SLOTS_DIR to the folder that holds its sockets.\n',
+    );
+    return 2;
+  }
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'aman-eval-'));
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${String(port)}`;
+  const serverEnv = Object.fromEntries(
+    PASSED_SETTINGS.filter(key => env[key] !== undefined).map(key => [key, env[key]]),
+  );
+  Object.assign(serverEnv, {
+    AMAN_EVAL_MODE: 'true',
+    TRUEFORGE_AUTH_MODE: 'local',
+    APP_DATA_DIR: dataDir,
+    // The runner talks to 127.0.0.1. Left at localhost, the server may listen only on the IPv6 address.
+    HOST: '127.0.0.1',
+    // Named outright, so the sign-in command and the server open the same database whatever a local .env says.
+    SQLITE_PATH: path.join(dataDir, 'db', 'db.sqlite'),
+    PORT: String(port),
+    // Lets the eval approve adding, running and removing a skill, which only the skill cases ask for.
+    ...(skills ? { AMAN_EVAL_SKILLS: 'true' } : {}),
+  });
+  const password = randomBytes(24).toString('hex');
+  const trueforge = path.join(rootDir, 'packages', 'trueforge');
+  let child;
+  try {
+    const providers = await loadEvalProviders(path.join(trueforge, 'evals', 'eval-providers.json'));
+    const keyFree = withoutKeys({ env, providers });
+    stderr('Preparing the eval instance...\n');
+    await run('pnpm', ['run', 'build:gen'], {
+      cwd: trueforge,
+      env: keyFree,
+      stdio: ['ignore', 'ignore', 'inherit'],
+    });
+    await createAccount({ cwd: trueforge, env: serverEnv, password });
+    child = spawn('pnpm', ['run', 'serve:eval'], {
+      cwd: trueforge,
+      env: serverEnv,
+      detached: true,
+      stdio: ['ignore', 'ignore', 'inherit'],
+    });
+    await waitForHealth({ origin, child });
+    const token = await signIn({ origin, password });
+    const added = await addEvalProviders({ providers, env, origin, token });
+    stderr(
+      `Eval instance ready at ${origin}${added.length > 0 ? `, with ${added.map(provider => provider.name).join(', ')}` : ''}.\n`,
+    );
+    return await runModels({
+      argv: ['--instance', origin, ...args],
+      env: { ...keyFree, TRUEFORGE_TOKEN: token },
+      stdout,
+      stderr,
+      rootDir,
+      extraPrices: providerPrices(added),
+    });
+  } catch (error) {
+    stderr(`${error instanceof Error ? error.message : 'The eval stopped for an unknown reason.'}\n`);
+    return 1;
+  } finally {
+    if (child?.pid !== undefined && child.exitCode === null) {
+      process.kill(-child.pid, 'SIGTERM');
+      await sleep(2000);
+    }
+    await rm(dataDir, { recursive: true, force: true });
+  }
+}

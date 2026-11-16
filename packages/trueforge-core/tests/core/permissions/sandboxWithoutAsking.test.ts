@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'n
 import os, { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recordClassificationAudit, type AuditRecordInput } from '../../../src/core/permissions/audit';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import {
   defaultSentinelServices,
   forUnattendedRun,
@@ -10,6 +10,7 @@ import {
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import type { TrackedExecutableScope } from '../../../src/core/permissions/trackedExecutables';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
@@ -787,6 +788,7 @@ describe('a write through a symlink is checked where it lands', () => {
             tool_type: 'truefoundry-system',
             canonical_params: params,
             tier: 1,
+            sandbox_file_write: true,
             approval_token_id: null,
             approval_binding: null,
             shell_binding: null,

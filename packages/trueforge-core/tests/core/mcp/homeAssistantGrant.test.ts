@@ -7,6 +7,7 @@ function haChangeDecision(grant_tool_name: string | null): TierDecision {
   return tier3Decision({
     card: {
       plain_what: 'Turn off Living room lamp',
+      copy: null,
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,
@@ -22,7 +23,7 @@ function haChangeDecision(grant_tool_name: string | null): TierDecision {
     reason_detail: 'A change to your home asks first.',
     sensitive_read: false,
     approval_token_id: 'token-1',
-    grant_host: 'homeassistant.local:8123',
+    grant_binding: 'binding-home-assistant',
     grant_tool_name,
   });
 }

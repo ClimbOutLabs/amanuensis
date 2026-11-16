@@ -180,7 +180,7 @@ describe('aman import-data', () => {
   it('says whether the search model is on disk with --check-ready, without opening the instance', async () => {
     for (const [modelReady, word] of [
       [true, 'ready'],
-      [false, 'downloading'],
+      [false, 'missing'],
     ] as const) {
       const { deps, calls } = fakeDeps({ modelReady });
       const io = fakeIo();

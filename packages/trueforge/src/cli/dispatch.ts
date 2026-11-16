@@ -1,22 +1,26 @@
 import { backup } from './backup';
 import { backupCheck } from './backupCheck';
 import type { Command } from './command';
+import { createAccount } from './createAccount';
 import { demoSeed } from './demoSeed';
 import { doctor } from './doctor';
 import { exportData } from './exportData';
 import { hashPassword } from './hashPassword';
 import { importData } from './importData';
 import { UsageError, type CliIo } from './io';
+import { memoryExample } from './memoryExample';
 import { resetPassword } from './resetPassword';
 
 const COMMANDS: Readonly<Record<string, Command>> = {
   'hash-password': hashPassword,
   backup,
   'backup-check': backupCheck,
+  'create-account': createAccount,
   doctor,
   'export-data': exportData,
   'demo-seed': demoSeed,
   'import-data': importData,
+  'memory-example': memoryExample,
   'reset-password': resetPassword,
 };
 
@@ -26,10 +30,12 @@ Commands:
   hash-password   Read a password on stdin, print {"hash": "<bcrypt>"}
   backup          Copy the database, memory and persona knowledge to --target
   backup-check    Tell whether this version can open a backed-up database (--sqlite <file>)
+  create-account  Create the one local sign-in on this computer (--if-missing skips an existing one)
   doctor          Check this instance and print the results
   export-data     Export one user's data to a zip (--list-users shows the user ids)
   demo-seed       Seed one synthetic demo world (needs DEMO_MODE=true); --reset removes it
   import-data     Restore a data export (--in <file.zip>) into this fresh instance
+  memory-example  Replace this instance's memory with two years of made-up notes (--replace), keeping the old
   reset-password  Set a new password for the local sign-in (Aman must be stopped)
 
 JSON goes to stdout, messages to stderr. Exit codes: 0 ok, 1 failure, 2 usage.

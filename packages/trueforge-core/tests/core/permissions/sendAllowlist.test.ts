@@ -1,12 +1,13 @@
 import type { ReviewableDraft } from '../../../src/core/email/gmail/draftReview';
 import { SEND_DRAFT_TOOL_NAME } from '../../../src/core/email/gmail/toolContract';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import {
   DEMO_CONNECTOR_REFUSAL,
   DEMO_SEND_REFUSAL,
   recipientsAllowed,
 } from '../../../src/core/permissions/sendAllowlist';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function ctx(demoSendAllowlist: readonly string[] | null): ClassifyContext {
@@ -60,6 +61,7 @@ const DRAFT: ReviewableDraft = {
   inReplyTo: '',
   references: '',
   fromName: '',
+  fromAddress: 'ada@demo.example',
   nameLeftOff: false,
   replyTo: null,
 };
@@ -193,8 +195,8 @@ describe("demo instance and the host Email connector's drafts", () => {
       hostMailCall('save_draft', { recipients: [LISTED], subject: 'Lease', body: 'Hi' }),
       demoCtx(),
     );
-    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
-    expect(decision.card?.plain_what).toContain('Save a message draft');
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_draft' });
+    expect(decision.card?.plain_what).toBe('Save this draft?');
   });
 
   it('raises the new-recipient card for a draft to a new address instead of the demo refusal', async () => {
@@ -250,6 +252,6 @@ describe("demo instance and the host Email connector's drafts", () => {
       hostMailCall('save_draft', { recipients: [LISTED], subject: 'Lease', body: 'Hi' }),
       outsideDemo,
     );
-    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_draft' });
   });
 });

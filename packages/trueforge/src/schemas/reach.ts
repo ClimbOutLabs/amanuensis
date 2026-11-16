@@ -140,6 +140,10 @@ export const ReachChannelAvailabilitySchema = z
   .object({
     available: z.boolean().describe('Whether this channel can be used on this server now.'),
     note: z.string().describe('A plain-words line about the channel, shown beside its switch.'),
+    problem: z
+      .string()
+      .nullable()
+      .describe('Set when the channel works but has a problem to fix, in plain words with what to do. Null otherwise.'),
   })
   .openapi('ReachChannelAvailability');
 
@@ -203,6 +207,12 @@ export const ReachViewSchema = z
     mail_source: MailSourceKindSchema.nullable().describe(
       'Where mail is read from. Null until mail has been checked once.',
     ),
+    mail_sender_confirmation: z
+      .boolean()
+      .nullable()
+      .describe(
+        'Whether the mail source read from reports sender confirmation, as the source states about itself. Null until mail has been checked once, or when the last checks predate the fact being recorded.',
+      ),
   })
   .openapi('ReachView');
 

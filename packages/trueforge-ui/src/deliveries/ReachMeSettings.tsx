@@ -84,7 +84,7 @@ export function ReachMeSettings() {
       <div>
         <h2 className="text-text-primary text-lg font-semibold">Reach me</h2>
         <p className="text-text-secondary mt-1 text-sm">
-          Choose how {assistant} reaches you. Everything it sends also waits under the bell in the top bar, with the
+          Choose how {assistant} reaches you. Everything it sends also waits under the bell in the left panel, with the
           reason you got it. Texts and phone calls stay off until they are set up.
         </p>
       </div>

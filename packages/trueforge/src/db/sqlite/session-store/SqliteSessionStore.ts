@@ -42,6 +42,7 @@ import type {
   ListSessionsInput,
   ListTurnEventsInput,
   ListTurnsInput,
+  MergeSessionMetadataInput,
   OverwriteThreadContextInput,
   PatchMCPServersInput,
   PatchSandboxInfoInput,
@@ -120,6 +121,7 @@ import {
   getSession as getSessionQuery,
   listExpiredPrivateSessions as listExpiredPrivateSessionsQuery,
   listSessions as listSessionsQuery,
+  mergeSessionMetadata as mergeSessionMetadataQuery,
   replaceSessionTitleIfCurrent as replaceSessionTitleIfCurrentQuery,
   setPrivateExpiry as setPrivateExpiryQuery,
   stampImportedSession as stampImportedSessionQuery,
@@ -238,6 +240,10 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
 
   updateSession(input: UpdateSessionInput<SessionCustom>): Promise<void> {
     return updateSessionQuery(this.db, input);
+  }
+
+  mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void> {
+    return mergeSessionMetadataQuery(this.db, input);
   }
 
   replaceSessionTitleIfCurrent(input: ReplaceSessionTitleIfCurrentInput): Promise<boolean> {

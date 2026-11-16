@@ -56,8 +56,10 @@ export async function exportInstanceArchive<TTransaction>({
     auditStore: stores.auditStore,
     deliveryStore: stores.deliveryStore,
     reachSettingsStore: stores.reachSettingsStore,
+    textContactStore: stores.textContactStore,
     turnArtifactStore: stores.turnArtifactStore,
     mcpServerStore: stores.mcpServerStore,
+    modelProviderStore: stores.modelProviderStore,
     listAgents: async () =>
       (
         await stores.agentStore.listAgents({
@@ -68,7 +70,7 @@ export async function exportInstanceArchive<TTransaction>({
           page_token: undefined,
         })
       ).data.filter(agent => agent.created_by_subject.subject_id === subjectId),
-    memorySource: { kind: 'markdown', markdownDir: instance.memoryDir },
+    memoryMarkdownDir: instance.memoryDir,
     personaKnowledgeDir: instance.knowledgeDir,
   };
   const sink = new CollectingWritable();

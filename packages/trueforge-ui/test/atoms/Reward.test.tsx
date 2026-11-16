@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { act, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AllClear, GoldTick, HandNote, Highlight, STUB_TEAR_MS, StubTear } from '@/atoms/Reward.js';
+import { AllClear, GoldTick, HandNote, Highlight } from '@/atoms/Reward.js';
 
 describe('reward pieces', () => {
   beforeEach(() => {
@@ -26,53 +26,6 @@ describe('reward pieces', () => {
     render(<Highlight>Watch out: the car inspection</Highlight>);
     const span = screen.getByText('Watch out: the car inspection');
     expect(span.getAttribute('data-play')).toBe('false');
-  });
-
-  it('StubTear renders nothing until it plays, then calls onDone once the tear finishes', () => {
-    const onDone = vi.fn();
-    const { container, rerender } = render(
-      <StubTear play={false} onDone={onDone}>
-        <span>Tuesday</span>
-      </StubTear>,
-    );
-    expect(container.querySelector('.aui-reward-tear')).toBeNull();
-
-    rerender(
-      <StubTear play onDone={onDone}>
-        <span>Tuesday</span>
-      </StubTear>,
-    );
-    const layer = container.querySelector('.aui-reward-tear');
-    expect(layer?.getAttribute('aria-hidden')).toBe('true');
-    expect(onDone).not.toHaveBeenCalled();
-
-    act(() => {
-      vi.advanceTimersByTime(STUB_TEAR_MS);
-    });
-    expect(onDone).toHaveBeenCalledTimes(1);
-  });
-
-  it('StubTear does not restart its timer when the callback identity changes', () => {
-    const first = vi.fn();
-    const second = vi.fn();
-    const { rerender } = render(
-      <StubTear play onDone={first}>
-        <span>Tuesday</span>
-      </StubTear>,
-    );
-    act(() => {
-      vi.advanceTimersByTime(STUB_TEAR_MS / 2);
-    });
-    rerender(
-      <StubTear play onDone={second}>
-        <span>Tuesday</span>
-      </StubTear>,
-    );
-    act(() => {
-      vi.advanceTimersByTime(STUB_TEAR_MS / 2);
-    });
-    expect(first).not.toHaveBeenCalled();
-    expect(second).toHaveBeenCalledTimes(1);
   });
 
   it('AllClear always shows the warm line and adds the sweep and flecks only when playing', () => {

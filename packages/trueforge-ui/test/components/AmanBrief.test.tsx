@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 
 import { AmanBrief } from '@/components/AmanBrief.js';
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
-import type { SentinelApi } from '@/sentinel/types.js';
+import type { SentinelApi, SentinelAuditEntry } from '@/sentinel/types.js';
 
 const { composer } = vi.hoisted(() => ({ composer: { setText: vi.fn(), send: vi.fn() } }));
 
@@ -64,14 +64,28 @@ const UNUSED = async (): Promise<never> => {
   throw new Error('not used by the brief');
 };
 
+function readEntries(count: number): SentinelAuditEntry[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `entry-${String(index)}`,
+    session_id: 'chat-1',
+    created_at: '2026-01-05T08:00:00.000Z',
+    tier: 1,
+    action_type: 'mail.read',
+    description: 'Read the inbox',
+    outcome: 'logged',
+  }));
+}
+
 /** A Sentinel API whose brief methods are spies; the rest of the surface is never called here. */
 function fakeApi(
-  brief: Partial<Pick<SentinelApi, 'listBriefItemCompletions' | 'markBriefItemDone' | 'unmarkBriefItemDone'>> = {},
+  brief: Partial<
+    Pick<SentinelApi, 'listAuditEntries' | 'listBriefItemCompletions' | 'markBriefItemDone' | 'unmarkBriefItemDone'>
+  > = {},
 ): SentinelApi & { markBriefItemDone: Mock; unmarkBriefItemDone: Mock } {
   const markBriefItemDone = vi.fn(brief.markBriefItemDone ?? (async () => undefined));
   const unmarkBriefItemDone = vi.fn(brief.unmarkBriefItemDone ?? (async () => undefined));
   return {
-    listAuditEntries: async () => [],
+    listAuditEntries: brief.listAuditEntries ?? (async () => []),
     listUserAuditEntries: async () => ({ entries: [] }),
     getUserSettings: UNUSED,
     updateUserSettings: UNUSED,
@@ -82,10 +96,10 @@ function fakeApi(
   };
 }
 
-function renderBrief(brief: MorningBrief, api: SentinelApi = fakeApi()) {
+function renderBrief(brief: MorningBrief, api: SentinelApi = fakeApi(), omittedCount = 0) {
   return render(
     <SentinelApiProvider api={api}>
-      <AmanBrief brief={brief} briefId="brief-1" sessionId="chat-1" />
+      <AmanBrief brief={brief} omittedCount={omittedCount} briefId="brief-1" sessionId="chat-1" />
     </SentinelApiProvider>,
   );
 }
@@ -117,6 +131,23 @@ describe('AmanBrief', () => {
     expect(screen.getByRole('heading', { name: 'Check first' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Needs a decision · 2' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Coming up' })).toBeInTheDocument();
+  });
+
+  it('says in plain words how many items were left out, and draws the rest', () => {
+    renderBrief(BRIEF, fakeApi(), 1);
+    expect(screen.getByTestId('brief-omitted')).toHaveTextContent('1 item could not be shown.');
+    expect(screen.getAllByTestId('brief-row')).toHaveLength(4);
+  });
+
+  it('says nothing about left out items when none were', () => {
+    renderBrief(BRIEF);
+    expect(screen.queryByTestId('brief-omitted')).not.toBeInTheDocument();
+  });
+
+  it('does not claim nothing needs you when every item was left out', () => {
+    renderBrief({ digest: 'Two items.', items: [] }, fakeApi(), 2);
+    expect(screen.getByTestId('brief-omitted')).toHaveTextContent('2 items could not be shown.');
+    expect(screen.queryByText('Nothing needs you this morning.')).not.toBeInTheDocument();
   });
 
   it('gives the Check first label the accent and the dot the bright gold', () => {
@@ -155,9 +186,9 @@ describe('AmanBrief', () => {
         },
       ],
     };
-    const brief = parseMorningBrief(`\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
-    if (brief === null) throw new Error('Expected the brief to parse');
-    renderBrief(brief);
+    const read = parseMorningBrief(`\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
+    if (read === null) throw new Error('Expected the brief to parse');
+    renderBrief(read.brief);
     expect(screen.queryByRole('link')).toBeNull();
     expect(screen.queryByText('Pay invoice')).toBeNull();
     expect(screen.getByTestId('brief-link-site')).toHaveTextContent('pay-invoices.example.net');
@@ -197,9 +228,9 @@ describe('AmanBrief', () => {
         },
       ],
     };
-    const brief = parseMorningBrief(`Here it is.\n\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
-    if (brief === null) throw new Error('Expected the brief to parse');
-    renderBrief(brief);
+    const read = parseMorningBrief(`Here it is.\n\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
+    if (read === null) throw new Error('Expected the brief to parse');
+    renderBrief(read.brief);
     const card = screen.getByTestId('aman-brief');
     expect(card.textContent).not.toMatch(/[*_`#[\]]/);
     expect(screen.getByText('Fri 10/23, 10:00 AM Dentist')).toBeInTheDocument();
@@ -275,5 +306,20 @@ describe('AmanBrief', () => {
     renderBrief(BRIEF, api);
     await waitFor(() => expect(screen.getAllByTestId('brief-row')).toHaveLength(3));
     expect(screen.queryByRole('listitem', { name: 'Reply to Ines' })).toBeNull();
+  });
+
+  it('asks for no more audit entries than one read gives, and shows the counts under the brief', async () => {
+    const listAuditEntries = vi.fn(async () => readEntries(3));
+    renderBrief(BRIEF, fakeApi({ listAuditEntries }));
+    expect(await screen.findByText('3 things read, allowed by your settings. Nothing was sent.')).toBeInTheDocument();
+    expect(listAuditEntries).toHaveBeenCalledWith({ sessionId: 'chat-1', limit: 100 });
+  });
+
+  it('shows no counts when the read came back full, since more entries may exist', async () => {
+    const listAuditEntries = vi.fn(async () => readEntries(100));
+    renderBrief(BRIEF, fakeApi({ listAuditEntries }));
+    await waitFor(() => expect(listAuditEntries).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByText(/Nothing was sent/)).toBeNull();
   });
 });

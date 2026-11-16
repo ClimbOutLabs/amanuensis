@@ -13,6 +13,7 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { FIND_PLACES_QUERY, GARDEN_URL, HARBOUR_ADDRESS, HARBOUR_URL, scriptedPlaces } from './groundedFinderFixtures';
+import { INERT_MAILBOX, INERT_MAILBOX_TOOLS } from './inertMcpServer';
 
 export const RUN_DIRECTIVE_PREFIX = 'run:';
 export const SERVER_DIRECTIVE_PREFIX = 'server:';
@@ -40,6 +41,8 @@ export const SCRIPTED_SCHEDULE = {
   days: ['friday'],
   time: '16:00',
   time_zone: 'Europe/London',
+  connectors: [],
+  skills: [],
 };
 /** What `run:draft_email` asks to save, so a test can check the card and the saved draft against it. */
 export const SCRIPTED_DRAFT = {
@@ -110,17 +113,22 @@ export interface ScriptedModelServer {
    * Each is used once.
    */
   next: (step: { reply?: string; toolArguments?: unknown }) => void;
+  /**
+   * Sets how the model answers the host's own requests, the ones that offer no tools, such as sorting a note
+   * onto a memory page. The answer is used every time until it is cleared with `undefined`.
+   */
+  answerHostRequests: (answer: ((messages: readonly ChatMessage[]) => string | undefined) | undefined) => void;
   /** Thinking streams still open: a cancelled turn must hang up every one of them. */
   openThinkingStreams: () => number;
   close: () => Promise<void>;
 }
 
-interface ChatMessage {
+export interface ChatMessage {
   role: string;
   content?: unknown;
 }
 
-interface AdvertisedTool {
+export interface AdvertisedTool {
   function?: { name?: unknown };
 }
 
@@ -138,7 +146,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function toChatMessages(value: unknown): ChatMessage[] {
+export function toChatMessages(value: unknown): ChatMessage[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -151,7 +159,7 @@ function toChatMessages(value: unknown): ChatMessage[] {
   return messages;
 }
 
-function toAdvertisedTools(value: unknown): AdvertisedTool[] {
+export function toAdvertisedTools(value: unknown): AdvertisedTool[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -188,7 +196,7 @@ const HOST_BLOCK = /^\s*<([a-z][a-z-]*)>[\s\S]*<\/\1>\s*$/;
  * recalled memory) into the same message as labelled blocks; like a real model, the script
  * reads directives only from the person's own words, never from recalled chat titles.
  */
-function personText(content: unknown): string {
+export function personText(content: unknown): string {
   const parts = typeof content === 'string' ? [content] : Array.isArray(content) ? content : [];
   const own: string[] = [];
   for (const part of parts) {
@@ -261,7 +269,7 @@ function pendingDirective(messages: ChatMessage[]): string | undefined {
   return directive;
 }
 
-function readRequestBody(req: IncomingMessage): Promise<unknown> {
+export function readRequestBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -329,7 +337,12 @@ function argumentsJsonForTool({
   if (name.endsWith('create_event')) {
     return JSON.stringify(SCRIPTED_EVENT);
   }
-  return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
+  if (name.includes('ask_memory')) {
+    return '{"question":"inert"}';
+  }
+  return INERT_MAILBOX_TOOLS.some(tool => name.endsWith(tool))
+    ? JSON.stringify({ text, mailbox: INERT_MAILBOX })
+    : JSON.stringify({ text });
 }
 
 /** The `text:<value>` of the latest user message that names one, else the default. */
@@ -419,13 +432,13 @@ function chunkEnvelope(choice: Record<string, unknown>, usage?: typeof USAGE): R
   };
 }
 
-interface ScriptedToolCall {
+export interface ScriptedToolCall {
   name: string;
   callId: string;
   argumentsJson: string;
 }
 
-function toolCallChunks(toolCalls: ScriptedToolCall[]): Record<string, unknown>[] {
+export function toolCallChunks(toolCalls: ScriptedToolCall[]): Record<string, unknown>[] {
   return [
     chunkEnvelope({ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }),
     chunkEnvelope({
@@ -444,14 +457,14 @@ function toolCallChunks(toolCalls: ScriptedToolCall[]): Record<string, unknown>[
   ];
 }
 
-function textChunks(text: string): Record<string, unknown>[] {
+export function textChunks(text: string): Record<string, unknown>[] {
   return [
     chunkEnvelope({ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }),
     chunkEnvelope({ index: 0, delta: {}, finish_reason: 'stop' }, USAGE),
   ];
 }
 
-function completionBody({ text, toolCalls }: { text: string | null; toolCalls: ScriptedToolCall[] }) {
+export function completionBody({ text, toolCalls }: { text: string | null; toolCalls: ScriptedToolCall[] }) {
   return {
     id: 'scripted-completion',
     object: 'chat.completion',
@@ -517,6 +530,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const thinking = new Set<ServerResponse>();
   let callCounter = 0;
   let nextReply: string | undefined;
+  let hostAnswer: ((messages: readonly ChatMessage[]) => string | undefined) | undefined;
   let nextToolArgumentsJson: string | undefined;
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -567,7 +581,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     } else if (progress.directive === WRITE_THEN_SEARCH_DIRECTIVE && progress.toolResults < 2) {
       requestedTool =
         progress.toolResults === 0
-          ? { match: 'inert_write', argumentsJson: '{"text":"inert"}' }
+          ? { match: 'inert_write', argumentsJson: JSON.stringify({ text: 'inert', mailbox: INERT_MAILBOX }) }
           : { match: 'web_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
     } else if (progress.directive === FIND_PLACES_DIRECTIVE && progress.toolResults < 3) {
       const steps = [
@@ -582,7 +596,10 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
     ) {
       requestedTool = { match: 'tavily_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
     } else if (progress.directive === THINK_AFTER_WRITE_DIRECTIVE && progress.toolResults === 0) {
-      requestedTool = { match: 'inert_write', argumentsJson: '{"text":"inert"}' };
+      requestedTool = {
+        match: 'inert_write',
+        argumentsJson: JSON.stringify({ text: 'inert', mailbox: INERT_MAILBOX }),
+      };
     } else if (progress.directive === BRIEF_DIRECTIVE) {
       requestedTool = briefSteps(parsed.messages)[progress.toolResults];
     } else if (pending !== undefined) {
@@ -603,7 +620,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         toolCalls.push({
           name: threeAtOnceName,
           callId: `call_${String(callCounter)}`,
-          argumentsJson: JSON.stringify({ text }),
+          argumentsJson: JSON.stringify({ text, mailbox: INERT_MAILBOX }),
         });
       }
     } else if (toolName !== undefined) {
@@ -635,6 +652,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       ? '{"helpful":[]}'
       : ((quoteToolResult ? lastToolResultText(parsed.messages) : undefined) ??
         (isChatAnswer ? nextReply : undefined) ??
+        (parsed.tools.length === 0 ? hostAnswer?.(parsed.messages) : undefined) ??
         FINAL_TEXT);
     if (isChatAnswer) {
       nextReply = undefined;
@@ -716,6 +734,9 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   return {
     baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
     requests: () => requests,
+    answerHostRequests: answer => {
+      hostAnswer = answer;
+    },
     next: step => {
       nextReply = step.reply ?? nextReply;
       nextToolArgumentsJson =

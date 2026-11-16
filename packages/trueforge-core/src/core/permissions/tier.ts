@@ -7,7 +7,6 @@ import { z } from '@hono/zod-openapi';
 
 import { APPROVAL_EXPIRED_REASON_CODE } from './approvalExpiry';
 import type { ShellApprovalBinding } from './approvalTokens.js';
-import { MAPS_HOLD_REASON } from './mapsToolNames';
 import { Tier3MailboxSchema } from './tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
@@ -38,74 +37,6 @@ export const CONTENT_STEERED_REASON = 'content_steered';
  */
 export const CONNECTOR_READ_GUARD_REASON = 'connector_read_guard';
 
-/**
- * Tier 3 reason codes for calls the classifier ranks as a send, a mail draft, destructive, install or
- * hint-escalated action. A standing approval is argument-blind, so these never get "Always allow" across chats,
- * whatever the hosting server declares about the tool. Only the chat grant below may cover some of them, inside
- * one chat.
- */
-export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
-  'external_service',
-  'gmail_send',
-  'gmail_draft',
-  'mail_new_recipient',
-  'mail_send',
-  'destructive_action',
-  'install_action',
-  'mcp_destructive_hint',
-  'mcp_open_world_hint',
-  'connector_send',
-  'calendar_write_guests',
-  'caldav_calendar_guests',
-  'caldav_invitation_reply',
-  'connector_calendar_write',
-  'schedule_write',
-  'persona_write',
-  'skill_install',
-  REMINDER_CANCEL_REASON,
-  SCHEDULE_STATUS_REASON,
-  CONTENT_STEERED_REASON,
-  CONNECTOR_READ_GUARD_REASON,
-  MAPS_HOLD_REASON,
-]);
-
-/**
- * Consequential actions a person may answer once for the whole chat with "Always allow in this chat". The chat grant
- * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
- * names one. A send, a mail draft, a guest change, a steered call, creating a schedule or a persona, and adding a skill are never
- * among them: each of those asks every time.
- */
-export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
-  'connector_outbound',
-  'destructive_action',
-  'mcp_destructive_hint',
-  'mcp_open_world_hint',
-]);
-
-/**
- * Browser open reasons whose chat grant covers the whole site, not the one address. Only the unvouched open
- * qualifies: it asks because the person never gave the address once the chat had read other people's content,
- * so the person is the one vouching, the card names the site, and a later open on that site still has to pass
- * the outbound guard, the private-detail check and the steering check on its own, each under a reason no
- * grant covers. Every other open reason stays out: a steered open always asks, an address carrying a private
- * detail asks for what is inside that one address, and an open the guard or the person's search setting held
- * is never covered by a grant.
- */
-export const BROWSER_OPEN_SITE_GRANT_REASONS: ReadonlySet<string> = new Set(['browser_open_unvouched']);
-
-/**
- * Calendar changes that touch only the person's own calendar: no guest is invited, reached or cancelled.
- * Only these may get a chat grant, and none gets a grant for every chat. Anything that cannot be shown guest-free
- * is a guest change.
- */
-export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
-
-/**
- * Drive writes touch only the person's own files: a new Doc, or rows added to their own Sheet. Nothing is
- * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant.
- */
-export const OWN_DRIVE_WRITE_REASONS: ReadonlySet<string> = new Set(['google_drive_write']);
-
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
@@ -113,7 +44,9 @@ export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 /** Machine-readable reasons a Tier 3 action is auto-denied: without a card, or after its card went unanswered. */
 export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
+  'cannot_describe',
   'destination_unverifiable',
+  'draft_first',
   'incognito_chat',
   'incomplete_send_card',
   'lookup_limit',
@@ -137,6 +70,12 @@ export const Tier3EmailSchema = z
     bcc: z.array(Tier3MailboxSchema).describe('Hidden copy recipients.'),
     subject: z.string().describe('Subject line.'),
     body: z.string().describe('The whole message text, exactly as it will be sent.'),
+    // Cards stored before this field existed carry no code.
+    check_code: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('Short code for a send, repeated on its receipt; null for a draft.'),
     replaces: z
       .object({
         subject: z.string().describe('Subject of the draft being replaced.'),
@@ -167,6 +106,18 @@ export const Tier3EmailSchema = z
       .boolean()
       .optional()
       .describe('True when a name was left off an address because it looked like an address.'),
+    // Absent on cards stored before this field existed, and on a message that is not a forward.
+    forwards: z
+      .object({
+        from: z.string().describe('Sender of the message being forwarded.'),
+        subject: z.string().describe('Subject of the message being forwarded.'),
+        body: z.string().describe('Text of the message being forwarded.'),
+        truncated: z.boolean().describe('True when the text is longer than the part shown.'),
+        attachments: z.array(z.string()).describe('Names of the files sent on with the message.'),
+      })
+      .nullable()
+      .optional()
+      .describe('The message a forward sends on, below the note in `body`; null when the message is not a forward.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
@@ -184,7 +135,7 @@ const Tier3CalendarEventBeforeSchema = z
 export const Tier3CalendarEventSchema = z
   .object({
     action: z.enum(['create', 'change']).describe('Whether a new event is added or an existing one changed.'),
-    calendar: z.string().describe('The Google account whose main calendar is written.'),
+    calendar: z.string().describe('The account whose main calendar is written, as its own service names it.'),
     title: z.string().describe('Event title.'),
     when: z.string().describe('Local date and time in plain words.'),
     time_zone: z.string().describe('IANA time zone the times are in.'),
@@ -192,7 +143,13 @@ export const Tier3CalendarEventSchema = z
     location: z.string().describe('Place; empty when none.'),
     description: z.string().describe('Description the write sets; empty when none.'),
     attendees: z.array(z.string()).describe('Every guest on the event.'),
-    guests_emailed: z.boolean().describe('True when Google emails the guests about this.'),
+    // Cards stored before this line was carried read as no line: they held only a flag for it.
+    guests_line: z
+      .string()
+      .default('')
+      .describe(
+        'What the card tells the person about the guests being emailed, in the finished words of the review that built the card. Empty when the event has no guests.',
+      ),
     one_of_repeating: z.boolean().describe('True when this changes one date of a repeating event.'),
     before: Tier3CalendarEventBeforeSchema.nullable(),
     // Absent on cards stored before these fields existed: a reader must treat absent as not known.
@@ -210,6 +167,26 @@ export const Tier3CalendarEventSchema = z
   .describe('The calendar event a write adds or changes, shown in full.')
   .openapi('Tier3CalendarEvent');
 
+/** One connector or skill a new schedule may run with, and whether it is turned on. */
+export const Tier3ScheduleToolChoiceSchema = z
+  .object({
+    name: z.string().describe('Connector or skill name.'),
+    on: z.boolean().describe('True when the schedule runs with it.'),
+  })
+  .openapi('Tier3ScheduleToolChoice');
+
+/** What a new schedule runs with, as it will be saved. */
+export const Tier3ScheduleToolsSchema = z
+  .object({
+    editable: z.boolean().describe('True when the person may ask for other choices before approving.'),
+    agent_name: z.string().describe('The agent the schedule runs as.'),
+    connectors: z.array(Tier3ScheduleToolChoiceSchema).describe('Connectors the person may pick from.'),
+    skills: z.array(Tier3ScheduleToolChoiceSchema).describe('Skills the person may pick from.'),
+    run_code: z.boolean().describe('True when runs may run code.'),
+    memory: z.boolean().describe('True when runs recall memories.'),
+  })
+  .openapi('Tier3ScheduleTools');
+
 /** A schedule that a chat call creates or deletes, shown in full. */
 export const Tier3ScheduleSchema = z
   .object({
@@ -222,6 +199,9 @@ export const Tier3ScheduleSchema = z
     next_runs: z
       .array(z.string())
       .describe('The next three runs in plain words for a new schedule; empty for a delete.'),
+    tools: Tier3ScheduleToolsSchema.nullable()
+      .optional()
+      .describe('What a new schedule runs with; absent for a delete and on an older card.'),
   })
   .describe('The schedule a chat call creates or deletes, shown in full.')
   .openapi('Tier3Schedule');
@@ -249,9 +229,69 @@ export const Tier3SkillSchema = z
       .string()
       .nullable()
       .describe("The skill's own instruction file as the host read it, or null for a starter skill."),
+    websites: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'The websites the skill sends requests to, as the host found them in its files. Approving allows these.',
+      ),
+    makes_up_addresses: z
+      .boolean()
+      .optional()
+      .describe('True when the skill also builds web addresses while it runs, which cannot be read ahead of time.'),
+    can_send: z.boolean().optional().describe('True when one of the websites can send email or change a calendar.'),
   })
   .describe('The skill a chat call adds, shown in full.')
   .openapi('Tier3Skill');
+
+/**
+ * Why a skill network card is asked: the skill's first use, a site it reached for without
+ * declaring, or its code changed since the person approved it.
+ */
+export const Tier3SkillNetworkReasonSchema = z
+  .enum(['first_use', 'undeclared_host', 'code_changed'])
+  .describe(
+    'Why the card is asked: the skill\u2019s first use, a site it did not declare, or its code changed since it was approved.',
+  )
+  .openapi('Tier3SkillNetworkReason');
+
+/**
+ * The network question a skill network card asks, shown in full: the skill, the sites, and why.
+ * `code_pin` names the exact code the approval covers: the commit a git skill's approval is
+ * pinned to, or null when no pin is in force.
+ */
+export const Tier3SkillNetworkSchema = z
+  .object({
+    skill_name: z.string().describe('Name of the skill asking for network access.'),
+    hosts: z.array(z.string()).describe('The sites the skill asks to reach.'),
+    reason: Tier3SkillNetworkReasonSchema,
+    code_pin: z
+      .string()
+      .nullable()
+      .describe('The code version the approval is pinned to, or null when no pin is in force.'),
+  })
+  .describe('The skill network access a card asks about, shown in full.')
+  .openapi('Tier3SkillNetwork');
+
+/**
+ * The words an approval card is made of, produced in trueforge-core by one owner per action kind
+ * (see cardCopy.ts). The UI renders these three parts and never builds sentences of its own: one
+ * headline, one consequence line when it matters, and the tier reason on its own line.
+ * None of the three ever carries an internal id: things are named the way the person names them.
+ */
+export const ApprovalCardCopySchema = z
+  .object({
+    headline: z.string().describe('What will happen, in one sentence, in words the person recognises.'),
+    consequence: z
+      .string()
+      .nullable()
+      .describe('What follows from approving, in one line, or null when nothing needs saying.'),
+    reason: z.string().nullable().describe('Why the tier asks, in plain words, or null when it needs no reason.'),
+  })
+  .describe('The headline, consequence and reason an approval card shows.')
+  .openapi('ApprovalCardCopy');
+
+export type ApprovalCardCopy = z.infer<typeof ApprovalCardCopySchema>;
 
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
@@ -261,6 +301,19 @@ export const Tier3SkillSchema = z
 export const Tier3CardSchema = z
   .object({
     plain_what: z.string().describe('One plain-language sentence describing what will happen. No jargon.'),
+    copy: ApprovalCardCopySchema.nullable().describe(
+      'The headline, consequence and reason the card renders. Every builder fills it from its copy owner; null only where a later choke point fills it, never on a finished card.',
+    ),
+    safe_choice: z
+      .boolean()
+      .optional()
+      .describe(
+        "True when the action is irreversible or reaches other people, so the no choice uses safe words such as Keep it or Don't send.",
+      ),
+    destructive: z
+      .boolean()
+      .optional()
+      .describe('True when the action destroys or sends something for good, so the no choice says Keep it.'),
     plain_why: z
       .string()
       .nullable()
@@ -301,11 +354,29 @@ export const Tier3CardSchema = z
       .boolean()
       .optional()
       .describe('True when a card carrying mail_new_recipients approves saving a draft rather than sending.'),
+    mail_from: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('For a mail card: the account the message goes from. Otherwise null.'),
+    mail_from_choices: z
+      .array(z.string())
+      .nullable()
+      .optional()
+      .describe(
+        'For a card on the Email connector: every connected account the person could pick instead. Otherwise null.',
+      ),
+    skill_network: Tier3SkillNetworkSchema.nullable()
+      .optional()
+      .describe('For a skill network card: the skill, the sites it asks for, and why. Otherwise null.'),
   })
   .openapi('Tier3Card');
 
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
+export type Tier3Email = z.infer<typeof Tier3EmailSchema>;
+export type Tier3SkillNetwork = z.infer<typeof Tier3SkillNetworkSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
+export type Tier3ScheduleTools = z.infer<typeof Tier3ScheduleToolsSchema>;
 export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;
 export type Tier3Skill = z.infer<typeof Tier3SkillSchema>;
 
@@ -350,8 +421,8 @@ export interface TierDecision {
    * is stamped as inspection, so the grant and chat scope both apply to it.
    */
   inspection: boolean;
-  /** Host of the connector the call goes to; a standing grant the user records on this ask binds to it. */
-  grant_host: string | null;
+  /** The connector setup the call goes to (see `ToolGrantKey`); a standing grant the user records on this ask binds to it. */
+  grant_binding: string | null;
   /**
    * Tool name a standing grant for this call is recorded under, when the grant covers a scope
    * wider than the one tool (a Home Assistant domain, say). Null records under the tool's own name.
@@ -361,6 +432,20 @@ export interface TierDecision {
   secret_path_read: boolean;
   /** True for a send through the host's own Email sidecar. Steering changes the reason, never this, so the send-list step still runs. */
   mail_send: boolean;
+  /** True when the classifying branch bars this call from a standing grant across chats. */
+  standing_grant_barred: boolean;
+  /** True when this consequential call may take a chat grant for the target its card names. */
+  chat_grantable_consequence: boolean;
+  /**
+   * True when this browser open may take a chat grant for its whole site rather than the one address: the person
+   * never gave the address after the chat read other people's content, so the person is the one vouching. A later
+   * open on that site still passes every other check on its own, and each of those asks without a grant.
+   */
+  site_grantable_open: boolean;
+  /** True when this call changes only the person's own calendar, with no guest reached. */
+  own_calendar_change: boolean;
+  /** True when this call writes only the person's own Drive files and sends nothing to anyone. */
+  own_drive_write: boolean;
 }
 
 /** Hash binding for a tracked executable file execution. */
@@ -396,10 +481,15 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     audit_description: null,
     shell_binding: null,
     inspection: false,
-    grant_host: null,
+    grant_binding: null,
     grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
+    standing_grant_barred: false,
+    chat_grantable_consequence: false,
+    site_grantable_open: false,
+    own_calendar_change: false,
+    own_drive_write: false,
   };
 }
 
@@ -417,10 +507,15 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     audit_description: null,
     shell_binding: null,
     inspection: false,
-    grant_host: null,
+    grant_binding: null,
     grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
+    standing_grant_barred: false,
+    chat_grantable_consequence: false,
+    site_grantable_open: false,
+    own_calendar_change: false,
+    own_drive_write: false,
   };
 }
 
@@ -479,10 +574,15 @@ export function tier3Decision(input: {
   approval_token_id?: string | null | undefined;
   shell_binding?: ShellApprovalBinding | null | undefined;
   inspection?: boolean | undefined;
-  grant_host?: string | null | undefined;
+  grant_binding?: string | null | undefined;
   grant_tool_name?: string | null | undefined;
   secret_path_read?: boolean | undefined;
   mail_send?: boolean | undefined;
+  standing_grant_barred?: boolean | undefined;
+  chat_grantable_consequence?: boolean | undefined;
+  site_grantable_open?: boolean | undefined;
+  own_calendar_change?: boolean | undefined;
+  own_drive_write?: boolean | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -497,10 +597,15 @@ export function tier3Decision(input: {
     approval_token_id: input.approval_token_id ?? null,
     shell_binding: input.shell_binding ?? null,
     inspection: input.inspection === true,
-    grant_host: input.grant_host ?? null,
+    grant_binding: input.grant_binding ?? null,
     grant_tool_name: input.grant_tool_name ?? null,
     secret_path_read: input.secret_path_read === true,
     mail_send: input.mail_send === true,
+    standing_grant_barred: input.standing_grant_barred === true,
+    chat_grantable_consequence: input.chat_grantable_consequence === true,
+    site_grantable_open: input.site_grantable_open === true,
+    own_calendar_change: input.own_calendar_change === true,
+    own_drive_write: input.own_drive_write === true,
   };
 }
 

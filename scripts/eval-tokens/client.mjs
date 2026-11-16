@@ -103,25 +103,208 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
       return await request('GET', '/healthz');
     },
     /**
-     * @param {{ model: string, temperature: number }} options
+     * Sets the skills a chat may use, as the app does after a skill is added or removed in that chat. The chat's
+     * setup is replaced, so it is built the same way as when the chat was made, with the sandbox on.
+     * @param {{ sessionId: string, model: string, temperature: number, skills: string[] }} options
+     */
+    async setSessionSkills({ sessionId, model, temperature, skills }) {
+      await request('PATCH', `/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+        agent: {
+          spec: {
+            model: { name: model, params: { temperature } },
+            config: { sandbox: { enabled: true } },
+            skills: skills.map(name => ({ name })),
+          },
+        },
+      });
+    },
+    /** What the server can do, such as whether its sandbox is ready. */
+    async getCapabilities() {
+      const body = await request('GET', '/api/v1/capabilities');
+      return isRecord(body) && isRecord(body.data) ? body.data : body;
+    },
+    /**
+     * An incognito chat is neither remembered nor shown remembered facts, which keeps a judge's chats out of memory.
+     * A chat with the sandbox on can run skills and commands, as the app's chats do when the server has one.
+     * @param {{ model: string, temperature: number, incognito?: boolean, sandbox?: boolean }} options
      * @returns {Promise<string>} session id
      */
-    async createSession({ model, temperature }) {
+    async createSession({ model, temperature, incognito = false, sandbox = false }) {
       const body = await request('POST', '/api/v1/sessions', {
-        agent: { spec: { model: { name: model, params: { temperature } } } },
+        agent: {
+          spec: {
+            model: { name: model, params: { temperature } },
+            ...(sandbox ? { config: { sandbox: { enabled: true } } } : {}),
+          },
+        },
+        ...(incognito ? { is_incognito: true } : {}),
       });
       return readSessionId(body);
+    },
+    /** @returns {Promise<{ name: string, model_id: string, provider: { name: string } }[]>} */
+    async listModels() {
+      const body = await request('GET', '/api/v1/models');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its models. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** Provider names with their type, such as `tokenfactory`. Keys are never returned by the server. */
+    async listModelProviders() {
+      const body = await request('GET', '/api/v1/settings/model-providers');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its model providers. Is --instance a TrueForge server?');
+      }
+      return body.data.map(provider => ({ name: provider?.name, type: provider?.manifest?.type }));
+    },
+    /** Today's Token Factory use per model, priced by the server. */
+    async getTokenFactoryUsage() {
+      const body = await request('GET', '/api/v1/settings/token-factory-usage');
+      if (!isRecord(body) || !isRecord(body.data) || !Array.isArray(body.data.models)) {
+        throw new Error('The instance did not return its Token Factory use. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /**
+     * @param {{ namespace?: string }} [options] a persona's vault is `persona:<name>`; left out, the shared memory
+     * @returns {Promise<{ id: string, text: string }[]>}
+     */
+    async listMemoryEntries({ namespace } = {}) {
+      const query = namespace === undefined ? '' : `?namespace=${encodeURIComponent(namespace)}`;
+      const body = await request('GET', `/api/v1/memory/vault${query}`);
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its memory. Is the memory turned on in the eval instance?');
+      }
+      return body.data;
+    },
+    /**
+     * @param {{ text: string, timestamp: string }[]} entries
+     * @param {{ namespace?: string }} [options] left out, the shared memory
+     */
+    async importMemories(entries, { namespace } = {}) {
+      await request('POST', '/api/v1/memory/vault/import', {
+        entries,
+        ...(namespace === undefined ? {} : { namespace }),
+      });
+    },
+    /** @param {string} id */
+    async deleteMemoryEntry(id) {
+      await request('DELETE', `/api/v1/memory/vault/${encodeURIComponent(id)}`);
+    },
+    /** @returns {Promise<{ id: string, name: string, manifest: Record<string, unknown> }[]>} the person's schedules */
+    async listSchedules() {
+      const body = await request('GET', '/api/v1/schedules?limit=25');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its schedules. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /**
+     * Starts one run of a schedule now, as the Schedules page does.
+     * @param {string} scheduleId
+     * @returns {Promise<{ id: string }>}
+     */
+    async runScheduleNow(scheduleId) {
+      const body = await request('POST', '/api/v1/schedules/runs', { schedule_id: scheduleId });
+      if (!isRecord(body) || !isRecord(body.data) || typeof body.data.id !== 'string') {
+        throw new Error('The instance did not start the schedule run. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /**
+     * @param {{ display_name: string, instructions: string, model_name: string }} persona
+     * @returns {Promise<{ id: string, display_name: string }>}
+     */
+    async createPersona(persona) {
+      const body = await request('POST', '/api/v1/personas', { persona: { ...persona, aliases: [] } });
+      if (!isRecord(body) || !isRecord(body.data) || typeof body.data.id !== 'string') {
+        throw new Error('The instance did not return the new persona. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @param {string} personaId */
+    async deletePersona(personaId) {
+      await request('DELETE', `/api/v1/personas/${encodeURIComponent(personaId)}`);
+    },
+    /** Makes a persona answer in a chat, the way picking it from the chat's menu does. */
+    async setSessionPersona({ sessionId, personaId }) {
+      await request('PUT', `/api/v1/sessions/${encodeURIComponent(sessionId)}/persona`, { persona_id: personaId });
+    },
+    /** @returns {Promise<Record<string, unknown> | null>} the Personalization page, or null when it was never filled */
+    async getProfile() {
+      const body = await request('GET', '/api/v1/personalization/profile');
+      return isRecord(body) && isRecord(body.data) ? body.data : null;
+    },
+    /** @param {Record<string, unknown>} profile the whole page, since saving replaces it */
+    async putProfile(profile) {
+      await request('PUT', '/api/v1/personalization/profile', { profile });
+    },
+    async deleteProfile() {
+      await request('DELETE', '/api/v1/personalization/profile');
+    },
+    /** @returns {Promise<{ name: string, manifest: unknown }[]>} the skills added in Settings */
+    async listSkills() {
+      const body = await request('GET', '/api/v1/settings/skills');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its skills. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @returns {Promise<{ declared_hosts: string[], allowed_hosts: string[] }>} the websites a skill names and may reach */
+    async getSkillNetworkApproval(name) {
+      const body = await request('GET', `/api/v1/settings/skills/${encodeURIComponent(name)}/network-approval`);
+      if (!isRecord(body) || !isRecord(body.data)) {
+        throw new Error("The instance did not return the skill's websites. Is --instance a TrueForge server?");
+      }
+      return body.data;
+    },
+    /** @param {string} name */
+    async deleteSkill(name) {
+      await request('DELETE', `/api/v1/settings/skills/${encodeURIComponent(name)}`);
+    },
+    /** @param {string} scheduleId */
+    async deleteSchedule(scheduleId) {
+      await request('DELETE', `/api/v1/schedules/${encodeURIComponent(scheduleId)}`);
+    },
+    /** @returns {Promise<{ id: string, name: string }[]>} the saved agents, including the ones schedules run as */
+    async listAgents() {
+      const body = await request('GET', '/api/v1/agents?limit=100');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its agents. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @param {string} agentId */
+    async deleteAgent(agentId) {
+      await request('DELETE', `/api/v1/agents/${encodeURIComponent(agentId)}`);
+    },
+    /** @returns {Promise<{ id: string, title: string, source: unknown }[]>} the newest chats */
+    async listRecentSessions() {
+      const body = await request('GET', '/api/v1/sessions?limit=25');
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return its chats. Is --instance a TrueForge server?');
+      }
+      return body.data;
+    },
+    /** @returns {Promise<{ id: string, state: Record<string, unknown> }[]>} a chat's turns */
+    async listTurns(sessionId) {
+      const body = await request('GET', `/api/v1/sessions/${encodeURIComponent(sessionId)}/turns`);
+      if (!isRecord(body) || !Array.isArray(body.data)) {
+        throw new Error('The instance did not return the chat turns. Is --instance a TrueForge server?');
+      }
+      return body.data;
     },
     /**
      * Starts a turn without streaming. Poll `getTurn` until the state leaves `running`.
      * @param {string} sessionId
-     * @param {{ input: unknown[], previous_turn_id: string }} options
+     * @param {{ input: unknown[], previous_turn_id: string, client_timezone?: string }} options
      */
-    async createTurn(sessionId, { input, previous_turn_id }) {
+    async createTurn(sessionId, { input, previous_turn_id, client_timezone }) {
       const body = await request('POST', `/api/v1/sessions/${encodeURIComponent(sessionId)}/turns`, {
         input,
         previous_turn_id,
         stream: false,
+        ...(client_timezone === undefined ? {} : { client_timezone }),
       });
       return readTurn(body);
     },

@@ -48,7 +48,7 @@ export const REMOVED_TOOL_STREAK_STOP_AT = 2;
 /** Why a step is answered with no tools. */
 export type ForcedAnswer = 'budget' | 'removed_streak' | 'empty_after_tools';
 
-/** Steps one thread may get back in a reply for landing space writes or sandbox file edits. With the base budget this bounds a reply at 8 + 12 steps. */
+/** Steps one thread may get back in a reply for landing space writes or sandbox file edits, or for running sandbox commands. With the base budget this bounds a reply at 8 + 12 steps. */
 export const MAX_PROGRESS_STEP_REFUNDS = 12;
 
 export const STEP_BUDGET_SPENT_MESSAGE =
@@ -93,8 +93,10 @@ export function replyStepBudgetFor({
 
 /**
  * Steps to hand back after one tool batch: one when a space write or a sandbox file edit in it landed
- * cleanly, so a build done in parts (a space, or a project written file by file in the sandbox) is not
- * cut off by its own progress. Refused or failed writes, and writes that saved nothing new, earn
+ * cleanly, or a sandbox shell command in it ran to its end. A build done in parts (a space, or a project
+ * written file by file and then built and tested in the sandbox) is then not cut off by its own progress.
+ * A failing test run counts, since reading the failure is how the next fix is found; it comes back as a
+ * finished command with its exit code. A command the host refused or could not run does not count. Refused or failed writes, and writes that saved nothing new, earn
  * nothing, and the total per thread never passes MAX_PROGRESS_STEP_REFUNDS.
  */
 export function progressRefundFor({
@@ -108,6 +110,8 @@ export function progressRefundFor({
     savedNothing: boolean;
     /** True for the sandbox's own file tools (write_file, apply_patch, replace_text). */
     sandboxFileEdit?: boolean | undefined;
+    /** True for the sandbox's own shell tool. */
+    sandboxCommand: boolean;
   }[];
   refundsSoFar: number;
 }): number {
@@ -118,7 +122,8 @@ export function progressRefundFor({
       !result.failure &&
       !result.savedNothing,
   );
-  return landedWrite && refundsSoFar < MAX_PROGRESS_STEP_REFUNDS ? 1 : 0;
+  const commandRan = results.some(result => result.sandboxCommand && result.disposition === 'executed_ok');
+  return (landedWrite || commandRan) && refundsSoFar < MAX_PROGRESS_STEP_REFUNDS ? 1 : 0;
 }
 
 /** Tool names are snake_case; the person and the model read them as plain words. */

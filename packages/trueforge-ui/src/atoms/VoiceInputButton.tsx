@@ -31,6 +31,8 @@ import { Tooltip } from './primitives/Tooltip.js';
 const TRANSCRIBE_ERROR_MESSAGE = 'Transcription failed, try again or type instead.';
 const MIC_UNAVAILABLE_MESSAGE = 'Microphone unavailable. Check your microphone and try again.';
 const RECORD_LIMIT_MESSAGE = 'Recording stopped at the 3-minute limit. Tap the mic to record another segment.';
+const NOTHING_HEARD_MESSAGE = 'Nothing was heard. Tap the mic and try again.';
+const RECORDING_STOPPED_MESSAGE = 'Recording stopped before it finished. Tap the mic to try again.';
 const VOICE_MODE_FAILED_MESSAGE = 'Voice mode could not start. Check your microphone, then try again.';
 
 /** The hints are a sentence long, so they wrap instead of running off a narrow screen. */
@@ -86,6 +88,12 @@ function VoiceInputButtonInner({
   const notice = useLiveNotice();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const recorderRef = useRef<VoiceRecorder | null>(null);
+  // The start token of the start still opening the mic, if any, so teardown handlers can tell a start
+  // is under way. Keyed on the token so an older start finishing late cannot clear a newer one.
+  const acquiringTokenRef = useRef<number | null>(null);
+  // The path the composer was on when it mounted; a route-change event on the same path is an
+  // address tidy-up (a link or an error flag being cleared), not a move to another chat.
+  const lastPathnameRef = useRef<string | null>(null);
   // Each start takes the next number; a stop bumps it, so a start still waiting on the mic is dropped.
   const startTokenRef = useRef(0);
   const recordingStartedAtRef = useRef<number | null>(null);
@@ -132,26 +140,44 @@ function VoiceInputButtonInner({
     endLiveLine();
   }, []);
 
+  /** A spoken attempt is under way: the mic is opening, a recording is live, or words are being transcribed. */
+  const attemptInFlight = useCallback(
+    (): boolean => acquiringTokenRef.current !== null || recorderRef.current != null || abortRef.current != null,
+    [],
+  );
+
   // Fail-closed on tab backgrounding: a recording ends and tracks stop. The chat's bridge ends voice mode.
+  // When a tap or hold was under way, the button says so on the person's return; a recording never
+  // just vanishes.
   useEffect(() => {
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') cancelVoice();
+      if (document.visibilityState !== 'hidden') return;
+      const wasInFlight = attemptInFlight();
+      cancelVoice();
+      if (wasInFlight) setLiveNotice(RECORDING_STOPPED_MESSAGE);
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [cancelVoice]);
+  }, [cancelVoice, attemptInFlight]);
 
   // Fail-closed on SPA route changes: the recording ends and tracks stop, even if the composer
   // stays mounted across navigation. Voice mode stays: a new chat changes its address when it gets
-  // its id, and switching to another chat ends it (below).
+  // its id, and switching to another chat ends it (below). An address write that keeps the same
+  // path is not a navigation: the app itself writes the address to clear a delivery link or an
+  // error flag, and one of those landing mid-recording must not throw the recording away.
   useEffect(() => {
+    lastPathnameRef.current = window.location.pathname;
     const onRouteChange = () => {
+      if (window.location.pathname === lastPathnameRef.current) return;
+      lastPathnameRef.current = window.location.pathname;
       if (getVoiceMode() !== 'off') return;
+      const wasInFlight = attemptInFlight();
       cancelVoice();
+      if (wasInFlight) setLiveNotice(RECORDING_STOPPED_MESSAGE);
     };
     window.addEventListener('trueforge:routechange', onRouteChange);
     return () => window.removeEventListener('trueforge:routechange', onRouteChange);
-  }, [cancelVoice]);
+  }, [cancelVoice, attemptInFlight]);
 
   const stopAndTranscribe = useCallback(
     async ({ autoStopped, send }: { autoStopped: boolean; send: boolean }): Promise<void> => {
@@ -182,6 +208,9 @@ function VoiceInputButtonInner({
         }
         if (autoStopped) {
           setLiveNotice(RECORD_LIMIT_MESSAGE);
+        } else if (!spoke) {
+          // A tap or hold that heard nothing must say so, not leave the box empty without a word.
+          setLiveNotice(NOTHING_HEARD_MESSAGE);
         }
       } catch {
         // Abort (cancel, unmount, route change, backgrounding) discards silently.
@@ -211,6 +240,7 @@ function VoiceInputButtonInner({
     setLiveNotice(null);
     setAcquiring(true);
     const token = ++startTokenRef.current;
+    acquiringTokenRef.current = token;
     try {
       const recorder = await startVoiceRecording({
         onAutoStop: () => {
@@ -244,6 +274,7 @@ function VoiceInputButtonInner({
       }
       return false;
     } finally {
+      if (acquiringTokenRef.current === token) acquiringTokenRef.current = null;
       if (mountedRef.current) {
         setAcquiring(false);
       }

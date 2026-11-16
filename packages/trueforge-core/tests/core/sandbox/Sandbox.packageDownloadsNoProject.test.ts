@@ -254,6 +254,26 @@ describe('the first package download in a chat without a project', () => {
     expect(pipExec?.packageMirrorToken).toBe('mirror-token');
   });
 
+  it('gives the install its download grant in a folder that is not a Git repository', async () => {
+    const execCalls: SandboxExecParams[] = [];
+    const sandbox = makeSandbox({
+      execCalls,
+      allowed: () => true,
+      allowPackageDownloads: jest.fn(async () => undefined),
+      commandResults: {
+        'git rev-parse --show-toplevel': { exitCode: 128, result: 'fatal: not a git repository' },
+      },
+    });
+    const response = await sandbox.callTool(PIP_CALL, { status: 'allow' });
+    if (!isCallToolResponseResult(response)) {
+      throw new Error('Expected a tool result');
+    }
+    expect(response.result.isError).toBe(false);
+    const pipExec = execCalls.find(params => params.command === 'pip install requests');
+    expect(pipExec?.packageMirrorToken).toBe('mirror-token');
+    expect(pipExec?.workspaceLock).toBeUndefined();
+  });
+
   it('asks again on the next install once the allowance is taken back', async () => {
     const execCalls: SandboxExecParams[] = [];
     let allowed = true;
@@ -356,6 +376,14 @@ describe('the first download always asks, even when sandbox work runs without as
     expect(firstInfo.tier3_card?.plain_what).toBe(
       'Aman wants to download packages from the public package sites (npm) in your chats that are not working on a project. This also covers your scheduled runs.',
     );
+    // An install always asks, so the download wording takes over the command card: the headline is the
+    // download sentence and the command card's own warning stays as the consequence.
+    expect(firstInfo.tier3_card?.copy).toEqual({
+      headline:
+        'Aman wants to download packages from the public package sites (npm) in your chats that are not working on a project. This also covers your scheduled runs.',
+      consequence: 'Commands can change or delete files.',
+      reason: null,
+    });
 
     const held = await sandbox.callTool(npmCall);
     if (!('approvalRequired' in held)) {

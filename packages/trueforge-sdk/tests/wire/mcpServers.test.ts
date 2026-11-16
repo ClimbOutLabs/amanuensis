@@ -268,9 +268,12 @@ describe("McpServersClient", () => {
                 auth_status: { authorization_url: "authorization_url", status: "authenticated" },
                 manifest: {
                     auth: { type: "dcr" },
+                    declared_change_tools: ["declared_change_tools"],
                     description: "description",
-                    memory_provider: true,
                     name: "name",
+                    page_read_tools: ["page_read_tools"],
+                    search_in_process: true,
+                    search_plumbing_fields: ["search_plumbing_fields"],
                     search_provider: true,
                     search_tools: ["search_tools"],
                     type: "remote",
@@ -299,9 +302,12 @@ describe("McpServersClient", () => {
                     auth: {
                         type: "dcr",
                     },
+                    declaredChangeTools: ["declared_change_tools"],
                     description: "description",
-                    memoryProvider: true,
                     name: "name",
+                    pageReadTools: ["page_read_tools"],
+                    searchInProcess: true,
+                    searchPlumbingFields: ["search_plumbing_fields"],
                     searchProvider: true,
                     searchTools: ["search_tools"],
                     type: "remote",
@@ -371,47 +377,6 @@ describe("McpServersClient", () => {
 
         await expect(async () => {
             return await client.mcpServers.homeAssistantCheck("name");
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
-    });
-
-    test("memory_check (1)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { data: { status: "ok" } };
-
-        server
-            .mockEndpoint()
-            .post("/api/v1/mcp-servers/name/memory-check")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        const response = await client.mcpServers.memoryCheck("name");
-        expect(response).toEqual({
-            data: {
-                status: "ok",
-            },
-        });
-    });
-
-    test("memory_check (2)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .post("/api/v1/mcp-servers/name/memory-check")
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.mcpServers.memoryCheck("name");
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
 

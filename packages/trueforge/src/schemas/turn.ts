@@ -98,7 +98,7 @@ export const ListTurnEventsRequestQuerySchema = z
 export const ListTurnEventsResponseSchema = z
   .object({
     // SessionEventSchema (agent-session, core) excludes passthrough events by design;
-    // aman.memory.recall, aman.profile.learned, aman.skill.used, aman.sandbox.provisioning,
+    // aman.memory.recall, aman.profile.learned, aman.skill.used, aman.email.send_receipt, aman.sandbox.provisioning,
     // aman.model.usage, and aman.model.waiting are passthrough events this package registers (see
     // runtime/memory/memoryEvents.ts, runtime/profileLearning.ts, schemas/skillEvents.ts,
     // schemas/provisionEvents.ts, schemas/modelUsageEvents.ts, schemas/modelWaitingEvents.ts),

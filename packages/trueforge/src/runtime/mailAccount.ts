@@ -86,8 +86,10 @@ function parseAgentAccount(body: unknown): PublicMailAccount | null {
 const mailKind: ConnectorAccountKind<PublicMailAccount> = {
   label: 'Email',
   parseAccount: parseAgentAccount,
+  accountKey: account => account.address,
   connectorUnreachableMessage: MAIL_CONNECTOR_UNREACHABLE_MESSAGE,
   statusUnreachableMessage: MAIL_STATUS_UNREACHABLE_MESSAGE,
+  unknownAccountMessage: 'That email account is not connected. Connect it first, then try again.',
   saveRefusal: body => {
     const kind = agentErrorKind(body);
     if (kind === 'sign_in_refused') {
@@ -124,12 +126,12 @@ export function resolveMailAccountSave(
   if (isMicrosoftMailAddress(request.address)) {
     return { ok: false, message: MICROSOFT_MAIL_MESSAGE };
   }
-  const password = cleanMailPassword({ provider_key: request.provider_key, password: request.password });
+  const preset = request.provider_key === 'other' ? undefined : emailProviderPreset(request.provider_key);
+  const password = cleanMailPassword({ preset, password: request.password });
   const passwordProblem = mailPasswordProblem(password);
   if (passwordProblem !== null) {
     return { ok: false, message: passwordProblem };
   }
-  const preset = request.provider_key === 'other' ? undefined : emailProviderPreset(request.provider_key);
   if (request.provider_key !== 'other' && preset === undefined) {
     return { ok: false, message: 'That email provider is not on the list. Pick one and try again.' };
   }
@@ -189,9 +191,17 @@ export async function saveMailAccount(
   return mailClient.save(deps, resolved.payload);
 }
 
-/** Removes the saved account through the agent; the password is deleted from the account file. */
-export function removeMailAccount(deps: ConnectorAccountClientDeps): Promise<MailAccountState> {
-  return mailClient.remove(deps);
+/**
+ * Removes saved accounts through the agent; their passwords are deleted from the account file. With an
+ * address, only that account goes; without one, every account goes.
+ */
+export function removeMailAccount(deps: ConnectorAccountClientDeps, address?: string): Promise<MailAccountState> {
+  return mailClient.remove(deps, address);
+}
+
+/** Makes one saved account the default: the one new mail goes out from unless a draft says otherwise. */
+export function setMailDefaultAccount(deps: ConnectorAccountClientDeps, address: string): Promise<MailAccountState> {
+  return mailClient.setDefault(deps, address);
 }
 
 /** Registers the Email connector (with its send list prepared) or removes it, as the saved account says. */
@@ -230,6 +240,7 @@ export function syncMailConnectorWithAccount(deps: {
  */
 export function registerMailConnectorFromSavedAccountInBackground(deps: {
   accountUrl: string | undefined;
+  secret: string | undefined;
   mcpUrl: string | undefined;
   policyPath: string | undefined;
   fetchImpl: typeof fetch | undefined;
@@ -242,7 +253,16 @@ export function registerMailConnectorFromSavedAccountInBackground(deps: {
   if (deps.accountUrl === undefined || deps.mcpUrl === undefined) {
     return;
   }
-  const clientDeps = { accountUrl: deps.accountUrl, fetchImpl: deps.fetchImpl, logger: deps.logger };
+  if (deps.secret === undefined) {
+    deps.logger.warn('Email connector is off: MAIL_EMAIL_ACCOUNT_SECRET is not set. Set it to turn the Email card on.');
+    return;
+  }
+  const clientDeps = {
+    accountUrl: deps.accountUrl,
+    secret: deps.secret,
+    fetchImpl: deps.fetchImpl,
+    logger: deps.logger,
+  };
   void keepConnectorInStepInBackground({
     readState: () => getMailAccountState(clientDeps),
     apply: state =>

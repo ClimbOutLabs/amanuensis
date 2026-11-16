@@ -14,6 +14,8 @@ import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const SAVED_NAME = 'Robin Example';
+const SAVED_ASSISTANT_NAME = 'Juniper';
+const READ_WHOLE = 'Read whole messages aloud';
 
 interface PanelCheck {
   /** The feature id in tests/nightly-coverage.json. */
@@ -47,8 +49,31 @@ const PANELS: readonly PanelCheck[] = [
   {
     surface: 'settings:connectors',
     tab: 'Connectors',
-    check: async ({ panel }) => {
+    check: async ({ page, panel }) => {
       await shows(panel.getByRole('heading', { name: 'inert', exact: true }));
+
+      // Telegram is offered, and its setup asks for the bot token before anything else.
+      const telegram = panel.getByRole('region', { name: 'Telegram', exact: true });
+      await shows(telegram.getByText('Available', { exact: true }));
+      await telegram.getByRole('button', { name: 'Connect', exact: true }).click();
+      const setup = page.getByRole('dialog', { name: 'Telegram' });
+      await shows(setup.getByLabel('Bot token'));
+      assert.equal(
+        await setup.getByRole('button', { name: 'Connect', exact: true }).isDisabled(),
+        true,
+        'nothing can be sent until a token is typed',
+      );
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: 'route:telegram',
+          step: 'setup',
+          did: 'In Settings, Connectors, pressed Connect on Telegram.',
+          expect:
+            'The Telegram setup opens and asks for the bot token. Its Connect button is off until a token is typed.',
+        }),
+      });
+      await setup.getByRole('button', { name: 'Close', exact: true }).click();
+      await setup.waitFor({ state: 'hidden', timeout: RENDER_TIMEOUT_MS });
     },
   },
   {
@@ -60,7 +85,7 @@ const PANELS: readonly PanelCheck[] = [
   },
   {
     surface: 'settings:themes',
-    tab: 'Themes',
+    tab: 'Appearance',
     check: async ({ page, panel }) => {
       const dark = panel.getByRole('button', { name: 'Dark', exact: true });
       await shows(dark);
@@ -80,6 +105,12 @@ const PANELS: readonly PanelCheck[] = [
         'choosing Dark changes the colors on screen',
       );
       assert.equal(await dark.getAttribute('aria-pressed'), 'true', 'Dark is the chosen color mode');
+
+      const readWhole = panel.getByRole('switch', { name: READ_WHOLE, exact: true });
+      await shows(readWhole);
+      assert.equal(await readWhole.getAttribute('aria-checked'), 'false', 'whole messages are not read aloud at first');
+      await readWhole.click();
+      assert.equal(await readWhole.getAttribute('aria-checked'), 'true', 'the switch turns on');
     },
   },
   {
@@ -110,6 +141,18 @@ const PANELS: readonly PanelCheck[] = [
       );
       await panel.getByRole('button', { name: 'Save personalization' }).click();
       assert.ok((await saved).ok(), 'the server kept the name');
+
+      await panel.getByRole('tab', { name: 'Assistant profile', exact: true }).click();
+      const assistantName = panel.locator('#personalization-assistant-name');
+      await shows(assistantName);
+      assert.equal(await name.count(), 0, 'each section shows only its own fields');
+      await assistantName.fill(SAVED_ASSISTANT_NAME);
+      const savedAssistant = page.waitForResponse(
+        response => response.url().includes('/personalization') && response.request().method() !== 'GET',
+        { timeout: RENDER_TIMEOUT_MS },
+      );
+      await panel.getByRole('button', { name: 'Save personalization' }).click();
+      assert.ok((await savedAssistant).ok(), "the server kept the assistant's name");
     },
   },
   {
@@ -121,7 +164,7 @@ const PANELS: readonly PanelCheck[] = [
   },
   {
     surface: 'settings:audit',
-    tab: 'Audit',
+    tab: 'Activity log',
     check: async ({ panel }) => {
       await shows(panel.getByText('Nothing recorded yet.', { exact: true }));
     },
@@ -185,7 +228,14 @@ test(
         current = panel.surface;
         await tablist.getByRole('tab', { name: panel.tab, exact: true }).click();
         await panel.check({ page, panel: page.getByRole('tabpanel') });
-        await page.screenshot({ path: await featureShotPath({ surface: panel.surface, step: 'panel' }) });
+        await page.screenshot({
+          path: await featureShotPath({
+            surface: panel.surface,
+            step: 'panel',
+            did: `Opened Settings against the real server and chose the "${panel.tab}" tab.`,
+            expect: 'The panel opens, shows what it holds, and no request fails.',
+          }),
+        });
       }
 
       // What Personalization saved is still there after the app loads again.
@@ -199,7 +249,44 @@ test(
         SAVED_NAME,
         { timeout: RENDER_TIMEOUT_MS },
       );
-      await page.screenshot({ path: await featureShotPath({ surface: current, step: 'name-kept-after-reload' }) });
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: current,
+          step: 'name-kept-after-reload',
+          did: 'Saved a name in Personalization, reloaded the app and opened Personalization again.',
+          expect: 'The saved name is still in the box.',
+        }),
+      });
+      // Saving the second section did not undo the first, and the second is kept too.
+      await page.getByRole('tabpanel').getByRole('tab', { name: 'Assistant profile', exact: true }).click();
+      await page.waitForFunction(
+        expected => document.querySelector<HTMLInputElement>('#personalization-assistant-name')?.value === expected,
+        SAVED_ASSISTANT_NAME,
+        { timeout: RENDER_TIMEOUT_MS },
+      );
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: current,
+          step: 'assistant-kept-after-reload',
+          did: 'After the reload, opened "Assistant profile" inside Personalization.',
+          expect: 'The saved assistant name is still there, so saving one section did not undo the other.',
+        }),
+      });
+
+      // The read-aloud choice is kept in this browser.
+      current = 'settings:themes';
+      await tablist.getByRole('tab', { name: 'Appearance', exact: true }).click();
+      const readWhole = page.getByRole('tabpanel').getByRole('switch', { name: READ_WHOLE, exact: true });
+      await readWhole.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+      assert.equal(await readWhole.getAttribute('aria-checked'), 'true', 'the read-aloud choice is still on');
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: current,
+          step: 'read-whole-kept-after-reload',
+          did: 'Turned on reading whole messages aloud in Appearance, reloaded the app and opened Appearance again.',
+          expect: 'The switch is still on.',
+        }),
+      });
 
       assert.deepEqual(failures, [], 'no request failed and no page error was raised on any panel');
     } catch (error) {

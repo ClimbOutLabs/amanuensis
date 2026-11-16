@@ -2,15 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { actionIdFor, normalizeCwd } from '../../../src/core/permissions/approvalTokens';
-import {
-  canonicalShellForm,
-  classifyTier,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { canonicalShellForm, classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { type ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import {
   canonicalFileIdentity,
   canonicalWriteTarget,
@@ -30,7 +26,14 @@ function servicesWithAllowlist(binDir: string): SentinelServices {
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: binDir,
     commands: {
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, script: null, subcommands: null },
+      ls: {
+        args: ['-l'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+        script: null,
+        count_flag: false,
+        subcommands: null,
+      },
     },
   };
   const services = defaultSentinelServices({ pinned_path: binDir });
@@ -269,6 +272,7 @@ describe('approvals bind to the normalized path', () => {
       tool_type: 'truefoundry-system' as const,
       canonical_params: params,
       tier: 2 as const,
+      sandbox_file_write: true,
       approval_token_id: tokenId,
       approval_binding: null,
       shell_binding: null,

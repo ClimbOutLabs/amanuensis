@@ -1,4 +1,4 @@
-# Spec: Adding a skill from a chat
+# Spec: Adding and removing a skill from a chat
 
 **Status:** draft
 
@@ -18,16 +18,18 @@ Three rules do not bend:
 
 ## 1. Tools
 
-Two tools of the server's own, mounted on a chat turn's root thread:
+Three tools of the server's own, mounted on a chat turn's root thread:
 
 - `list_skills`: the skills already added, and the starter skills that can still be added. Read-only, runs without a card.
 - `install_skill`: takes `url`, and optionally `path` and `ref`. It accepts the plain repository address and the address of the skill folder or its `SKILL.md` as a browser shows it. It takes no name and no description.
+- `remove_skill`: takes the `name` of an added skill. See section 6.
 
-Nothing here changes or removes a skill.
+Nothing here changes a skill that stays.
 
 ## 2. Reading the skill
 
 - Only public repositories on github.com are read, with no sign-in. Anything else is refused with a plain message that points to Settings, under Skills.
+- Every lookup goes through the app's one guard for outside addresses. Only `api.github.com` is asked, the address it answers from must be on the public internet, and a redirect is never followed.
 - The ref is settled to a full commit through the GitHub API. No ref means the repository's main branch. A full commit is used as it is.
 - `SKILL.md` is read at that commit. Its opening block must hold a description. The stored name is the skill's own name in the form skill names take (lower-case letters, digits and hyphens); when the file names none, the folder name is used.
 - A `SKILL.md` over 100 KB, a description over 1,024 characters, or a name that cannot be made into a skill name is refused.
@@ -45,17 +47,31 @@ Nothing here changes or removes a skill.
 
 - It saves one skill, with the same checks the Settings page saves under.
 - It only adds. A skill from the same place that is already there is not added twice, and a different skill with the same name is not replaced. Both say what to do next.
-- It grants no network access. Sites a starter skill declares are saved as asked for only; reaching them still needs the approval in Settings, under Skills. A skill read from GitHub is saved with no sites.
+- Before the card, the host reads every file of the skill at the pinned commit (the same host-side git fetch the sandbox copy uses) and scans them for websites (`scanSkillSites`). Nothing in the skill runs. The found list becomes the skill's `network_hosts`; a starter skill uses the list its catalog entry names. Code that builds addresses at run time is flagged on the card. If the files cannot be read, or the list is longer than a skill may name, nothing is offered.
+- Approval is all or nothing. Allow saves the skill and its approval of exactly the listed websites; if that approval cannot be saved, the skill is removed again. The list is part of what the approval covers, so a different list at dispatch ends the approval and nothing is saved.
+- Settings uses the same scan. Its add form checks the skill first (`POST /api/v1/settings/skills/check-websites`) and sends the list the person saw as `approved_websites`. The server scans again and saves the skill and its approval in one transaction only when the two lists match; otherwise nothing is saved. A git skill is stored at the commit that was read (its `ref` becomes that commit), and its `network_hosts` always comes from the scan, never from the request. An edit that keeps the saved url, path and commit is not read again.
+- Removing a skill in Settings removes its websites with its record, and drops its allow-once answers in open chats. A website another installed skill lists stays allowed through that skill's own record.
 - Scripts a skill brings run in the sandbox under the same rules as any other code.
-- After a call that finishes while the chat is open, the app turns the skill on for that chat. A finished call in an older chat is left alone.
+- The server turns the skill on for the chat it was added from, by adding its name to that chat's own setup, so it is ready from the next message in the app, on Telegram or through the API. A chat that runs a saved agent, or has no sandbox, is left as it is, and the reply says the skill is not on there. The app also refreshes its skill lists after a call that finishes while the chat is open.
+- A chat or schedule that still names a skill removed later keeps working: the removed skill is left out of its turns.
 - Without a sandbox the skill is still added, and the assistant says it will work once the sandbox is set up.
 
 ## 5. Where it is off
 
-- **Incognito chats:** the tool is not offered, and the classifier refuses the call, like every other lasting change.
+- **Incognito chats:** the add and remove tools are not offered, and the classifier refuses the call, like every other lasting change.
 - **Scheduled runs:** the tools are not mounted. Nobody is there to read the card.
 - **Instances whose skills are kept by a managed registry:** the tools are not mounted.
-- **Offline mode:** `install_skill` is marked as needing the network.
+- **Offline mode:** `install_skill` is marked as needing the network. `remove_skill` is not.
+
+## 6. Removing a skill
+
+- The classifier ranks `remove_skill` as an action that always asks, with its own reason (`skill_remove`), and no earlier answer covers it.
+- The host finds the skill by name. A name that is not added is refused without a card, and tells the model to call `list_skills`.
+- The card is a plain sentence card: it names the skill, says it is taken out of every chat, and lists the websites it will no longer reach (the same list the sandbox would grant it). It says the step can't be undone: to use the skill again, it is added again and its websites approved again.
+- The approved call carries the name and the website list. If either differs when the person answers, the approval no longer covers the call and nothing is removed.
+- Allow does what Settings' Remove does: deletes the record, which takes its websites with it, and drops its allow-once answers in open chats. Not now changes nothing.
+- After a call that finishes while the chat is open, the app takes the skill out of that chat and reads the skill lists again.
+- The server also takes the skill out of the setup of the chat it was removed from. Other chats that still name it skip it when they run. After a call that finishes while the chat is open, the app takes the skill out of its own copy of that chat and reads the skill lists again.
 
 ## Privacy
 
@@ -65,14 +81,14 @@ Adding a skill from GitHub sends GitHub the address of that skill and a request 
 
 All tests use synthetic data and a stand-in for GitHub; none reaches the real site.
 
-- Classifier: the list runs without asking, an install always asks, skill text is escaped, an unsettled install is refused, an unknown tool fails closed, and an incognito chat is refused.
-- Tool set: the card holds what the server read; the name and description cannot be passed in; nothing is saved without approval; a branch that moved ends the approval; starter skills need no lookup; no sites are granted; nothing is replaced or added twice; each refusal says the one thing to do next.
+- Classifier: the list runs without asking, an install always asks, a removal always asks and names the websites it loses, skill text is escaped, an unsettled install is refused, an unknown tool fails closed, and an incognito chat is refused.
+- Tool set: the card holds what the server read; the name and description cannot be passed in; nothing is saved without approval; a branch that moved ends the approval; starter skills need no lookup; the card lists the websites found and approving allows exactly those; a changed list ends the approval; unreadable files add nothing; a failed approval write removes the skill; nothing is replaced or added twice; each refusal says the one thing to do next; a removal asks, removes on approval, removes nothing without it, and refuses a name that is not added.
 - Reader: address forms, the opening block, each failure, and the size limit.
 - App: the card, the server event parser, and turning the skill on for the chat.
 - End to end: a chat asks for a starter skill, the card shows, a chat-wide answer is refused, and Allow saves it. The browser test does the same on the screen.
 
 ## Out of scope
 
-- Changing, updating or removing a skill from a chat.
+- Changing or updating a skill from a chat.
 - Private repositories and GitLab from a chat. Both still work in Settings.
-- Letting a skill reach sites from a chat.
+- Allowing a website one by one from the install card: the list is approved whole or not at all.

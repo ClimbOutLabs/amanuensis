@@ -13,7 +13,13 @@ import {
   ImplementationPlanGrantScopeSchema,
 } from '../mcp/implementationPlanGrant';
 import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
-import { TIER2_ACTION_KINDS, Tier3CardSchema, TierSchema, TrackedExecutionBindingSchema } from '../permissions/tier';
+import {
+  TIER2_ACTION_KINDS,
+  Tier3CardSchema,
+  Tier3SkillNetworkSchema,
+  TierSchema,
+  TrackedExecutionBindingSchema,
+} from '../permissions/tier';
 import { GitRemotePreconditionSchema } from '../sandbox/gitRemoteObservation';
 import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
@@ -75,6 +81,12 @@ const ToolEffectHintsSchema = z.object({
     .boolean()
     .optional()
     .describe('MCP openWorldHint: the tool reaches systems beyond this machine, so data can leave it.'),
+  requires_network: z
+    .boolean()
+    .optional()
+    .describe(
+      'The tool needs the network, as its own registration declares. Set by the host from the registration, never from tool arguments.',
+    ),
   effect: z
     .enum(['inspect', 'edit', 'verify', 'commit', 'push', 'execute'])
     .optional()
@@ -106,18 +118,29 @@ export const DocumentScopeSchema = z
   })
   .describe('Host-derived folders the document reader may read without asking. Never model-authored.');
 
-export const BrowserClickReviewSchema = z
+export const BrowserElementReviewSchema = z
   .object({
-    site: z.string().describe('Host of the page the click would happen on.'),
-    accessible_name: z.string().describe("The clicked element's accessible name, read from the live page."),
+    site: z.string().describe('Host of the page the element is on.'),
+    accessible_name: z.string().describe("The element's name as a person reads it on the live page."),
+    // A read stored before this field existed matches no live element, so acting on it is refused.
+    role: z
+      .string()
+      .default('')
+      .describe('What kind of control the element is: link, button, textbox, combobox and so on.'),
     is_form_submit: z
       .boolean()
       .describe('True when the element submits a form: type=submit, or a plain button inside a form.'),
     form_values: z
       .record(z.string(), z.string())
-      .describe("Named field values on the clicked element's form, sensitive ones already masked."),
+      .describe("Named field values on the element's form, sensitive ones already masked."),
+    // A read stored before this field existed counts as not a plain link, so it asks first.
+    link_url: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('The http or https address the element is a plain link to, or null for anything else.'),
   })
-  .describe('Host-read context for a browser click, used to classify it and to build its approval card.');
+  .describe('Host-read context for the element a browser action acts on, used to classify it and build its card.');
 
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
@@ -189,8 +212,8 @@ export const InternalToolCallInfoSchema = z.object({
   document_scope: DocumentScopeSchema.optional().describe(
     'Host-derived folders the document reader may read without asking. Never model-authored or client supplied.',
   ),
-  browser_click: BrowserClickReviewSchema.optional().describe(
-    'Host-read context for a browser_click call, read from the live page before the click. Never model-authored.',
+  browser_element: BrowserElementReviewSchema.optional().describe(
+    'Host-read context for the element a browser click, type or select acts on, read from the live page first. Never model-authored.',
   ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
@@ -216,12 +239,12 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
-  grant_host: z
+  grant_binding: z
     .string()
     .nullable()
     .optional()
     .describe(
-      'Connector host a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
+      'Connector setup a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
     ),
   grant_tool_name: z
     .string()
@@ -239,10 +262,27 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'Set when an unattended run held this call for the owner instead of asking; duplicate marks a repeat of a call already held in the same batch. Never model-authored.',
     ),
+  skill_network: Tier3SkillNetworkSchema.nullable()
+    .optional()
+    .describe(
+      'Set on a held call that carries a skill network card: the skill, the sites it asks for, and why. The answer is recorded against the skill, and approving re-runs the command. Never model-authored.',
+    ),
   search_provider_call: z
     .literal(true)
     .optional()
     .describe('Set on every call to the connector the user designated as search provider. Never model-authored.'),
+  search_result_call: z
+    .literal(true)
+    .optional()
+    .describe(
+      'Set when the call ran one of the search tools the designated provider record declares, so its results are recorded as search hits. Never model-authored.',
+    ),
+  page_read_call: z
+    .literal(true)
+    .optional()
+    .describe(
+      'Set when the call ran one of the page-read tools the designated provider record declares, so what it returned is recorded as page text. Never model-authored.',
+    ),
   secret_path_read: z
     .literal(true)
     .optional()
@@ -254,6 +294,34 @@ export const InternalToolCallInfoSchema = z.object({
     .optional()
     .describe(
       "Set when the call is a send through the host's own Email sidecar, so approving it checks the Email list. Never model-authored.",
+    ),
+  standing_grant_barred: z
+    .boolean()
+    .optional()
+    .describe('Set from the classifier decision when this call may never take a standing grant. Never model-authored.'),
+  chat_grantable_consequence: z
+    .boolean()
+    .optional()
+    .describe(
+      'Set from the classifier decision when this consequential call may take a chat grant for a target its card names. Never model-authored.',
+    ),
+  site_grantable_open: z
+    .boolean()
+    .optional()
+    .describe(
+      'Set from the classifier decision when this browser open may take a chat grant for its whole site. Never model-authored.',
+    ),
+  own_calendar_change: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set from the classifier decision when this call changes only the person's own calendar. Never model-authored.",
+    ),
+  own_drive_write: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set from the classifier decision when this call writes only the person's own Drive files. Never model-authored.",
     ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
@@ -395,7 +463,7 @@ export type RedactedThinkingBlock = z.infer<typeof RedactedThinkingBlockSchema>;
 export type ToolEffectHints = z.infer<typeof ToolEffectHintsSchema>;
 export type MapsHosts = z.infer<typeof MapsHostsSchema>;
 export type DocumentScope = z.infer<typeof DocumentScopeSchema>;
-export type BrowserClickReview = z.infer<typeof BrowserClickReviewSchema>;
+export type BrowserElementReview = z.infer<typeof BrowserElementReviewSchema>;
 export type InternalToolCallInfo = z.infer<typeof InternalToolCallInfoSchema>;
 export type RegisteredCommandExecution = z.infer<typeof RegisteredCommandExecutionSchema>;
 export type TrueFoundrySystemToolInfo = z.infer<typeof TrueFoundrySystemToolInfoSchema>;

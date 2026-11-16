@@ -5,12 +5,19 @@ import os
 import struct
 import sys
 import tempfile
+import types
 import unittest
 import wave
 from unittest import mock
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# The service does not start without a shared secret, so every test runs with this one and its
+# clients present it, as the app does.
+TEST_SECRET = "test-secret-value-with-more-than-32-chars"
+os.environ["SPEECH_SECRET"] = TEST_SECRET
+SECRET_HEADERS = {"x-speech-secret": TEST_SECRET}
 
 import hashlib  # noqa: E402
 
@@ -82,7 +89,7 @@ def make_client(settings: Settings | None = None, factory=FakeTranscriber) -> Te
     settings = settings or Settings()
     FakeTranscriber.instances.clear()
     app = create_app(settings=settings, transcriber_factory=factory)
-    return TestClient(app)
+    return TestClient(app, headers=SECRET_HEADERS)
 
 
 class HealthzTest(unittest.TestCase):
@@ -103,6 +110,61 @@ class HealthzTest(unittest.TestCase):
         self.assertEqual(body["status"], "ok")
         self.assertFalse(body["model_loaded"])
         self.assertIn("no model here", body["model_error"])
+
+
+class SharedSecretTest(unittest.TestCase):
+    SECRET = TEST_SECRET
+
+    def settings(self) -> Settings:
+        settings = Settings()
+        settings.shared_secret = self.SECRET
+        return settings
+
+    def test_transcribe_without_the_secret_is_refused(self):
+        wav = make_sine_wav()
+        app = create_app(settings=self.settings(), transcriber_factory=FakeTranscriber)
+        with TestClient(app) as client:
+            response = client.post("/v1/transcribe", content=wav, headers={"Content-Type": "audio/wav"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_transcribe_with_a_wrong_secret_is_refused(self):
+        wav = make_sine_wav()
+        with make_client(settings=self.settings()) as client:
+            response = client.post(
+                "/v1/transcribe",
+                content=wav,
+                headers={"Content-Type": "audio/wav", "x-speech-secret": "a-different-secret-that-is-long-enough"},
+            )
+        self.assertEqual(response.status_code, 401)
+
+    def test_transcribe_with_the_secret_works(self):
+        wav = make_sine_wav()
+        with make_client(settings=self.settings()) as client:
+            response = client.post(
+                "/v1/transcribe",
+                content=wav,
+                headers={"Content-Type": "audio/wav", "x-speech-secret": self.SECRET},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["text"], "synthetic transcript")
+
+    def test_healthz_stays_open_without_the_secret(self):
+        with make_client(settings=self.settings()) as client:
+            response = client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["model_loaded"])
+
+    def test_a_short_secret_refuses_to_start(self):
+        settings = Settings()
+        settings.shared_secret = "too-short"
+        with self.assertRaises(ValueError):
+            create_app(settings=settings, transcriber_factory=FakeTranscriber)
+
+    def test_no_secret_refuses_to_start(self):
+        settings = Settings()
+        settings.shared_secret = None
+        with self.assertRaises(ValueError):
+            create_app(settings=settings, transcriber_factory=FakeTranscriber)
 
 
 class TranscribeTest(unittest.TestCase):
@@ -251,7 +313,7 @@ class PrivacyTest(unittest.TestCase):
 
 
 class PinnedModelTest(unittest.TestCase):
-    """Model weight pinning: synthetic files and a fake downloader only.
+    """Model weight pinning: synthetic files in a temporary cache only.
 
     Never touches the network or real weights. Each test fails if the
     check it covers is removed from the implementation.
@@ -296,78 +358,46 @@ class PinnedModelTest(unittest.TestCase):
         patcher = mock.patch.dict(aman_stt.PINNED_MODELS, {"t": self.pinned})
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.downloads = []
 
-        def fake_downloader(pinned, cache_dir):
-            self.downloads.append((pinned.repo, pinned.revision))
-            return self._write_snapshot(pinned.repo, pinned.revision, self.FAKE_FILES)
-
-        self.fake_downloader = fake_downloader
-
-    def _ensure(self, size="t", downloader=None):
-        return ensure_verified_model_dir(
-            model_size=size,
-            cache_dir=self.cache_dir,
-            downloader=downloader or self.fake_downloader,
-        )
+    def _ensure(self, size="t"):
+        return ensure_verified_model_dir(model_size=size, cache_dir=self.cache_dir)
 
     def test_good_cache_loads(self):
+        self._write_snapshot(self.pinned.repo, self.pinned.revision, self.FAKE_FILES)
         snapshot = self._ensure()
         self.assertTrue(os.path.isdir(snapshot))
-        self.assertEqual(self.downloads, [(self.pinned.repo, self.pinned.revision)])
 
-    def test_unpinned_size_is_refused_without_download(self):
+    def test_unpinned_size_is_refused(self):
         with self.assertRaisesRegex(ModelVerificationError, "no pinned revision"):
             self._ensure(size="tiny")
-        self.assertEqual(self.downloads, [])
+
+    def test_missing_model_is_refused_and_never_downloaded(self):
+        def no_network(*args, **kwargs):
+            raise AssertionError("the service must never download a model")
+
+        fake_hub = types.ModuleType("huggingface_hub")
+        fake_hub.snapshot_download = no_network
+        with mock.patch.dict(sys.modules, {"huggingface_hub": fake_hub}):
+            with self.assertRaisesRegex(ModelVerificationError, "never downloads models"):
+                self._ensure()
 
     def test_tampered_file_is_refused(self):
         tampered = dict(self.FAKE_FILES)
         tampered["model.bin"] = b"tampered!"
-
-        def dl(pinned, cache_dir):
-            return self._write_snapshot(pinned.repo, pinned.revision, tampered)
-
+        self._write_snapshot(self.pinned.repo, self.pinned.revision, tampered)
         with self.assertRaisesRegex(ModelVerificationError, "mismatch"):
-            self._ensure(downloader=dl)
+            self._ensure()
 
     def test_missing_file_is_refused(self):
         short = {k: v for k, v in self.FAKE_FILES.items() if k != "tokenizer.json"}
-
-        def dl(pinned, cache_dir):
-            return self._write_snapshot(pinned.repo, pinned.revision, short)
-
+        self._write_snapshot(self.pinned.repo, self.pinned.revision, short)
         with self.assertRaisesRegex(ModelVerificationError, "missing"):
-            self._ensure(downloader=dl)
+            self._ensure()
 
-    def test_wrong_revision_is_refused(self):
-        other_revision = "b" * 40
-
-        def dl(pinned, cache_dir):
-            return self._write_snapshot(pinned.repo, other_revision, self.FAKE_FILES)
-
-        with self.assertRaisesRegex(ModelVerificationError, "revision mismatch"):
-            self._ensure(downloader=dl)
-
-    def test_offline_start_loads_from_verified_cache(self):
-        self._write_snapshot(self.pinned.repo, self.pinned.revision, self.FAKE_FILES)
-
-        def no_network(pinned, cache_dir):
-            raise AssertionError("network must not be touched on a warm cache")
-
-        snapshot = self._ensure(downloader=no_network)
-        self.assertTrue(os.path.isdir(snapshot))
-
-    def test_offline_cache_with_tampered_file_is_still_refused(self):
-        tampered = dict(self.FAKE_FILES)
-        tampered["config.json"] = b"{}"
-        self._write_snapshot(self.pinned.repo, self.pinned.revision, tampered)
-
-        def no_network(pinned, cache_dir):
-            raise AssertionError("network must not be touched")
-
-        with self.assertRaisesRegex(ModelVerificationError, "mismatch"):
-            self._ensure(downloader=no_network)
+    def test_other_revision_is_not_used(self):
+        self._write_snapshot(self.pinned.repo, "b" * 40, self.FAKE_FILES)
+        with self.assertRaisesRegex(ModelVerificationError, "is not in"):
+            self._ensure()
 
     def test_fallback_model_follows_same_rules(self):
         primary = self._fake_pinned(repo="FakeOrg/fake-primary")
@@ -377,10 +407,6 @@ class PinnedModelTest(unittest.TestCase):
             tampered["model.bin"] = b"tampered!"
             self._write_snapshot(primary.repo, primary.revision, tampered)
             self._write_snapshot(fallback.repo, fallback.revision, self.FAKE_FILES)
-
-            def no_network(pinned, cache_dir):
-                raise AssertionError("network must not be touched")
-
             loaded = []
 
             def fake_factory(snapshot_dir):
@@ -388,61 +414,25 @@ class PinnedModelTest(unittest.TestCase):
                 return object()
 
             model, size, primary_error = _load_first_verified(
-                ("t", "f"), self.cache_dir, no_network, fake_factory
+                ("t", "f"), self.cache_dir, fake_factory
             )
             self.assertEqual(size, "f")
             self.assertEqual(len(loaded), 1)
             self.assertIn("fake-fallback", loaded[0])
 
     def test_all_models_failing_raises(self):
-        def dl(pinned, cache_dir):
-            return self._write_snapshot(pinned.repo, pinned.revision, {})
-
+        self._write_snapshot(self.pinned.repo, self.pinned.revision, {})
         with self.assertRaises(ModelVerificationError):
-            _load_first_verified(("t",), self.cache_dir, dl, lambda d: object())
-
-    def test_missing_file_retries_download_once(self):
-        # Warm cache with a missing file (interrupted download): the
-        # snapshot is removed and downloaded again, exactly once.
-        short = {k: v for k, v in self.FAKE_FILES.items() if k != "tokenizer.json"}
-        self._write_snapshot(self.pinned.repo, self.pinned.revision, short)
-        calls = []
-
-        def dl(pinned, cache_dir):
-            calls.append((pinned.repo, pinned.revision))
-            return self._write_snapshot(pinned.repo, pinned.revision, self.FAKE_FILES)
-
-        snapshot = self._ensure(downloader=dl)
-        self.assertTrue(os.path.isdir(snapshot))
-        self.assertEqual(len(calls), 1)
-        # All files are present after the retry.
-        for name in self.FAKE_FILES:
-            self.assertTrue(os.path.isfile(os.path.join(snapshot, name)))
-
-    def test_missing_file_after_download_is_hard_failure(self):
-        # If the download itself leaves a file missing, there is no second retry.
-        short = {k: v for k, v in self.FAKE_FILES.items() if k != "tokenizer.json"}
-        calls = []
-
-        def dl(pinned, cache_dir):
-            calls.append((pinned.repo, pinned.revision))
-            return self._write_snapshot(pinned.repo, pinned.revision, short)
-
-        with self.assertRaisesRegex(ModelVerificationError, "missing"):
-            self._ensure(downloader=dl)
-        self.assertEqual(len(calls), 1)
+            _load_first_verified(("t",), self.cache_dir, lambda d: object())
 
     def test_unpinned_preprocessor_config_is_refused(self):
         # faster-whisper reads preprocessor_config.json when present; the
         # pinned revisions do not ship it, so its presence is refused.
         extra = dict(self.FAKE_FILES)
         extra["preprocessor_config.json"] = b'{"fake": true}'
-
-        def dl(pinned, cache_dir):
-            return self._write_snapshot(pinned.repo, pinned.revision, extra)
-
+        self._write_snapshot(self.pinned.repo, self.pinned.revision, extra)
         with self.assertRaisesRegex(ModelVerificationError, "unpinned loader-read file"):
-            self._ensure(downloader=dl)
+            self._ensure()
 
     def test_primary_error_returned_when_fallback_loads(self):
         primary = self._fake_pinned(repo="FakeOrg/fake-primary")
@@ -453,17 +443,8 @@ class PinnedModelTest(unittest.TestCase):
             self._write_snapshot(primary.repo, primary.revision, tampered)
             self._write_snapshot(fallback.repo, fallback.revision, self.FAKE_FILES)
 
-            def no_network(pinned, cache_dir):
-                raise AssertionError("network must not be touched")
-
-            loaded = []
-
-            def fake_factory(snapshot_dir):
-                loaded.append(snapshot_dir)
-                return object()
-
             _model, size, primary_error = _load_first_verified(
-                ("t", "f"), self.cache_dir, no_network, fake_factory
+                ("t", "f"), self.cache_dir, lambda d: object()
             )
             self.assertEqual(size, "f")
             self.assertIsNotNone(primary_error)
@@ -591,13 +572,6 @@ class TranscriberWiringTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-        def fake_downloader(pinned_model, cache_dir):
-            return self._write_snapshot(
-                pinned_model.repo, pinned_model.revision, self.FAKE_FILES
-            )
-
-        self.fake_downloader = fake_downloader
-
         # Recording stand-in for faster_whisper.WhisperModel, which the
         # transcriber imports lazily inside __init__.
         self.constructed = []
@@ -614,10 +588,9 @@ class TranscriberWiringTest(unittest.TestCase):
         self.addCleanup(mod_patcher.stop)
 
     def test_whisper_model_receives_verified_snapshot_dir(self):
+        self._write_snapshot(self.pinned.repo, self.pinned.revision, self.FAKE_FILES)
         settings = Settings(model_dir=self.cache_dir, model_size="t", cpu_threads=7)
-        transcriber = FasterWhisperTranscriber(
-            settings, downloader=self.fake_downloader
-        )
+        transcriber = FasterWhisperTranscriber(settings)
         self.assertEqual(len(self.constructed), 1)
         args, kwargs = self.constructed[0]
         self.assertEqual(
@@ -647,13 +620,10 @@ class TranscriberWiringTest(unittest.TestCase):
             self._write_snapshot(self.pinned.repo, self.pinned.revision, tampered)
             self._write_snapshot(fallback.repo, fallback.revision, self.FAKE_FILES)
 
-            def no_network(pinned_model, cache_dir):
-                raise AssertionError("network must not be touched")
-
             settings = Settings(
                 model_dir=self.cache_dir, model_size="t", fallback_model_size="f"
             )
-            transcriber = FasterWhisperTranscriber(settings, downloader=no_network)
+            transcriber = FasterWhisperTranscriber(settings)
             self.assertEqual(transcriber.model_label, "whisper-f-int8")
             self.assertIsNotNone(transcriber.primary_error)
             self.assertIn("t", transcriber.primary_error)

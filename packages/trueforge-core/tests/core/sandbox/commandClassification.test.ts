@@ -4,7 +4,6 @@ import {
   sandboxCommandHasNetworkIntent,
   sandboxCommandIsOnlyRepositorySetup,
   sandboxCommandRequiresApproval,
-  sandboxCommandUsesEvaluatorWrapper,
   sandboxCommandUsesUnstructuredOperation,
   sandboxCommandWebEgressRejection,
   sandboxInvocationPolicy,
@@ -280,30 +279,20 @@ describe('sandbox command admission', () => {
     `time sh -c 'git push origin HEAD'`,
     `xargs timeout 5 sh -c 'git push origin HEAD'`,
     `/usr/bin/timeout --signal=KILL 5 -- sh -c 'git push origin HEAD'`,
-  ])('rejects direct and recursively nested evaluator wrappers: %s', command => {
-    expect(sandboxCommandUsesEvaluatorWrapper(command)).toBe(true);
+  ])('never rates a direct or nested evaluator wrapper as a read that skips its card: %s', command => {
+    expect(sandboxCommandEffect(command)).not.toBe('inspect');
+    expect(sandboxCommandRequiresApproval(sandboxInvocationPolicy({ command, purpose: 'inspect' }).effect)).toBe(true);
   });
 
-  it('fails closed when indirect command nesting exceeds the traversal limit', () => {
-    expect(sandboxCommandUsesEvaluatorWrapper('xargs xargs xargs xargs xargs git push origin HEAD')).toBe(true);
-  });
-
-  it('fails closed when environment wrapper nesting exceeds the traversal limit', () => {
-    expect(sandboxCommandUsesEvaluatorWrapper("env env env env env sh -c 'touch out'")).toBe(true);
+  it('fails closed when indirect or environment wrapper nesting exceeds the traversal limit', () => {
+    expect(sandboxCommandEffect('xargs xargs xargs xargs xargs git push origin HEAD')).not.toBe('inspect');
+    expect(sandboxCommandEffect("env env env env env sh -c 'touch out'")).not.toBe('inspect');
   });
 
   it('finds separately reviewable commit and push operations through xargs', () => {
     const command = 'printf x | xargs git commit -m nested && printf x | xargs git push origin HEAD';
     expect(sandboxCommandHasGitSubcommand(command, 'commit')).toBe(true);
     expect(sandboxCommandHasGitSubcommand(command, 'push')).toBe(true);
-  });
-
-  it('does not treat evaluator-looking split-string arguments as command wrappers', () => {
-    expect(sandboxCommandUsesEvaluatorWrapper(`env -S "echo sh -c unsafe"`)).toBe(false);
-  });
-
-  it('does not report ordinary redirection as an evaluator wrapper', () => {
-    expect(sandboxCommandUsesEvaluatorWrapper('cat file > out')).toBe(false);
   });
 
   it.each([
@@ -343,6 +332,19 @@ describe('sandbox command admission', () => {
   it('keeps environment-prefixed inspections and unknown commands approval-gated', () => {
     expect(sandboxCommandEffect('PAGER=/tmp/custom git log -1')).toBe('execute');
     expect(sandboxCommandEffect('PATH=/tmp/tools:$PATH pnpm test')).toBe('execute');
+  });
+
+  it('counts only a readable check as a verification', () => {
+    expect(sandboxInvocationPolicy({ command: 'pnpm test', purpose: 'verify' })).toEqual({
+      effect: 'verify',
+      rejection: undefined,
+    });
+    for (const command of ['pnpm test > test.log', 'echo $(pnpm test)', "node -e 'process.exit(0)'"]) {
+      expect(sandboxInvocationPolicy({ command, purpose: 'verify' })).toEqual({
+        effect: 'execute',
+        rejection: undefined,
+      });
+    }
   });
 
   it('auto-admits only inspect effects', () => {

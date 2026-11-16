@@ -129,7 +129,12 @@ test(
           await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
           assertFits(await homeFit(page), 'after a first chat');
           await page.screenshot({
-            path: await featureShotPath({ surface: 'screen:home', step: 'after-a-first-chat' }),
+            path: await featureShotPath({
+              surface: 'screen:home',
+              step: 'after-a-first-chat',
+              did: 'Sent a first chat, "Plan my week", then opened Aman again on a 1440 by 900 screen.',
+              expect: 'The everyday home shows and all of it fits the screen without scrolling.',
+            }),
           });
           await context.close();
 
@@ -148,7 +153,12 @@ test(
             await menu.getByRole('button', { name: 'Sign out', exact: true }).waitFor({ timeout: RENDER_TIMEOUT_MS });
             const label = `${theme.preset} ${theme.mode}`;
             await menuPage.screenshot({
-              path: await featureShotPath({ surface: 'screen:home', step: `more-menu-${theme.preset}-${theme.mode}` }),
+              path: await featureShotPath({
+                surface: 'screen:home',
+                step: `more-menu-${theme.preset}-${theme.mode}`,
+                did: `Opened the More menu in the ${theme.preset} look, ${theme.mode} mode, signed in with a connected account.`,
+                expect: 'The menu uses the colours of that look, and every item has a label, down to Sign out.',
+              }),
             });
 
             const look = await menu.evaluate(el => {
@@ -164,7 +174,7 @@ test(
               };
               probe.remove();
               const style = getComputedStyle(el);
-              const rows = Array.from(el.querySelectorAll('button, [role="group"] > p')).map(row => {
+              const rows = Array.from(el.querySelectorAll('button')).map(row => {
                 const rowStyle = getComputedStyle(row);
                 const icon = row.querySelector('svg');
                 return {
@@ -189,7 +199,7 @@ test(
               );
             }
             const labels = look.rows.map(row => row.text);
-            for (const expected of ['Appearance', 'Light', 'Dark', 'Match my computer', 'Settings', 'Sign out']) {
+            for (const expected of ['Settings', 'Sign out']) {
               assert.ok(labels.includes(expected), `${label}: the menu lists ${expected} (${labels.join(', ')})`);
             }
             assert.equal(
@@ -284,6 +294,31 @@ test(
           await chatList.getByRole('button', { name: 'New chat', exact: true }).click();
           await pickPage.getByTitle('Choose a persona').waitFor({ timeout: RENDER_TIMEOUT_MS });
           await pickContext.close();
+
+          at = 'the chat header at 360px';
+          // At 360px wide the chat header keeps Chat actions on screen: the light and dark button
+          // steps aside below the md breakpoint, and the Appearance page keeps the full pick.
+          const phoneContext = await browser.newContext({ viewport: { width: 360, height: 800 } });
+          const phonePage = await phoneContext.newPage();
+          await phonePage.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+          await composer(phonePage).waitFor({ timeout: RENDER_TIMEOUT_MS });
+          await composer(phonePage).fill('A note from a narrow phone');
+          await composer(phonePage).press('Enter');
+          await phonePage.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+          const chatActions = phonePage.getByRole('button', { name: 'Chat actions' });
+          await chatActions.waitFor({ timeout: RENDER_TIMEOUT_MS });
+          const chatActionsBox = await chatActions.boundingBox();
+          assert.ok(chatActionsBox !== null, 'at 360px, Chat actions has a box');
+          assert.ok(
+            chatActionsBox.x >= 0 && chatActionsBox.x + chatActionsBox.width <= 360,
+            `at 360px, Chat actions stays on screen (${chatActionsBox.x} to ${chatActionsBox.x + chatActionsBox.width})`,
+          );
+          assert.equal(
+            await phonePage.getByRole('button', { name: 'Switch to dark' }).isVisible(),
+            false,
+            'at 360px, the light and dark button steps aside',
+          );
+          await phoneContext.close();
         },
       });
     } catch (error) {

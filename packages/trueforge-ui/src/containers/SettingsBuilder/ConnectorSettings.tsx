@@ -25,6 +25,7 @@ import { hasNotesFolderSetup, type NotesFolderStatus } from '@/server/notesFolde
 import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
+import { hasTelegramSetup, type TelegramAccountStatus } from '@/server/telegramSetup.js';
 import type { AgentSpec, ConnectorAuth, ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 import { buildHomeAssistantEndpoint } from '@/utils/homeAssistantPreset.js';
@@ -37,9 +38,9 @@ import CalendarSetupPanel from './CalendarSetupPanel.js';
 import ConnectorDetails from './ConnectorDetails.js';
 import EmailSetupPanel from './EmailSetupPanel.js';
 import GoogleSetupPanel from './GoogleSetupPanel.js';
-import { isMemoryProvider, memoryProviderUpdateRequest, withRemediation } from './memoryProvider.js';
 import NotesFolderSetupPanel from './NotesFolderSetupPanel.js';
-import { searchProviderForNewConnector } from './searchProvider.js';
+import { searchProviderForNewConnector, searchProviderUpdateRequest } from './searchProvider.js';
+import TelegramSetupPanel from './TelegramSetupPanel.js';
 
 type ConnectorListItem =
   { connector: ConnectorBase; isConfigured: true } | { connector: ConnectorCatalogEntry; isConfigured: false };
@@ -74,6 +75,15 @@ function homeAssistantCheckMessage(result: HomeAssistantCheck): ConnectorCheckSt
     ok: true,
     message: `Connected. ${String(result.toolCount)} ${result.toolCount === 1 ? 'tool' : 'tools'}, ${String(result.entityCount)} exposed ${result.entityCount === 1 ? 'entity' : 'entities'}`,
   };
+}
+
+/** Joins a message the API wrote to a remediation line without doubling its punctuation. */
+function withRemediation({ message, remediation }: { message: string; remediation: string }): string {
+  const trimmed = message.trim();
+  if (trimmed === '') {
+    return remediation;
+  }
+  return /[.!?]$/.test(trimmed) ? `${trimmed} ${remediation}` : `${trimmed}. ${remediation}`;
 }
 
 function connectionTestFailureMessage(result: { kind: ConnectorConnectionFailureKind; message: string }): string {
@@ -154,6 +164,9 @@ const ConnectorSettings = () => {
   const [calendarStatusFailed, setCalendarStatusFailed] = useState(false);
   const [calendarPanelOpen, setCalendarPanelOpen] = useState(false);
 
+  const [telegramStatus, setTelegramStatus] = useState<TelegramAccountStatus | null>(null);
+  const [telegramStatusFailed, setTelegramStatusFailed] = useState(false);
+  const [telegramPanelOpen, setTelegramPanelOpen] = useState(false);
   const [notesFolderStatus, setNotesFolderStatus] = useState<NotesFolderStatus | null>(null);
   const [notesFolderStatusFailed, setNotesFolderStatusFailed] = useState(false);
   const [notesFolderPanelOpen, setNotesFolderPanelOpen] = useState(false);
@@ -226,6 +239,12 @@ const ConnectorSettings = () => {
         setCalendarStatus(next !== null && next.available ? next : null);
         setCalendarStatusFailed(next === null);
       }
+      // The Telegram card likewise.
+      if (hasTelegramSetup(connectorCatalog)) {
+        const next = await connectorCatalog.getTelegramStatus().catch(() => null);
+        setTelegramStatus(next !== null && next.available ? next : null);
+        setTelegramStatusFailed(next === null);
+      }
       // The Notes folder card likewise, but it has no "available" state: the folder is a local
       // path, so every instance offers it and only a failed read shows as a failure.
       if (hasNotesFolderSetup(connectorCatalog)) {
@@ -260,10 +279,7 @@ const ConnectorSettings = () => {
   const matchingConnected = useMemo(() => {
     const result: ConnectorBase[] = [];
     for (const item of matchingConnectors) {
-      // The memory bank is stored as an MCP server row but is not a connector a user acts on:
-      // it is never offered in a chat, the model never chooses to call it, and Settings → Memory
-      // owns its whole lifecycle. Listing it here too would invite treating it as a connector.
-      if (item.isConfigured && !isMemoryProvider(item.connector)) {
+      if (item.isConfigured) {
         const authenticated = connectors.authStatusById.get(item.connector.id) ?? item.connector.authenticated;
         result.push(
           authenticated === item.connector.authenticated ? item.connector : { ...item.connector, authenticated },
@@ -372,10 +388,10 @@ const ConnectorSettings = () => {
       const existing = connectors.ordered.find(({ connector }) => connector.id === entry.id);
       const existingConnector = existing?.isConfigured ? existing.connector : undefined;
       if (existingConnector) {
-        // updateConnector sends the full manifest, so the memory-provider flag has to be
-        // resupplied here too or it would be silently cleared by this unrelated key change.
+        // updateConnector sends the full manifest, so the search-provider flag is resupplied
+        // here or this unrelated key change would silently clear it.
         await connectorCatalog.updateConnector(
-          memoryProviderUpdateRequest({ ...existingConnector, auth }, isMemoryProvider(existingConnector)),
+          searchProviderUpdateRequest({ ...existingConnector, auth }, isSearchProvider(existingConnector)),
         );
         // The credential just changed, so any earlier connection test no longer speaks to what
         // is stored now; go back to unverified until it is tested again.
@@ -725,6 +741,7 @@ const ConnectorSettings = () => {
 
   const emailMatchesQuery = normalizedQuery === '' || 'email mail'.includes(normalizedQuery);
   const calendarMatchesQuery = normalizedQuery === '' || 'calendar caldav events'.includes(normalizedQuery);
+  const telegramMatchesQuery = normalizedQuery === '' || 'telegram bot chat messages'.includes(normalizedQuery);
   const notesFolderMatchesQuery =
     normalizedQuery === '' || 'notes folder obsidian markdown vault'.includes(normalizedQuery);
 
@@ -928,7 +945,7 @@ const ConnectorSettings = () => {
               }}
             >
               <Icon name="plus" size="1rem" className="mr-1" />
-              Add MCP Server
+              Add a custom connector
             </Button>
           </div>
 
@@ -985,6 +1002,37 @@ const ConnectorSettings = () => {
                 state={calendarStatus?.state ?? 'not_connected'}
                 failed={calendarStatusFailed}
                 onOpen={() => setCalendarPanelOpen(true)}
+                onRetry={() => void refresh()}
+              />
+            ) : null}
+
+            {!loading &&
+            (telegramStatus !== null || telegramStatusFailed) &&
+            telegramMatchesQuery &&
+            hasTelegramSetup(connectorCatalog) ? (
+              <AccountConnectorCard
+                id="telegram"
+                title="Telegram"
+                glyph="T"
+                description="Message your assistant from Telegram. Replies, reminders and ok requests come back there; the bot answers only you."
+                connectedLine={
+                  telegramStatus?.botName
+                    ? `Connected as ${telegramStatus.botName}${telegramStatus.botUsername !== null ? ` (@${telegramStatus.botUsername})` : ''}.`
+                    : null
+                }
+                stoppedLine="The bot stopped answering. Open Manage to connect it again."
+                notWorkingLine="Telegram could not be reached just now. Check your internet connection, then open Manage."
+                failedLabel="Couldn't check Telegram right now"
+                pillLabel={telegramStatus?.state === 'awaiting_pairing' ? 'Waiting for pairing' : undefined}
+                lineOverride={
+                  telegramStatus?.state === 'awaiting_pairing'
+                    ? 'Your bot is connected. Open Manage and enter the code it sent you to finish pairing.'
+                    : undefined
+                }
+                actionLabel={telegramStatus?.state === 'awaiting_pairing' ? 'Pair' : undefined}
+                state={telegramStatus?.state === 'connected' ? 'connected' : 'not_connected'}
+                failed={telegramStatusFailed}
+                onOpen={() => setTelegramPanelOpen(true)}
                 onRetry={() => void refresh()}
               />
             ) : null}
@@ -1199,6 +1247,17 @@ const ConnectorSettings = () => {
             <CalendarSetupPanel
               open={calendarPanelOpen}
               onOpenChange={setCalendarPanelOpen}
+              port={connectorCatalog}
+              onChanged={() => {
+                void refresh();
+              }}
+            />
+          ) : null}
+
+          {hasTelegramSetup(connectorCatalog) ? (
+            <TelegramSetupPanel
+              open={telegramPanelOpen}
+              onOpenChange={setTelegramPanelOpen}
               port={connectorCatalog}
               onChanged={() => {
                 void refresh();

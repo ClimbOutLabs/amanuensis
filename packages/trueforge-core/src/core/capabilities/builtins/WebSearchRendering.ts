@@ -255,7 +255,10 @@ export class WebSearchRenderingProcessor implements ToolResponseProcessor {
           : undefined;
       // The picture list is read from the provider's own text, the same text provenance recorded, and
       // follows the page text as a host-added section so the page's words keep their untrusted framing.
-      const pictures = pagePicturesNote({ tool_name: toolName, text: result.rawContent });
+      const pictures = pagePicturesNote({
+        page_reader: result.toolCallInfo?.page_read_call === true,
+        text: result.rawContent,
+      });
       if (rendered === undefined && pictures === undefined) {
         continue;
       }

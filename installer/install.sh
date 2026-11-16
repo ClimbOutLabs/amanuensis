@@ -8,6 +8,8 @@
 #        install.sh instance refresh <name>
 #        install.sh instance email <name> [--remove]
 #        install.sh instance calendar <name> [--remove]
+#        install.sh instance local-model <name> <port> [--remove]
+#        install.sh instance address <name> list|add|remove [<address>]
 #        install.sh instance password [<name>]
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
@@ -64,6 +66,10 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/edge.sh"
 # shellcheck source=lib/instance.sh
 . "$INSTALLER_DIR/lib/instance.sh"
+# shellcheck source=lib/localmodel.sh
+. "$INSTALLER_DIR/lib/localmodel.sh"
+# shellcheck source=lib/address.sh
+. "$INSTALLER_DIR/lib/address.sh"
 # shellcheck source=lib/email.sh
 . "$INSTALLER_DIR/lib/email.sh"
 # shellcheck source=lib/demo.sh
@@ -90,6 +96,7 @@ PASSWORD_FROM_STDIN=0
 OPT_INSTALL_DOCKER=0
 OPT_ADD_DOCKER_GROUP=0
 OPT_NO_SANDBOX=0
+OPT_BUILD_FROM_SOURCE=0
 OPT_HOST_NODE=0
 OPT_SANDBOX_ROOT=0
 OPT_TLS_ROOT=0
@@ -136,8 +143,13 @@ OPT_CAL_URL=
 OPT_CAL_USER=
 OPT_CAL_PASSWORD_STDIN=0
 OPT_REMOVE=0
+OPT_LOCAL_MODEL=
+OPT_ADDRESS_ACTION=
+OPT_ADDRESS_VALUE=
 COMMAND=install
 SUBCOMMAND=
+SUMMARY_FULL=0
+TRUST_NEW_NAMES=
 LOCK_HELD=0
 AMAN_PASSWORD=
 AMAN_TF_KEY=
@@ -168,6 +180,17 @@ Amanuensis installer
                                   asks for the details unless the --email-* options are given
   install.sh instance calendar <name> [--remove]
                                   connect a calendar to an instance (asks for the details); --remove takes it away
+  install.sh instance local-model <name> <port> [--remove]
+                                  let an instance reach a model server on this computer at that port, through Aman's
+                                  own local link (http://aman-local-model:<port>/v1); --remove takes the port away
+  install.sh instance address <name> list|add|remove [<address>]
+                                  list the addresses an instance answers at, or add or remove one: an address or name
+                                  of this computer (Aman listens there), or a full address such as https://name.example
+                                  that another program passes on to http://127.0.0.1:<app port>
+  install.sh instance address <name> list|add|remove [<address>]
+                                  list the addresses an instance answers at, or add or remove one: an address or name
+                                  of this computer (Aman listens there), or a full address such as https://name.example
+                                  that another program passes on to http://127.0.0.1:<app port>
   install.sh instance password [<name>]
                                   set a new owner password and sign everyone out
   install.sh backup [<name>]      make a backup now
@@ -179,6 +202,7 @@ Amanuensis installer
   install.sh docker               install or start Docker, or update it, asking before anything that needs admin rights
   install.sh command              put the aman command back
   install.sh tls                  renew the https certificates that are due
+  install.sh status               show each instance's addresses, settings and how to set up a new phone or computer
 
 Options
   --home DIR            keep Aman's data in this folder (default ~/.amanuensis)
@@ -189,6 +213,7 @@ Options
   --tls-root            let the installer do the --tls caddy steps that need admin rights without asking
   --no-sandbox          install without the sandbox (the assistant then cannot run code or read attachments)
   --use-host-node       set up the sandbox with the Node.js on this computer (22.14 or newer) instead of a downloaded copy
+  --build-from-source   build every Aman image on this computer, even where a release published it
   --verbose             show technical details and the full list of downloads
   --dry-run             show the plan and stop; with instance import, check the file and say what it would bring
                         (an instance that has never started is started once first, so the file can be checked)
@@ -274,6 +299,7 @@ parse_args() {
       --add-docker-group) OPT_ADD_DOCKER_GROUP=1 ;;
       --sandbox-root) OPT_SANDBOX_ROOT=1 ;;
       --no-sandbox) OPT_NO_SANDBOX=1 ;;
+      --build-from-source) OPT_BUILD_FROM_SOURCE=1 ;;
       --use-host-node) OPT_HOST_NODE=1 ;;
       --print-root-steps) PRINT_ROOT_STEPS=1 ;;
       --print-network) PRINT_NETWORK=1 ;;
@@ -307,13 +333,23 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command | tls | migrate | restore) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command | tls | migrate | restore | status) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
           2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
-          4:instance) OPT_IMPORT_FILE=$arg ;;
+          4:instance)
+            case "$SUBCOMMAND" in
+              local-model) OPT_LOCAL_MODEL=$arg ;;
+              address) OPT_ADDRESS_ACTION=$arg ;;
+              *) OPT_IMPORT_FILE=$arg ;;
+            esac
+            ;;
+          5:instance)
+            [ "$SUBCOMMAND" = address ] || usage_die "unexpected argument $arg"
+            OPT_ADDRESS_VALUE=$arg
+            ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
           2:restore | 3:restore) restore_take_arg "$arg" ;;
           *) usage_die "unexpected argument $arg" ;;
@@ -450,6 +486,7 @@ on_exit() {
   migrate_on_exit
   restore_on_exit
   if [ "$rc" != 0 ]; then instance_pending_notice; fi
+  ui_panel_end
   lock_release
   exit "$rc"
 }
@@ -501,6 +538,7 @@ main() {
     docker) docker_fix ;;
     command) cmd_command ;;
     tls) cmd_tls ;;
+    status) cmd_status ;;
     upgrade) cmd_upgrade ;;
     migrate) cmd_migrate ;;
     instance)
@@ -514,7 +552,9 @@ main() {
         email) cmd_instance_email ;;
         password) cmd_instance_password ;;
         calendar) cmd_instance_calendar ;;
-        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|email|password|calendar" ;;
+        local-model) cmd_instance_local_model ;;
+        address) cmd_instance_address ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|import|refresh|email|password|calendar|local-model|address" ;;
       esac
       ;;
   esac

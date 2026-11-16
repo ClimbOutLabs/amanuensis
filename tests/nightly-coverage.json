@@ -31,12 +31,15 @@
     "screen:approval-ended": "An approval card whose request has ended can be cleared but never run.",
     "screen:browser-live": "The live view of the browser Aman is using.",
     "screen:chat-images": "Pictures in a chat.",
+    "screen:chat-list": "The list of chats in the left panel, with folders and the Today and Earlier groups.",
     "screen:chat-layout": "The chat screen with its side panels, on a computer and a phone.",
     "screen:chat-return": "Coming back to a chat while its reply is still running.",
     "screen:first-run": "Home on a fresh install, with the first-run guide.",
     "screen:help-chat": "The chat that \"Help, I'm stuck\" opens.",
     "screen:home": "The Home screen and its More menu.",
-    "screen:memory-sharing": "The grid that sets which personas share which memories.",
+    "screen:memory-review": "The list where older notes with no record of their source are ticked as the person's own.",
+    "screen:memory-sharing": "The list that sets which personas share which memories.",
+    "screen:notifications-panel": "The notifications panel opens from the bell in the left panel and stays fully on screen, on a phone and on a computer.",
     "screen:phone-width": "Home, a chat and every Settings tab at phone widths, with nothing cut off at the side.",
     "screen:settings-tabs": "The strip of Settings tabs.",
     "screen:signed-in-journey": "Signing in on the built app, adding a model, chatting and signing out.",
@@ -91,6 +94,10 @@
       "set": "calendar",
       "tests": []
     },
+    "command:address": {
+      "set": "install",
+      "tests": ["installer/tests/lib/address.test.sh"]
+    },
     "command:adopt": {
       "set": "install",
       "tests": []
@@ -105,13 +112,21 @@
     },
     "command:doctor": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/look.test.sh"]
+    },
+    "command:help": {
+      "set": "install",
+      "tests": ["installer/tests/lib/help.test.sh"]
     },
     "command:import": {
       "set": "install",
       "tests": []
     },
     "command:install": {
+      "set": "install",
+      "tests": ["installer/tests/lib/look.test.sh"]
+    },
+    "command:local-model": {
       "set": "install",
       "tests": []
     },
@@ -141,7 +156,7 @@
     },
     "command:status": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/network.test.sh"]
     },
     "command:uninstall": {
       "set": "install",
@@ -149,7 +164,7 @@
     },
     "command:upgrade": {
       "set": "install",
-      "tests": []
+      "tests": ["installer/tests/lib/look.test.sh"]
     },
     "command:verify": {
       "set": "install",
@@ -283,6 +298,10 @@
       "set": "home",
       "tests": []
     },
+    "route:gitCommitIdentity": {
+      "set": "code",
+      "tests": []
+    },
     "route:google": {
       "set": "connectors",
       "tests": []
@@ -297,6 +316,18 @@
     },
     "route:mcpServer": {
       "set": "connectors",
+      "tests": []
+    },
+    "route:memoryNightly": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:memoryPageSorting": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:memoryPages": {
+      "set": "memory",
       "tests": []
     },
     "route:memoryRecall": {
@@ -351,6 +382,14 @@
       "set": "reach",
       "tests": []
     },
+    "route:recallExclusion": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:reminder": {
+      "set": "reminders",
+      "tests": []
+    },
     "route:repository": {
       "set": "code",
       "tests": []
@@ -396,6 +435,18 @@
     },
     "route:spaceFolder": {
       "set": "spaces",
+      "tests": []
+    },
+    "route:telegram": {
+      "set": "reach",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "route:text": {
+      "set": "reach",
+      "tests": []
+    },
+    "route:today": {
+      "set": "home",
       "tests": []
     },
     "route:tokenFactoryUsage": {
@@ -450,6 +501,10 @@
         "packages/frontend/tests/composerMobile.browser.test.ts"
       ]
     },
+    "screen:chat-list": {
+      "set": "chat",
+      "tests": ["packages/frontend/tests/chatList.browser.test.ts"]
+    },
     "screen:chat-return": {
       "set": "chat",
       "tests": [
@@ -473,12 +528,21 @@
       "tests": [
         "packages/frontend/tests/homeAndMenu.browser.test.ts",
         "packages/frontend/tests/homeColumn.browser.test.ts",
-        "packages/frontend/tests/homeCards.browser.test.ts"
+        "packages/frontend/tests/homeCards.browser.test.ts",
+        "packages/frontend/tests/homeRailPhone.browser.test.ts"
       ]
+    },
+    "screen:memory-review": {
+      "set": "memory",
+      "tests": []
     },
     "screen:memory-sharing": {
       "set": "memory",
       "tests": ["packages/frontend/tests/memorySharing.browser.test.ts"]
+    },
+    "screen:notifications-panel": {
+      "set": "reach",
+      "tests": ["packages/frontend/tests/deliveryBellPanel.browser.test.ts"]
     },
     "screen:phone-width": {
       "set": "chat",
@@ -734,18 +798,15 @@
     "command:adopt",
     "command:backup",
     "command:backups",
-    "command:doctor",
     "command:import",
-    "command:install",
+    "command:local-model",
     "command:migrate",
     "command:network",
     "command:open",
     "command:password",
     "command:restore",
     "command:setup",
-    "command:status",
     "command:uninstall",
-    "command:upgrade",
     "command:verify",
     "command:version",
     "email-preset:aol",
@@ -771,10 +832,14 @@
     "route:delivery",
     "route:emailAccount",
     "route:firstRunGuide",
+    "route:gitCommitIdentity",
     "route:google",
     "route:help",
     "route:mcpOAuth",
     "route:mcpServer",
+    "route:memoryNightly",
+    "route:memoryPageSorting",
+    "route:memoryPages",
     "route:memoryRecall",
     "route:memoryScreen",
     "route:memorySummarize",
@@ -787,6 +852,8 @@
     "route:personalization",
     "route:privateChat",
     "route:reach",
+    "route:recallExclusion",
+    "route:reminder",
     "route:repository",
     "route:runCode",
     "route:sandboxProvider",
@@ -797,9 +864,12 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
+    "route:text",
+    "route:today",
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",
+    "screen:memory-review",
     "settings:account",
     "tour:company",
     "tour:explain",

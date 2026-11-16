@@ -3,7 +3,7 @@
  * Runs under jest against a fresh store per test (see backend test files).
  */
 import { ModelProviderNameConflictError, type IModelProviderStore } from '../../src/db/modelProviderStore';
-import type { ModelProviderManifest } from '../../src/schemas/modelProvider';
+import type { ModelProviderCheck, ModelProviderManifest } from '../../src/schemas/modelProvider';
 
 const TENANT = 'default';
 
@@ -129,6 +129,60 @@ export function runModelProviderStoreContractSuite(getStore: () => IModelProvide
       await store.getProvider({ tenant_id: TENANT, name: 'anthropic', model_name: 'claude-sonnet-4-6' }),
     ).toBeUndefined();
     expect(await store.deleteProvider({ tenant_id: TENANT, name: 'anthropic', model_name: '' })).toBe(false);
+  });
+
+  it('a fresh provider has no recorded check', async () => {
+    const store = getStore();
+    const created = await store.createProvider({ tenant_id: TENANT, name: 'anthropic', manifest: anthropic });
+    expect(created.last_check).toBeNull();
+
+    const listed = await store.listProviders({ tenant_id: TENANT });
+    expect(listed[0]?.last_check).toBeNull();
+  });
+
+  it('recordProviderCheck stores the outcome on the row and leaves the document alone', async () => {
+    const store = getStore();
+    await store.createProvider({ tenant_id: TENANT, name: 'anthropic', manifest: anthropic });
+    const check: ModelProviderCheck = {
+      kind: 'key_refused',
+      message: 'The model server refused the API key. Check the key for this provider and save again.',
+      checked_at: '2026-11-09T12:00:00.000Z',
+    };
+
+    const updated = await store.recordProviderCheck({ tenant_id: TENANT, name: 'anthropic', check });
+    expect(updated?.last_check).toEqual(check);
+    expect(updated?.manifest).toEqual(anthropic);
+
+    const fetched = await store.getProvider({
+      tenant_id: TENANT,
+      name: 'anthropic',
+      model_name: 'claude-sonnet-4-6',
+    });
+    expect(fetched?.last_check).toEqual(check);
+  });
+
+  it('recordProviderCheck returns undefined for an unknown provider', async () => {
+    const store = getStore();
+    const check: ModelProviderCheck = {
+      kind: 'answered',
+      message: 'The model server answered the test call.',
+      checked_at: '2026-11-09T12:00:00.000Z',
+    };
+    expect(await store.recordProviderCheck({ tenant_id: TENANT, name: 'missing', check })).toBeUndefined();
+  });
+
+  it('re-saving a provider keeps its recorded check', async () => {
+    const store = getStore();
+    await store.createProvider({ tenant_id: TENANT, name: 'anthropic', manifest: anthropic });
+    const check: ModelProviderCheck = {
+      kind: 'answered',
+      message: 'The model server answered the test call.',
+      checked_at: '2026-11-09T12:00:00.000Z',
+    };
+    await store.recordProviderCheck({ tenant_id: TENANT, name: 'anthropic', check });
+
+    const updated = await store.upsertProvider({ tenant_id: TENANT, name: 'anthropic', manifest: anthropic });
+    expect(updated.last_check).toEqual(check);
   });
 
   it('listModels flattens documents into fully qualified names', async () => {

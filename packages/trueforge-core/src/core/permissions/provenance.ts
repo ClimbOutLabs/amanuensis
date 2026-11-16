@@ -16,11 +16,12 @@ interface ProvenanceValues {
 }
 
 /**
- * Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. `reply` is
- * the assistant's own earlier reply, which can repeat what it read in a turn whose record is gone.
+ * Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. `memory` is
+ * read earlier and saved. `reply` is the assistant's own earlier reply, which can repeat what it read in a turn
+ * whose record is gone.
  */
 export type ReadSource =
-  'email_sender' | 'email' | 'event' | 'page' | 'browser_page' | 'file' | 'tool_result' | 'reply' | 'other';
+  'email_sender' | 'email' | 'event' | 'page' | 'browser_page' | 'file' | 'tool_result' | 'memory' | 'reply' | 'other';
 
 export interface ReadOrigin {
   source: ReadSource;
@@ -138,7 +139,7 @@ function parsedUrl(value: string): URL | undefined {
 }
 
 /** A site as the person thinks of it: lower case, without a leading `www.`. */
-function hostKey(host: string): string {
+export function siteName(host: string): string {
   return host.toLowerCase().replace(/^www\./, '');
 }
 
@@ -159,7 +160,7 @@ function urlKey(value: string): string | undefined {
   const path = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
   const port = url.port === '' ? '' : `:${url.port}`;
   const signIn = carriesSignIn(url) ? `${url.username}:${url.password}@` : '';
-  return `${signIn}${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
+  return `${signIn}${siteName(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
 }
 
 function add(input: { side: ProvenanceValues; kind: 'urls' | 'hosts' | 'addresses'; value: string }): void {
@@ -193,8 +194,8 @@ function recordUrl(side: ProvenanceValues, value: string): string | undefined {
   if (!carriesSignIn(url)) {
     add({ side, kind: 'urls', value: key });
   }
-  add({ side, kind: 'hosts', value: hostKey(url.hostname) });
-  return hostKey(url.hostname);
+  add({ side, kind: 'hosts', value: siteName(url.hostname) });
+  return siteName(url.hostname);
 }
 
 /** Records the links, sites and addresses in a text; returns the `site:` and `address:` keys it found. */
@@ -207,8 +208,8 @@ function recordText(side: ProvenanceValues, text: string): string[] {
     }
   }
   for (const match of text.matchAll(BARE_HOST)) {
-    add({ side, kind: 'hosts', value: hostKey(match[0]) });
-    found.push(`site:${hostKey(match[0])}`);
+    add({ side, kind: 'hosts', value: siteName(match[0]) });
+    found.push(`site:${siteName(match[0])}`);
   }
   for (const match of text.matchAll(EMAIL)) {
     add({ side, kind: 'addresses', value: match[0].toLowerCase() });
@@ -498,10 +499,11 @@ export function recordUntrustedText(input: {
     input.source === 'event' ||
     input.source === 'browser_page' ||
     input.source === 'file' ||
+    input.source === 'memory' ||
     input.source === 'other'
   ) {
-    // The person's own events, the pages their signed-in browser shows, their files and the host's notes on
-    // their chat hold their details too.
+    // The person's own events, the pages their signed-in browser shows, their files, their saved memory and the
+    // host's notes on their chat hold their details too.
     recordDetails(input.provenance, input.text);
   }
   for (const key of recordText(input.provenance.untrusted, input.text)) {
@@ -716,7 +718,7 @@ export function steeredUrl(input: { provenance: ChatProvenance; url: string }): 
   if (key === undefined || host === undefined) {
     return false;
   }
-  const site = hostKey(host);
+  const site = siteName(host);
   if (!untrustedHas({ provenance, kind: 'hosts', value: site })) {
     return false;
   }
@@ -752,7 +754,7 @@ export function replyLinksWithAddedData(input: { provenance: ChatProvenance; val
       if (key === undefined || parsed === undefined) {
         return false;
       }
-      const site = hostKey(parsed.hostname);
+      const site = siteName(parsed.hostname);
       const onlyReplyNamed =
         (provenance.reply.overflowed || provenance.reply.hosts.has(site)) &&
         !provenance.trusted.hosts.has(site) &&
@@ -815,7 +817,7 @@ export function steeredDestinations(input: {
     for (const url of urlsOf(value.replace(EMAIL, ' '))) {
       const host = parsedUrl(url)?.hostname;
       if (host !== undefined && steeredUrl({ provenance, url })) {
-        steered.push({ value: url, kind: 'link', origin: originOf({ provenance, key: `site:${hostKey(host)}` }) });
+        steered.push({ value: url, kind: 'link', origin: originOf({ provenance, key: `site:${siteName(host)}` }) });
       }
     }
   }
@@ -837,7 +839,7 @@ export function isPersonVouchedUrl(input: { provenance: ChatProvenance; url: str
     return true;
   }
   const host = parsedUrl(input.url)?.hostname;
-  return host !== undefined && isBareSite(input.url) && input.provenance.trusted.hosts.has(hostKey(host));
+  return host !== undefined && isBareSite(input.url) && input.provenance.trusted.hosts.has(siteName(host));
 }
 
 /** Whether a picture may be shown: a trusted link, or exactly a picture an opened page or a search result listed. */

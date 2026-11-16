@@ -54,7 +54,12 @@ export type ReachSettings = {
   approvalWaitMinutes: number;
 };
 
-export type ReachChannelState = { available: boolean; note: string };
+export type ReachChannelState = {
+  available: boolean;
+  note: string;
+  /** Set when the channel works but has a problem to fix, in plain words with what to do. */
+  problem: string | null;
+};
 
 export type ReachView = {
   settings: ReachSettings;
@@ -69,11 +74,48 @@ export type ReachView = {
   calendarProblem: { since: string; kind: 'google_sign_in' | 'other' } | null;
   /** Where mail is read from, or null until it has been checked once. */
   mailSource: 'google' | 'email_connector' | null;
+  /** Whether the mail source read from reports sender confirmation, or null when that is not known yet. */
+  mailSenderConfirmation: boolean | null;
 };
 
 export type ReachSuggestion = { address: string; memory: string };
 
 export type ReachTestChannel = 'in_app' | 'push' | 'text' | 'call';
+
+/** How much a text says. Private names only the kind of thing; full carries a reminder’s own words. */
+export type TextMode = 'private' | 'full';
+
+/** The person's number for texts and where confirming it stands. */
+export type TextStatus = {
+  /** The number as entered, or null before one is. */
+  phone: string | null;
+  /** Nothing is sent to the number until the person has proved it with a code. */
+  confirmed: boolean;
+  mode: TextMode;
+  /** The person replied STOP. They confirm the number again to use texts. */
+  optedOut: boolean;
+  codePending: boolean;
+  /** A new number waiting for its code. Texts keep going to the confirmed number until then. */
+  pendingPhone: string | null;
+  /** What a Private text says, word for word, as the server writes it. */
+  privatePreview: string;
+  /** The names and words the person lets Aman text besides the common words. */
+  words: string[];
+};
+
+/** The number for texts, served by the host. Each call rejects with a message fit to show. */
+export type TextsApi = {
+  status(): Promise<TextStatus>;
+  /** Texts a one-time code to the number. */
+  sendCode(phone: string): Promise<TextStatus>;
+  confirm(code: string): Promise<TextStatus>;
+  setMode(mode: TextMode): Promise<TextStatus>;
+  /** Lets Full texts carry a name or word. Rejects with the reason when the word cannot be added. */
+  addWord(word: string): Promise<TextStatus>;
+  removeWord(word: string): Promise<TextStatus>;
+  /** Forgets the number and switches texts off. */
+  remove(): Promise<void>;
+};
 
 /** The person's Reach me settings, served by the host. Each call rejects with a message fit to show. */
 export type ReachApi = {
@@ -83,6 +125,7 @@ export type ReachApi = {
   suggestions(): Promise<ReachSuggestion[]>;
   /** Sends a test through one channel. Resolves to how many devices a push notice reached. */
   test(channel: ReachTestChannel): Promise<{ devicesReached: number }>;
+  texts: TextsApi;
 };
 
 /** The feed, the push devices and Reach me settings, served by the host. */

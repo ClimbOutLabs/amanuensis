@@ -157,6 +157,49 @@ describe('a spoken turn', () => {
   });
 });
 
+describe('a line no turn asked for', () => {
+  it('speaks it in the line’s own format, sends nothing to the model, and can be talked over', async () => {
+    const t = setup({ stt: ['hello?'], message: [{ text: ['Hi.'] }], outputFormat: 'mulaw8k' });
+    await t.session.say('Hi, it is your assistant. Is this a good time? Something needs you.');
+    expect(t.tts.sentences).toEqual(['Hi, it is your assistant.', 'Is this a good time?', 'Something needs you.']);
+    expect(t.turns.sent).toEqual([]);
+    expect(t.transport.states()).toContain('speaking');
+    const clearedBefore = t.transport.cleared;
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    expect(t.transport.cleared).toBe(clearedBefore + 1);
+    await feed({ session: t.session, clock: t.clock, samples: quiet(900) });
+    await t.session.settled();
+    expect(t.turns.sent).toEqual(['hello?']);
+    expect(t.turns.spokenOver).toEqual([false]);
+  });
+
+  it('can hold the floor: talking over it does not stop it, and the turn is told it began over that line', async () => {
+    const t = setup({
+      stt: ['yeah?', 'yes'],
+      message: [{ text: ['Okay.'] }, { text: ['Okay.'] }],
+      outputFormat: 'mulaw8k',
+    });
+    await t.session.say('Hi, it is your assistant. Something needs you. Is this a good time?', {
+      interruptible: false,
+    });
+    const clearedBefore = t.transport.cleared;
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    await feed({ session: t.session, clock: t.clock, samples: quiet(900) });
+    await t.session.settled();
+    expect(t.transport.cleared).toBe(clearedBefore);
+    expect(t.tts.sentences.slice(0, 3)).toEqual([
+      'Hi, it is your assistant.',
+      'Something needs you.',
+      'Is this a good time?',
+    ]);
+    t.clock.advance(5_000);
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.sent).toEqual(['yeah?', 'yes']);
+    expect(t.turns.spokenOver).toEqual([true, false]);
+  });
+});
+
 describe('barge-in', () => {
   it('stops playback at once when the person talks over the assistant, and treats it as a new turn', async () => {
     const t = setup({
@@ -1223,5 +1266,43 @@ describe('a long turn, noises and order', () => {
     await feed({ session: t.session, clock: t.clock, samples: says() });
     await expect(t.session.settled()).resolves.toBeUndefined();
     expect(t.notes.some(note => note.startsWith('accept_failed'))).toBe(true);
+  });
+});
+
+describe('work the conversation runs on its own that fails', () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  beforeEach(() => {
+    unhandled.length = 0;
+    process.on('unhandledRejection', onUnhandled);
+  });
+  afterEach(() => {
+    process.off('unhandledRejection', onUnhandled);
+    jest.restoreAllMocks();
+  });
+  const afterPromises = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 20));
+
+  it('ends the conversation, and notes the kind of failure, when a turn throws', async () => {
+    const t = setup({ stt: ['what is on my calendar'] });
+    jest.spyOn(t.turns, 'sendMessage').mockRejectedValueOnce(new Error('the turn failed'));
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    await afterPromises();
+    expect(t.notes).toContain('turn_failed:Error');
+    expect(t.transport.closed).toBe(true);
+    expect(unhandled).toEqual([]);
+  });
+
+  it('notes it, and carries on, when ending the conversation from a timer fails', async () => {
+    const t = setup({});
+    jest.spyOn(t.transport, 'close').mockImplementationOnce(() => {
+      throw new Error('the line would not close');
+    });
+    t.clock.advance(IDLE_END_MS + 5000);
+    await afterPromises();
+    expect(t.notes).toContain('finish_failed:Error');
+    expect(unhandled).toEqual([]);
   });
 });

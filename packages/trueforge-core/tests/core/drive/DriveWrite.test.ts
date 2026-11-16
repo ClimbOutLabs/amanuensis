@@ -163,7 +163,7 @@ describe('create_doc', () => {
       created_by: built.sentinel.created_by,
       mcp_server_name: 'google_drive',
       tool_name: 'create_doc',
-      mcp_server_host: null,
+      connector_binding: null,
     });
     const info = await built.tools.toolCallInfo({ name: 'create_doc', arguments: CREATE });
     expect(info).toMatchObject({ tier: 1, tier_reason: 'mcp_tool_grant' });

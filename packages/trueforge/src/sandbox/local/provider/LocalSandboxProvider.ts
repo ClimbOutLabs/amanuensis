@@ -25,6 +25,7 @@ import {
   SandboxPathIsDirectoryError,
   shellEscape,
   validateNoPathTraversal,
+  withArgvAsCommandLine,
   withTrustedPath,
   workspaceTerminationCommand,
 } from '@truefoundry/trueforge-core/core';
@@ -634,6 +635,8 @@ export class LocalSandboxProvider implements SandboxProvider {
     const signal = params?.signal;
     throwIfSignalAborted(signal);
     await this.ensureSrt(signal);
+    // Making the sandbox root creates only its last folder, so a new chat's own folder must exist first.
+    await mkdir(this.sandboxRootPathParent, { recursive: true, mode: 0o700 });
     const sandboxRootPath = join(this.sandboxRootPathParent, newId());
     let sandboxId: string | undefined;
     try {
@@ -670,7 +673,7 @@ export class LocalSandboxProvider implements SandboxProvider {
     // Match remote providers: an already-cancelled call must not initialize a
     // sandbox, create its virtualenv, or spawn a host process.
     throwIfSignalAborted(params.signal);
-    const lockedParams = commandWithWorkspaceLock(params);
+    const lockedParams = commandWithWorkspaceLock(withArgvAsCommandLine(params));
     this.ensureSandboxRoot(lockedParams.sandboxId);
     try {
       await this.ensureSrt(lockedParams.signal);

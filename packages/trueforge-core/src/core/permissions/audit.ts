@@ -14,6 +14,7 @@ import {
   savedSearchHold,
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
+  withHoldSay,
 } from './searchHoldText';
 import { type AutoDenyReason, SANDBOX_SILENT_REASONS, type Tier, type TierDecision } from './tier';
 
@@ -146,7 +147,13 @@ export function heldCallAuditText(
       page: false,
     });
   }
-  return card?.plain_what ?? info.original_tool_name;
+  if (card === null) {
+    return info.original_tool_name;
+  }
+  // The audit row keeps the reason the card asked, which the card shows on its own line. Some cards
+  // already carry it in plain_what for older clients, so it is added only when missing.
+  const reason = card.copy?.reason ?? null;
+  return reason === null || card.plain_what.includes(reason) ? card.plain_what : withHoldSay(card.plain_what, reason);
 }
 
 /**

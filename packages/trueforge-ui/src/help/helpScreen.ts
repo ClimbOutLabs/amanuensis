@@ -9,9 +9,9 @@ const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   skills: 'Skills',
   sandbox: 'Sandbox',
   personalization: 'Personalization',
-  themes: 'Themes',
+  themes: 'Appearance',
   permissions: 'Permissions',
-  audit: 'Audit',
+  audit: 'Activity log',
   'reach-me': 'Reach me',
   account: 'Account',
   about: 'About',
@@ -23,6 +23,7 @@ export interface HelpScreenState {
   libraryOpen: boolean;
   sessionsOpen: boolean;
   schedulesOpen: boolean;
+  remindersOpen: boolean;
   spacesOpen: boolean;
 }
 
@@ -37,6 +38,9 @@ export function describeHelpScreen(state: HelpScreenState | null): string {
   if (state.schedulesOpen) {
     return 'Schedules';
   }
+  if (state.remindersOpen) {
+    return 'Reminders';
+  }
   if (state.spacesOpen) {
     return 'Spaces';
   }
@@ -44,7 +48,7 @@ export function describeHelpScreen(state: HelpScreenState | null): string {
     return 'Agent library';
   }
   if (state.sessionsOpen) {
-    return 'Sessions';
+    return 'Chat stats';
   }
   return 'Chat';
 }

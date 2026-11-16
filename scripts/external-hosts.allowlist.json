@@ -51,9 +51,19 @@
       "reason": "GitHub MCP server preset in the MCP catalog; contacted only if the person adds it."
     },
     {
+      "host": "api.telegram.org",
+      "category": "connector",
+      "reason": "Telegram Bot API, for the bot the person connects in Settings."
+    },
+    {
       "host": "api.transitous.org",
       "category": "connector",
       "reason": "Default public transit routes for the maps card (Transitous); can be changed in settings."
+    },
+    {
+      "host": "api.twilio.com",
+      "category": "connector",
+      "reason": "Twilio REST for texts, used only when the owner sets REACH_SMS_PROVIDER=twilio; fixed host, SID-checked paths."
     },
     {
       "host": "caldav.calendar.yahoo.com",
@@ -453,7 +463,7 @@
     {
       "host": "huggingface.co",
       "category": "model_download",
-      "reason": "Memory search model files, downloaded once on first use and checked against pinned hashes."
+      "reason": "Pinned speech and memory search model files, fetched when the Aman images are built and checked against fixed hashes. Aman never fetches them while it runs; the memory guide shows how to fetch them by hand for installs without Docker."
     },
     {
       "host": "raw.githubusercontent.com",

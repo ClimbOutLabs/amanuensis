@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Theme-token guard: every UI surface must get its colors from the app's
- * themes (Settings > Themes), never from fixed values.
+ * themes (Settings > Appearance), never from fixed values.
  *
  * Scans packages/trueforge-ui/src and packages/frontend/src and fails on:
  * - hex color literals (#fff, #1a1a1a), except fully-transparent #00000000

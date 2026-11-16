@@ -2,13 +2,17 @@ import type { MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
 import { isLoopbackHost } from '../config';
-import { ADDRESS_NOT_LISTED_MESSAGE, findAllowedOrigin, hostMatchesUrl, parseHostHeader } from './allowedOrigins';
+import { ADDRESS_NOT_LISTED_HEADERS, addressNotListedPage, ownPortsOf } from './addressNotListedPage';
+import { findAllowedOrigin, hostMatchesUrl, parseHostHeader } from './allowedOrigins';
 import { readBearerToken } from './token';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const LOOPBACK_ORIGIN_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
-/** Reachable without a browser session: probes, the service-key route, and the connector OAuth redirect. */
-const ORIGIN_EXEMPT_PATHS = ['/healthz', '/api/internal/schedules', '/api/v1/mcp-servers/oauth'];
+/**
+ * Reachable without a browser session: probes, the service-key route, the connector OAuth redirect,
+ * and the Telegram webhook, which carries its own secret instead of a session.
+ */
+const ORIGIN_EXEMPT_PATHS = ['/healthz', '/api/internal/schedules', '/api/v1/mcp-servers/oauth', '/api/telegram'];
 
 function isPathExempt(path: string): boolean {
   return ORIGIN_EXEMPT_PATHS.some(exempt => path === exempt || path.startsWith(`${exempt}/`));
@@ -58,8 +62,11 @@ export function createRequestGuardMiddleware(options: {
   loginGatewayUrl?: string;
   /** Path of the sign-in pages the app passes through when they are not on a separate address. */
   loginPath?: string;
+  /** Told each Host the instance refused, so the owner can be shown which name to add. */
+  onAddressRefused?: (host: string) => unknown;
 }): MiddlewareHandler {
   const allowedOrigins = options.allowedOrigins ?? [];
+  const ownPorts = ownPortsOf({ publicBaseUrl: options.publicBaseUrl, allowedOrigins });
   const publicUrl = new URL(options.publicBaseUrl);
   const publicIsLoopback = isLoopbackHost(publicUrl.hostname);
   const gatewayUrl = options.loginGatewayUrl === undefined ? undefined : new URL(options.loginGatewayUrl);
@@ -106,7 +113,9 @@ export function createRequestGuardMiddleware(options: {
           findAllowedOrigin({ hostHeader: rawHost, allowedOrigins }) !== undefined);
       if (!allowed) {
         if (allowedOrigins.length > 0) {
-          return c.text(ADDRESS_NOT_LISTED_MESSAGE, 421);
+          const hostHeader = rawHost;
+          void options.onAddressRefused?.(hostHeader);
+          return c.html(addressNotListedPage({ hostHeader, ownPorts }), 421, ADDRESS_NOT_LISTED_HEADERS);
         }
         throw new HTTPException(421, { message: 'Misdirected request: unrecognized Host' });
       }
