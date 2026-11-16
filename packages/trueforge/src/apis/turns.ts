@@ -3036,7 +3036,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               sandboxReady: serverSandboxAvailable,
               lookup: { fetchImpl: undefined, resolveAddresses: undefined },
               readFiles: readSkillFilesFromGit,
-              turnOnForChat: chatSkillSwitch({
+              chatSkills: chatSkillSwitch({
                 sessionStore: deps.sessionStore,
                 tenant_id: requestContext.tenant_id,
                 session_id: session.session_id,

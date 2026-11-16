@@ -68,7 +68,12 @@ import {
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import { isSkillWriteToolName, LIST_SKILLS_TOOL_NAME, SKILL_SERVER_ID } from '../skills/toolContract';
+import {
+  isSkillRemoveToolName,
+  isSkillWriteToolName,
+  LIST_SKILLS_TOOL_NAME,
+  SKILL_SERVER_ID,
+} from '../skills/toolContract';
 import {
   isSpaceReadToolName,
   isSpaceWriteToolName,
@@ -253,6 +258,12 @@ import {
 import { classifyHomeAssistantTool } from './homeAssistantTier';
 import { SKILL_SITES_DATA_WARNING, SKILL_SITES_EMAIL_BLOCKED, skillSiteLabel } from './skillSitesCopy';
 
+/** A saved skill a removal would take away, and the websites it may reach now that would go with it. */
+export interface SkillRemoveReview {
+  name: string;
+  websites: readonly string[];
+}
+
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
   tool_name: string;
@@ -332,6 +343,8 @@ export interface SentinelAction {
   persona_write?: Tier3Persona | undefined;
   /** The skill an install would add, settled by the skill tool set from the place the skill comes from. */
   skill_install?: Tier3Skill | undefined;
+  /** The skill a removal would take away, settled by the skill tool set from the saved skill. */
+  skill_remove?: SkillRemoveReview | undefined;
   /** The schedule a pause or resume would change, settled by the schedule tool set from the store. */
   schedule_status?: ScheduleStatusReview | undefined;
   /**
@@ -3386,12 +3399,15 @@ function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_
 }
 
 /**
- * Adding a skill always asks, with where it comes from and the exact version. Reading the list runs without
- * asking. Any other skill tool name fails closed.
+ * Adding a skill always asks, with where it comes from and the exact version, and removing one always asks too.
+ * Reading the list runs without asking. Any other skill tool name fails closed.
  */
 async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (action.tool_name === LIST_SKILLS_TOOL_NAME) {
     return tier1Decision({ reason: 'skill_read', reason_detail: 'Read your skills.', sensitive_read: false });
+  }
+  if (isSkillRemoveToolName(action.tool_name)) {
+    return classifySkillRemove(action, ctx);
   }
   if (!isSkillWriteToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown skill tool.' });
@@ -3411,6 +3427,37 @@ async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): 
     }),
     reason: 'skill_install',
     reason_detail: 'Adding a skill always asks.',
+    sensitive_read: false,
+    standing_grant_barred: true,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
+/**
+ * Removing a skill always asks, naming the skill and the websites it loses. A skill the host could not find is
+ * never offered.
+ */
+async function classifySkillRemove(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const review = action.skill_remove;
+  if (review === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The skill could not be found, so removing it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  const websites =
+    review.websites.length === 0
+      ? ''
+      : ` It will no longer reach ${review.websites.map(site => escapeDisplayText(site)).join(', ')}.`;
+  return tier3Decision({
+    card: sentenceCard({
+      plain_what: `Remove the skill ${cardSubject(review.name)}? It is taken out of every chat.${websites}`,
+      cannot_be_undone: 'To use it again, you add it again and approve its websites again.',
+      agent_intent: ctx.agent_intent,
+    }),
+    reason: 'skill_remove',
+    reason_detail: 'Removing a skill always asks.',
     sensitive_read: false,
     standing_grant_barred: true,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
