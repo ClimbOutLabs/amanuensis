@@ -5,7 +5,6 @@
  * Everyone here is made up.
  */
 import { z } from 'zod';
-import { ADDRESS_NOT_LISTED_MESSAGE } from '../../../src/auth/allowedOrigins';
 import configuration from '../../../src/config';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 
@@ -207,7 +206,7 @@ describe('terminal pairing under the address rules', () => {
     configuration.ALLOWED_ORIGINS = originalAllowedOrigins;
   });
 
-  it('refuses a pairing start from an unlisted address with the same message a browser gets', async () => {
+  it('refuses a pairing start from an unlisted address with the same page a browser gets', async () => {
     configuration.ALLOWED_ORIGINS = ['http://192.168.0.214:8790'];
     server = await startApprovalTestServer({ localSignIn: true });
 
@@ -219,7 +218,12 @@ describe('terminal pairing under the address rules', () => {
       body: JSON.stringify({ device_name: 'Pippa' }),
     });
     expect(refused.status).toBe(421);
-    expect(await refused.text()).toBe(ADDRESS_NOT_LISTED_MESSAGE);
+    // The refusal is the guard's own page, the one a browser at this address gets: it names
+    // the address, shows the command that allows it, and keeps the doctor line.
+    const refusedPage = await refused.text();
+    expect(refusedPage).toContain('Aman is not set up for this address');
+    expect(refusedPage).toContain('aman address add https://evil.example.com');
+    expect(refusedPage).toContain('aman doctor network --fix');
 
     const listed = await server.request('http://192.168.0.214:8790/api/v1/terminal-pairings', {
       method: 'POST',
