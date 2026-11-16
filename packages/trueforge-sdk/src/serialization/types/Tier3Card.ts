@@ -36,7 +36,6 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
             core.serialization.string().optionalNullable(),
         ),
         outboundText: core.serialization.property("outbound_text", core.serialization.string().nullable()),
-        outboundTruncated: core.serialization.property("outbound_truncated", core.serialization.boolean()),
         parsedCommand: core.serialization.property("parsed_command", core.serialization.string().nullable()),
         persona: Tier3Persona.optionalNullable(),
         plainWhat: core.serialization.property("plain_what", core.serialization.string()),
@@ -65,7 +64,6 @@ export declare namespace Tier3Card {
         mail_new_recipients?: (string[] | null | undefined) | null;
         outbound_plumbing_text?: (string | null | undefined) | null;
         outbound_text?: string | null;
-        outbound_truncated: boolean;
         parsed_command?: string | null;
         persona?: (Tier3Persona.Raw | null | undefined) | null;
         plain_what: string;

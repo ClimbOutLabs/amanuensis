@@ -26,10 +26,8 @@ export interface Tier3Card {
     mailNewRecipients?: string[] | null;
     /** Lines of outbound_text that a search service adds on its own, repeated so the card can fold them. Null when none. */
     outboundPlumbingText?: string | null;
-    /** Exact arguments sent to a connector, one "name: value" line each. Long values are cut with a marker. */
+    /** Exact arguments sent to a connector, one "name: value" line each, every value whole. */
     outboundText: string | null;
-    /** True when part of outbound_text is cut and not shown in full. */
-    outboundTruncated: boolean;
     /** Server-parsed command structure for shell actions, or null. */
     parsedCommand: string | null;
     persona?: TrueForge.Tier3Persona | null;
