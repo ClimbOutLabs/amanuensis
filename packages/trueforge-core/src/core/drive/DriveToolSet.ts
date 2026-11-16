@@ -8,7 +8,7 @@ import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ToolInvocationContext } from '../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../mcp/ToolSet';
-import { stableStringify } from '../permissions/approvalTokens';
+import { REVIEW_HASH_ARGUMENT, stableStringify } from '../permissions/approvalTokens';
 import { classifyHostToolCall } from '../permissions/classifier';
 import type { SentinelHostContext } from '../permissions/context';
 import type { ToolBundleName } from '../runtime/toolBundleCatalog';
@@ -39,9 +39,6 @@ import {
   sharedWithCount,
   type DriveWriteReview,
 } from './writeReview';
-
-/** Key the host adds to an approved write: the hash of the write the card showed. */
-const REVIEW_HASH_KEY = 'review_hash';
 
 const NOT_APPROVED = 'This was not approved, so nothing was changed. Ask again to make the change.';
 
@@ -211,7 +208,7 @@ export class DriveToolSet extends LocalToolMCP {
           text: parsed.data.text,
           request: undefined,
         });
-        return { approved: { ...parsed.data, [REVIEW_HASH_KEY]: hash }, review };
+        return { approved: { ...parsed.data, [REVIEW_HASH_ARGUMENT]: hash }, review };
       }
       const parsed = AppendRowsSchema.safeParse(params.arguments);
       if (!parsed.success) {
@@ -229,7 +226,7 @@ export class DriveToolSet extends LocalToolMCP {
         shared_with: sharedWithCount(file),
       });
       const hash = hashDriveWrite({ tool_name: APPEND_ROWS_TOOL_NAME, title: undefined, text: undefined, request });
-      return { approved: { ...parsed.data, [REVIEW_HASH_KEY]: hash }, review };
+      return { approved: { ...parsed.data, [REVIEW_HASH_ARGUMENT]: hash }, review };
     } catch (error) {
       if (
         error instanceof GoogleReconnectRequiredError ||
@@ -309,7 +306,7 @@ export class DriveToolSet extends LocalToolMCP {
     if (!(await this.#writePermitted({ approval: input.approval, toolName: input.toolName }))) {
       return { refusal: NOT_APPROVED };
     }
-    const { [REVIEW_HASH_KEY]: hash, ...approvedArgs } = input.context?.approved_params ?? {};
+    const { [REVIEW_HASH_ARGUMENT]: hash, ...approvedArgs } = input.context?.approved_params ?? {};
     if (typeof hash !== 'string') {
       return { refusal: NOT_APPROVED };
     }

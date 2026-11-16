@@ -119,7 +119,13 @@ test('the chat reconnects on its own after the page was in the background', { ti
     assert.ok(baseline.userMessages >= 1, 'the question is on screen');
     assert.ok(baseline.allowButtons >= 1, 'the approval card is on screen');
     await page.screenshot({
-      path: await featureShotPath({ surface: 'screen:chat-return', step: 'phone-before-background' }),
+      path: await featureShotPath({
+        surface: 'screen:chat-return',
+        step: 'phone-before-background',
+        did: 'Opened a chat that is waiting on an approval card, on a 390 px wide phone, and let it settle.',
+        expect:
+          'The question and the approval card are on screen. This is the picture before the page is sent to the background.',
+      }),
     });
     const marker = await pageLoadMarker(page);
 

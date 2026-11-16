@@ -283,6 +283,37 @@ describe('"Always allow in this chat" is offered only when the card names who or
   );
 });
 
+describe('a connector change that carries words but shows no place they go', () => {
+  let server: ApprovalTestServer;
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  it(
+    'is turned down without a card, and the connector is never called',
+    async () => {
+      const chatId = await createChat(server);
+      const writesBefore = server.mcp.writeInvocations();
+
+      // The words go somewhere the card could not show, so there is nothing for the person to check.
+      server.model.next({ toolArguments: { text: 'See you at noon.' } });
+      expect(cards(await runTurn({ server, chatId, input: ask(INERT_WRITE_TOOL) }))).toEqual([]);
+      expect(server.mcp.writeInvocations()).toBe(writesBefore);
+
+      // The same change naming the folder it acts on still asks first.
+      const card = onlyCard(await runTurn({ server, chatId, input: ask(INERT_WRITE_TOOL) }));
+      await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
+      expect(server.mcp.writeInvocations()).toBe(writesBefore + 1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
 describe('an email address the person never gave', () => {
   let server: ApprovalTestServer;
   const ADDRESS = 'dana.reyes@harbour.example';

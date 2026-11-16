@@ -91,6 +91,7 @@ All tests use synthetic data, never the user's real data.
 - A Tier 3 action with an unverifiable destination or a network need while offline is denied without a card
 - Web search through the designated provider runs silently within its bounds (guard pass, turn cap, returned URLs only) and asks when the switch is off or a bound fails
 - First-party read-only closed-world connector tools, and tools holding an Always allow everywhere grant, run without a card and are audited
+- Every connector call that would run without a card (any MCP connector, and Aman's own Gmail, Calendar and Drive tools) first passes the same outbound guard as a silent search, in one step every classifier branch goes through; a trip asks with a card, a held key stops the call, and what passes joins the chat's trace
 - Chat-scope and Always allow everywhere approvals admit later calls at their scope; a single-call Allow cannot be replayed
 - Approvals survive a server restart
 - Unclassifiable actions default to Tier 3

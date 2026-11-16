@@ -147,11 +147,11 @@ Pages, emails from other people, files and tool results are things Aman reads. T
 
     A search, page or map that would send a password, an API key, a private key or a payment card number is held, whatever its source.
 
-    So is a read through a connector, even one you set to **Always allow everywhere**, because what the read asks for goes to that connector's service. A connector read that would send one of this computer's own keys doesn't run at all.
+    So is anything that would run through a connector without asking, because what it sends goes to that connector's service. That covers reading your Gmail, Google Calendar and Google Drive, the Email and Calendar connectors, Home Assistant, and any connector tool you set to **Always allow everywhere**. A connector call that would send one of this computer's own keys doesn't run at all. What each of these sends is kept for the rest of the chat, so a secret split across two calls is still caught.
 
 ??? note "It's very long"
 
-    A search, or a read through a connector, asks first when one part is over 200 characters, or all of it is over 1,000.
+    A search, or anything that would run through a connector without asking, asks first when one part is over 200 characters, or all of it is over 1,000.
 
 ??? note "A link adds details to a site only Aman brought up"
 

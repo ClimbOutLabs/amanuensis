@@ -3,11 +3,7 @@ import type { Logger } from 'winston';
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { caldavResultForModel } from '../calendar/caldav/toolResults';
-import {
-  MAIL_DRAFT_FIRST_DETAIL,
-  mailDraftKey,
-  type ApprovedMailDraft,
-} from '../email/mailConnector/approvedDrafts';
+import { MAIL_DRAFT_FIRST_DETAIL, mailDraftKey, type ApprovedMailDraft } from '../email/mailConnector/approvedDrafts';
 import {
   mailForwardReadArguments,
   mailForwardReviewFrom,
@@ -577,12 +573,9 @@ export class ToolSet implements IToolSet {
       return deniedToolCallResponse(decision.reason);
     }
 
-    if (
-      this.sentinel !== undefined &&
-      (this.searchProvider || (decision !== undefined && isMapsToolName(params.name)))
-    ) {
+    if (this.sentinel !== undefined && decision !== undefined && (this.searchProvider || isMapsToolName(params.name))) {
       // The text an approved search or map sends joins the turn's trace, so a later silent call is checked
-      // against it. A silent map was recorded when it was classified, so only approved maps are added here.
+      // against it. A silent call was recorded when it was classified, so only approved ones are added here.
       const turn = this.sentinel.web_search;
       const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
       if (sent !== undefined) {
