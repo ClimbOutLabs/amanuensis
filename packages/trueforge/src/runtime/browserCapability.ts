@@ -454,7 +454,7 @@ class BrowserTool extends LocalToolMCP {
       name: 'browser_open',
       requiresNetwork: true,
       annotations: BROWSER_READ_ANNOTATIONS,
-      description: `Open a web page in Aman's own browser (not the user's browser) and read it back as text. Only http and https addresses; never a file, app or local-network address. Use when the user asks to find something on a site or open a specific page. When a page needs a step only the person can do, such as signing in, a code sent to their phone, a picture check or a cookie banner you cannot clear: ${liveViewHint()}`,
+      description: `Open a web page in Aman's own browser (not the user's browser) and read it back as text. Only http and https addresses. Never a file, app or local-network address. Use the browser when a page needs a real browser: clicking, filling in a form, signing in, a live view, or a page the page reader could not load. When you only need to read a page's text, use the page reader when one is available instead. When a page needs a step only the person can do, such as signing in, a code sent to their phone, a picture check or a cookie banner you cannot clear: ${liveViewHint()}`,
       schema: OPEN_INPUT_SCHEMA,
       handler: async (input: BrowserOpenInput) => {
         this.#lastOpened = input.url;

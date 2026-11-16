@@ -47,6 +47,7 @@ Now each search shows an approval card with the exact words before it runs.
 - What you tell Aman is yours to search with. A search that names your city, or a person from your email, runs without asking.
 - After 20 lookups in one answer, Aman stops and tells you.
 - Aman reads pages for facts only. It never follows instructions written on a page.
+- Aman can read a page's text through your search provider, without opening the browser. It opens the browser instead when a page needs clicking, filling in a form or signing in.
 - To stop all searches, turn on **Offline mode** under **Permissions**, or remove the search provider under **Connectors**.
 - Without a search provider, Aman tells you it cannot search the web.
 

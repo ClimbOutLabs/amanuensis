@@ -291,6 +291,18 @@ describe('browser capability', () => {
     expect(open?.description).toContain('/aman/browser-live');
   });
 
+  it('keeps the browser for pages that need one, and sends plain reading to the page reader', async () => {
+    const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
+    const response = await toolSet.listTools();
+    if (!('result' in response)) {
+      throw new Error('expected a resolved listTools response');
+    }
+    const open = response.result.tools.find(tool => tool.name === 'browser_open');
+    expect(open?.description).toContain('Use the browser when a page needs a real browser');
+    expect(open?.description).toContain('use the page reader when one is available instead');
+    expect(open?.description).not.toContain('find something on a site or open a specific page');
+  });
+
   it('registers all eight browser tools', async () => {
     const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
     const response = await toolSet.listTools();
