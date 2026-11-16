@@ -49,6 +49,8 @@ export * from "./spaces/client/requests/index.js";
 export * as spaces from "./spaces/index.js";
 export * from "./telegram/client/requests/index.js";
 export * as telegram from "./telegram/index.js";
+export * from "./terminalPairings/client/requests/index.js";
+export * as terminalPairings from "./terminalPairings/index.js";
 export * from "./today/client/requests/index.js";
 export * as today from "./today/index.js";
 export * from "./voice/client/requests/index.js";

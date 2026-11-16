@@ -6877,6 +6877,258 @@ await client.spaces.revert("space_id", {
 </dl>
 </details>
 
+## TerminalPairings
+<details><summary><code>client.terminalPairings.<a href="/src/api/resources/terminalPairings/client/Client.ts">start</a>({ ...params }) -> TrueForge.StartTerminalPairingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Begins a terminal pairing and returns a one-time code, the address the person opens to confirm it, and when the code expires. The code works once.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.terminalPairings.start({
+    deviceName: "device_name"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.StartTerminalPairingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TerminalPairingsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.terminalPairings.<a href="/src/api/resources/terminalPairings/client/Client.ts">complete</a>({ ...params }) -> TrueForge.CompleteTerminalPairingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The waiting terminal polls with its pairing id and code. While nobody has confirmed it answers waiting. Once confirmed it hands the terminal key over, exactly once.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.terminalPairings.complete({
+    code: "code",
+    pairingId: "pairing_id"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.CompleteTerminalPairingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TerminalPairingsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.terminalPairings.<a href="/src/api/resources/terminalPairings/client/Client.ts">confirm</a>({ ...params }) -> TrueForge.ConfirmTerminalPairingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Approves a pairing code for the signed-in person and pairs the terminal that started it. The terminal key itself goes only to the waiting terminal.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.terminalPairings.confirm({
+    code: "code"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.ConfirmTerminalPairingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TerminalPairingsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.terminalPairings.<a href="/src/api/resources/terminalPairings/client/Client.ts">revokeCurrent</a>() -> TrueForge.RevokeCurrentTerminalKeyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+A paired terminal revokes its own key, as it does when the person signs out on the terminal. The key stops working on the next request.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.terminalPairings.revokeCurrent();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TerminalPairingsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Today
 <details><summary><code>client.today.<a href="/src/api/resources/today/client/Client.ts">get</a>({ ...params }) -> TrueForge.GetTodayResponse</code></summary>
 <dl>
@@ -13634,6 +13886,125 @@ await client.settings.skills.deleteNetworkDeniedHost("name", {
 <dd>
 
 **requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings TerminalKeys
+<details><summary><code>client.settings.terminalKeys.<a href="/src/api/resources/settings/resources/terminalKeys/client/Client.ts">list</a>() -> TrueForge.GetTerminalKeysResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Every terminal the person paired, newest first, with when it was paired, last used, and revoked.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.terminalKeys.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TerminalKeysClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.terminalKeys.<a href="/src/api/resources/settings/resources/terminalKeys/client/Client.ts">delete</a>(terminal_key_id) -> TrueForge.DeleteTerminalKeyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Revokes one paired terminal key. The key stops working on the next request the terminal makes.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.terminalKeys.delete("terminal_key_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**terminal_key_id:** `string` — The id of the terminal key.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TerminalKeysClient.RequestOptions`
 
 </dd>
 </dl>

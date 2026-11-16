@@ -286,6 +286,17 @@
             },
             "default": "./dist/cjs/api/resources/spaces/exports.js"
         },
+        "./terminalPairings": {
+            "import": {
+                "types": "./dist/esm/api/resources/terminalPairings/exports.d.mts",
+                "default": "./dist/esm/api/resources/terminalPairings/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/terminalPairings/exports.d.ts",
+                "default": "./dist/cjs/api/resources/terminalPairings/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/terminalPairings/exports.js"
+        },
         "./today": {
             "import": {
                 "types": "./dist/esm/api/resources/today/exports.d.mts",
@@ -703,6 +714,17 @@
                 "default": "./dist/cjs/api/resources/settings/resources/skills/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/skills/exports.js"
+        },
+        "./settings/terminalKeys": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/terminalKeys/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/terminalKeys/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/terminalKeys/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/terminalKeys/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/terminalKeys/exports.js"
         },
         "./settings/tokenFactoryUsage": {
             "import": {

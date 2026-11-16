@@ -19,6 +19,7 @@ import { RunCodeClient } from "../resources/runCode/client/Client.js";
 import { SandboxProvidersClient } from "../resources/sandboxProviders/client/Client.js";
 import { SkillsClient } from "../resources/skills/client/Client.js";
 import { TelegramClient } from "../resources/telegram/client/Client.js";
+import { TerminalKeysClient } from "../resources/terminalKeys/client/Client.js";
 import { TokenFactoryUsageClient } from "../resources/tokenFactoryUsage/client/Client.js";
 import { ToolOutputScreensClient } from "../resources/toolOutputScreens/client/Client.js";
 
@@ -40,6 +41,7 @@ export class SettingsClient {
     protected _runCode: RunCodeClient | undefined;
     protected _sandboxProviders: SandboxProvidersClient | undefined;
     protected _skills: SkillsClient | undefined;
+    protected _terminalKeys: TerminalKeysClient | undefined;
     protected _tokenFactoryUsage: TokenFactoryUsageClient | undefined;
     protected _toolOutputScreens: ToolOutputScreensClient | undefined;
     protected _calendar: CalendarClient | undefined;
@@ -98,6 +100,10 @@ export class SettingsClient {
 
     public get skills(): SkillsClient {
         return (this._skills ??= new SkillsClient(this._options));
+    }
+
+    public get terminalKeys(): TerminalKeysClient {
+        return (this._terminalKeys ??= new TerminalKeysClient(this._options));
     }
 
     public get tokenFactoryUsage(): TokenFactoryUsageClient {
