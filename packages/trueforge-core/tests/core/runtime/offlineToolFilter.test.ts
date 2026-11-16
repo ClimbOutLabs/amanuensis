@@ -5,11 +5,19 @@ import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { finalAnswerStream, makeMockIMCPServer, makeSilentLogger, OBJECT_INPUT_SCHEMA } from '../harnessMocks';
 
-function toolSetNamed(input: { name: string; tool: string }): IToolSet {
+function toolSetNamed(input: { name: string; tool: string; requiresNetwork?: boolean }): IToolSet {
   return makeMockIMCPServer({
     name: input.name,
     preload: true,
-    tools: [{ name: input.tool, description: input.tool, inputSchema: OBJECT_INPUT_SCHEMA, preload: true }],
+    tools: [
+      {
+        name: input.tool,
+        description: input.tool,
+        inputSchema: OBJECT_INPUT_SCHEMA,
+        preload: true,
+        ...(input.requiresNetwork === undefined ? {} : { requires_network: input.requiresNetwork }),
+      },
+    ],
   });
 }
 
@@ -42,9 +50,9 @@ async function offeredToolNames({ offline }: { offline: boolean }): Promise<stri
     capabilities: [
       {
         systemToolSets: [
-          toolSetNamed({ name: 'maps', tool: 'render_map' }),
-          toolSetNamed({ name: 'maps-route', tool: 'render_route' }),
-          toolSetNamed({ name: 'local', tool: 'get_current_datetime' }),
+          toolSetNamed({ name: 'maps', tool: 'render_map', requiresNetwork: true }),
+          toolSetNamed({ name: 'maps-route', tool: 'render_route', requiresNetwork: true }),
+          toolSetNamed({ name: 'local', tool: 'get_current_datetime', requiresNetwork: false }),
         ],
       },
     ],

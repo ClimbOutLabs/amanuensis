@@ -1623,6 +1623,16 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "page_read_tools": {
+            "description": "Page-read tools of this server that run without asking when it is the web search provider.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "search_provider": {
             "description": "When true, adding this preset offers to make it the web search provider.",
             "type": "boolean"
@@ -7249,6 +7259,10 @@
             "description": "MCP readOnlyHint: the tool does not modify anything in its environment.",
             "type": "boolean"
           },
+          "requires_network": {
+            "description": "The tool needs the network, as its own registration declares. Set by the host from the registration, never from tool arguments.",
+            "type": "boolean"
+          },
           "server_id": {
             "description": "Internal MCP server id.",
             "type": "string"
@@ -10856,6 +10870,16 @@
           "auth": {
             "$ref": "#/components/schemas/MCPServerManifestAuth"
           },
+          "declared_change_tools": {
+            "description": "Bare names of the tools this server itself declared as changing things, captured from its own tool list at connect time. Standing grants may cover only these. Set by the server; a value sent is replaced.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
           "description": {
             "description": "Concise summary of what this MCP server provides.",
             "minLength": 1,
@@ -10864,12 +10888,36 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "page_read_tools": {
+            "description": "The page-read tools of the web search provider, captured from the server’s own tool list when the person designated it. What they return is recorded as page text. Set by the server; a value sent is replaced.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "search_in_process": {
+            "description": "When true, the host serves this connector’s search itself, in process. Set by the server when the person designates the provider the host serves that way; a value sent is replaced.",
+            "type": "boolean"
+          },
+          "search_plumbing_fields": {
+            "description": "Argument names that are the search provider’s own bookkeeping, not the person’s text. Set by the server; a value sent is replaced.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "search_provider": {
             "description": "When true, this connector is the web search provider: its read-only tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it.",
             "type": "boolean"
           },
           "search_tools": {
-            "description": "Tools that run without asking as the web search provider even when the server does not declare them read-only. Set by the server for a known provider; a value sent is replaced.",
+            "description": "The search tools of the web search provider, captured from the server’s own tool list when the person designated it. Their results are recorded as search hits. Set by the server; a value sent is replaced.",
             "items": {
               "maxLength": 128,
               "minLength": 1,
@@ -16193,6 +16241,10 @@
             "description": "MCP readOnlyHint: the tool does not modify anything in its environment.",
             "type": "boolean"
           },
+          "requires_network": {
+            "description": "The tool needs the network, as its own registration declares. Set by the host from the registration, never from tool arguments.",
+            "type": "boolean"
+          },
           "type": {
             "description": "Built-in harness system tool.",
             "enum": [
@@ -20366,7 +20418,7 @@
     },
     "/api/v1/mcp-servers/{name}/home-assistant-check": {
       "post": {
-        "description": "Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.",
+        "description": "Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. The check changes nothing on the server. It does store, on the connector record, which of the listed tools the server itself declares as changes, because standing grants read that. A failed check is a 200 carrying the reason.",
         "parameters": [
           {
             "description": "MCP server name.",

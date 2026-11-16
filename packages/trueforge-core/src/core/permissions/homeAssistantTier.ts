@@ -9,7 +9,7 @@ import {
   homeAssistantTargetLabel,
   homeAssistantToolBase,
   isHomeAssistantCallActionTool,
-  isHomeAssistantKnownChangeTool,
+  isHomeAssistantDeclaredChangeTool,
   isHomeAssistantNameOnlyTarget,
   isHomeAssistantReadTool,
   isHomeAssistantRefusedTarget,
@@ -37,8 +37,9 @@ export const HOME_ASSISTANT_CHANGE_REASON = 'home_assistant_change';
  * domain by a grant for that domain. Locks, alarm panels, garage doors and covers that lead outside are
  * refused outright, with no standing grant possible. The generic action tool is refused
  * outright too: it can run any service and names its target where these rules cannot read it.
- * A write tool Aman does not know asks every time, with no standing grant possible. A change
- * that read content steered is refused too, as a steered send is.
+ * A write tool the server did not declare as a change at connect time asks every time, with
+ * no standing grant possible. A change that read content steered is refused too, as a
+ * steered send is.
  */
 export async function classifyHomeAssistantTool({
   action,
@@ -55,6 +56,7 @@ export async function classifyHomeAssistantTool({
     | 'mcp_server_name'
     | 'mcp_server_host'
     | 'mcp_grant_binding'
+    | 'mcp_declared_change_tools'
     | 'mcp_hints'
   >;
   mintToken: () => Promise<string>;
@@ -109,9 +111,13 @@ export async function classifyHomeAssistantTool({
     });
   }
 
-  // Standing grants cover only the change tools Aman knows. A write tool outside that set
-  // asks every time, and its card offers no grant to record.
-  const known_change = isHomeAssistantKnownChangeTool(action.tool_name);
+  // Standing grants cover only the change tools the server itself declared at connect time,
+  // as stored on the connector record. A write tool outside that declaration asks every time,
+  // and its card offers no grant to record.
+  const known_change = isHomeAssistantDeclaredChangeTool({
+    tool_name: action.tool_name,
+    declared_change_tools: action.mcp_declared_change_tools ?? [],
+  });
   const coverage = known_change ? homeAssistantGrantCoverage(target) : [];
   if (coverage.length > 0) {
     const covering: string[] = [];

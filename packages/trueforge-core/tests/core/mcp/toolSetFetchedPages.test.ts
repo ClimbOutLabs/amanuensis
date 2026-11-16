@@ -49,12 +49,20 @@ function harness(
   result: (name: string) => string,
   toolNames: { search: string; fetch: string } = { search: 'web_search', fetch: 'web_fetch' },
   shared?: { pages: FetchedPageStore; scope: FetchedPageScope },
+  undeclared?: string,
 ): { toolSet: ToolSet; pages: FetchedPageStore; scope: FetchedPageScope } {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
       sessionId: null,
-      listTools: () => Promise.resolve({ tools: [searchTool(toolNames.search), fetchTool(toolNames.fetch)] }),
+      listTools: () =>
+        Promise.resolve({
+          tools: [
+            searchTool(toolNames.search),
+            fetchTool(toolNames.fetch),
+            ...(undeclared === undefined ? [] : [searchTool(undeclared)]),
+          ],
+        }),
       callTool: callParams => Promise.resolve({ content: [{ type: 'text', text: result(callParams.name) }] }),
       close: () => Promise.resolve(),
     }),
@@ -85,7 +93,7 @@ function harness(
     selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [] },
     preload: false,
     sentinel: host,
-    searchProvider: { tools: [toolNames.search, toolNames.fetch], plumbing_fields: [] },
+    searchProvider: { tools: [toolNames.search], page_read_tools: [toolNames.fetch], plumbing_fields: [], served_in_process: false },
     pages,
     pagesScope: scope,
   });
@@ -196,7 +204,7 @@ describe('ToolSet records pages read through a Tavily shaped server', () => {
   });
 });
 
-describe('a page reader listed as a search tool never records search results', () => {
+describe('a page reader never records search results', () => {
   const NAMED_URL = 'https://named.example/';
   const NEVER_NAMED_URL = 'https://never-named.example/';
   const readerOutput = JSON.stringify({
@@ -258,7 +266,12 @@ describe('ToolSet records only pages Aman reads itself', () => {
   it.each(ECHOES)(
     'refuses a place whose only page is %s echoed by a tool that is not a page reader',
     async (_label, url, text) => {
-      const { toolSet, pages, scope } = harness(() => text, { search: 'web_search', fetch: 'lookup_listing' });
+      const { toolSet, pages, scope } = harness(
+        () => text,
+        { search: 'web_search', fetch: 'web_fetch' },
+        undefined,
+        'lookup_listing',
+      );
       await toolSet.callTool({ name: 'lookup_listing', arguments: { url } }, { status: 'allow' });
       expect(
         groundPlace({

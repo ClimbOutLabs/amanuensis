@@ -10,6 +10,8 @@ import { getUniqueSanitizedToolName } from './toolNames';
 export interface MappedMCPTool {
   toolSet: IToolSet;
   originalToolName: string;
+  /** Whether the tool needs the network, as its own registration declared it when the tool set listed it. Absent reads as needing it. */
+  requires_network?: boolean | undefined;
 }
 
 export interface ConvertToolsResult {
@@ -228,6 +230,7 @@ export async function convertMCPServersToTools(params: {
       toolMapping.set(toolName, {
         toolSet,
         originalToolName: mcpTool.name,
+        requires_network: mcpTool.requires_network,
       });
     }
   }

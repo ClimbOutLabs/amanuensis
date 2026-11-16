@@ -63,6 +63,7 @@
     "sdk:types": "pnpm --filter @truefoundry/trueforge-sdk exec tsc --project ./tsconfig.cjs.json --emitDeclarationOnly --noCheck",
     "sync:check": "node scripts/sync-upstream.mjs --check",
     "sync:start": "node scripts/sync-upstream.mjs --start",
+    "create-account": "pnpm --filter @truefoundry/trueforge create-account",
     "dev:login": "node scripts/dev-login.mjs",
     "eval:tokens": "node scripts/eval-tokens.mjs",
     "eval:spaces": "node scripts/eval-spaces.mjs",

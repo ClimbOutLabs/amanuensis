@@ -17,5 +17,7 @@ export interface TrueFoundrySystemToolInfo {
     openWorldHint?: boolean;
     /** MCP readOnlyHint: the tool does not modify anything in its environment. */
     readOnlyHint?: boolean;
+    /** The tool needs the network, as its own registration declares. Set by the host from the registration, never from tool arguments. */
+    requiresNetwork?: boolean;
     type: "truefoundry-system";
 }

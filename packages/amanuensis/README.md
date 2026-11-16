@@ -6,12 +6,13 @@ Agent server and chat UI, started with one command. No clone, no database to set
 npx amanuensis
 ```
 
-Run `npx amanuensis`, open the address, create your sign-in. Then open the URL it prints, by default <http://localhost:8790>.
+Run `npx amanuensis`. The first time, it asks in the terminal for the email and password you will sign in with. Then open the URL it prints, by default <http://localhost:8790>, and sign in.
 
 ## Options
 
 ```
 npx amanuensis --port <n>   HTTP port (default 8790, or the PORT env var)
+npx amanuensis --create-account   Create the local sign-in without starting Aman
 npx amanuensis --reset-password   Set a new password for the local sign-in (Aman must be stopped)
 npx amanuensis --help       Show usage
 ```
@@ -20,13 +21,15 @@ Requires Node.js 22.14 or newer.
 
 ## Sign-in
 
-The first time you open Aman it asks you to create your sign-in: an email and a password of at least 8 characters, typed twice. Aman keeps the password itself, as a scrambled hash, in its own database. There is only ever one sign-in, and it can change every setting. After that first time, the same page is a plain sign-in form.
+The first time you start Aman with `npx amanuensis`, it asks in the terminal for your sign-in: an email and a password of at least 8 characters, typed twice. It does not show the password while you type. Aman keeps the password itself, as a scrambled hash, in its own database. There is only ever one sign-in, and it can change every setting. The sign-in is made only in a terminal on this computer, never from a web page, so nobody who reaches the page before you can claim it.
+
+Starting Aman where nobody can type, such as from a service? Run `npx amanuensis --create-account` once in a terminal first. Piped in, it reads three lines: the email, the password, and the password again.
 
 Change the password any time in Settings, Account. Changing it signs out every other device.
 
 Forgot the password? There is no reset by email. Stop Aman, run `npx amanuensis --reset-password`, and type a new password twice on the terminal (it does not show what you type). Then start Aman again and sign in with the new password. The sign-in page carries the same instruction in one line.
 
-Local sign-in works on this computer, or behind an https address you set as `PUBLIC_BASE_URL`. If a plain http address on another computer is listed, Aman refuses to start and says why: a password should not travel over an open connection.
+Local sign-in works on this computer, or behind an https address you set as `PUBLIC_BASE_URL`. If a plain http address on another computer is listed anywhere, even beside an https public address, Aman refuses to start and says why: a password should not travel over an open connection.
 
 ### Advanced: your own sign-in service
 

@@ -58,7 +58,12 @@ import {
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import { isSkillWriteToolName, LIST_SKILLS_TOOL_NAME, SKILL_SERVER_ID } from '../skills/toolContract';
+import {
+  isSkillRemoveToolName,
+  isSkillWriteToolName,
+  LIST_SKILLS_TOOL_NAME,
+  SKILL_SERVER_ID,
+} from '../skills/toolContract';
 import {
   isSpaceReadToolName,
   isSpaceWriteToolName,
@@ -110,7 +115,7 @@ import {
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
 } from './mapsToolNames';
-import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { requiresNetwork } from './networkRequirements';
 import { classifyNotesFolderTool } from './notesTier';
 import {
   appendOutboundTrace,
@@ -2695,12 +2700,15 @@ function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_
 }
 
 /**
- * Adding a skill always asks, with where it comes from and the exact version. Reading the list runs without
- * asking. Any other skill tool name fails closed.
+ * Adding a skill always asks, with where it comes from and the exact version, and removing one always asks too.
+ * Reading the list runs without asking. Any other skill tool name fails closed.
  */
 async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (action.tool_name === LIST_SKILLS_TOOL_NAME) {
     return tier1Decision({ reason: 'skill_read', reason_detail: 'Read your skills.', sensitive_read: false });
+  }
+  if (isSkillRemoveToolName(action.tool_name)) {
+    return classifySkillRemove(action, ctx);
   }
   if (!isSkillWriteToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown skill tool.' });
@@ -2720,6 +2728,37 @@ async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): 
     }),
     reason: 'skill_install',
     reason_detail: 'Adding a skill always asks.',
+    sensitive_read: false,
+    standing_grant_barred: true,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
+/**
+ * Removing a skill always asks, naming the skill and the websites it loses. A skill the host could not find is
+ * never offered.
+ */
+async function classifySkillRemove(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const review = action.skill_remove;
+  if (review === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The skill could not be found, so removing it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  const websites =
+    review.websites.length === 0
+      ? ''
+      : ` It will no longer reach ${review.websites.map(site => escapeDisplayText(site)).join(', ')}.`;
+  return tier3Decision({
+    card: sentenceCard({
+      plain_what: `Remove the skill ${cardSubject(review.name)}? It is taken out of every chat.${websites}`,
+      cannot_be_undone: 'To use it again, you add it again and approve its websites again.',
+      agent_intent: ctx.agent_intent,
+    }),
+    reason: 'skill_remove',
+    reason_detail: 'Removing a skill always asks.',
     sensitive_read: false,
     standing_grant_barred: true,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
@@ -3143,7 +3182,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         sensitive_read: false,
       });
     }
-    if (requiresNetwork({ tool_name: action.tool_name, provenance: provenanceForToolType(action.tool_type) })) {
+    if (requiresNetwork({ declared: action.requires_network })) {
       return autoDenyDecision({
         reason: 'offline_mode',
         reason_detail: 'This tool needs network access, which is disabled while offline.',
