@@ -47,6 +47,17 @@ describe('PairTerminalPage', () => {
     expect(screen.getByText(/You can close this page/)).toBeInTheDocument();
   });
 
+  it('warns a person who did not start the pairing to close the page, before the confirm button', () => {
+    const api = apiStub({});
+
+    renderPage(api, CODE);
+
+    const warning = screen.getByText('If you did not just start pairing on your own terminal, close this page.');
+    const confirmButton = screen.getByRole('button', { name: 'Confirm pairing' });
+    expect(warning).toBeInTheDocument();
+    expect(warning.compareDocumentPosition(confirmButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('shows the server one refusal line when the code is refused, and never claims a pairing', async () => {
     const api = apiStub({
       confirmPairing: vi.fn(async () => {

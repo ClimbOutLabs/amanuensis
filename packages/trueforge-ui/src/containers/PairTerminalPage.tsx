@@ -9,6 +9,7 @@ import { getErrorMessage } from '@/utils/getErrorMessage.js';
 const CONFIRM_FAILED_LINE = 'That pairing did not work. On the terminal, start pairing again and use the new code.';
 const NO_CODE_LINE = 'This link has no pairing code in it. On the terminal, start pairing again and open the new link.';
 const NO_PAIRING_LINE = 'Pairing is not available here. Open this link in the web app where you use Aman.';
+const NOT_YOUR_PAIRING_LINE = 'If you did not just start pairing on your own terminal, close this page.';
 
 /**
  * The page a pairing link opens. The terminal that asked shows the same code, so the
@@ -66,6 +67,7 @@ const PairTerminalPage = ({ code }: { code: string | null }) => {
                 <p className="text-sm leading-6 text-text-secondary">
                   Only confirm when this code matches the code on your terminal.
                 </p>
+                <p className="text-sm leading-6 text-text-secondary">{NOT_YOUR_PAIRING_LINE}</p>
                 {error !== null ? (
                   <p
                     role="alert"

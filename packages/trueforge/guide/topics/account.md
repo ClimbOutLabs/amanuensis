@@ -66,7 +66,7 @@ To confirm a pairing:
 2. Check that the code on the page matches the code on your terminal.
 3. Click **Confirm pairing**.
 
-The page then names the terminal that paired, and you can close the page. A paired terminal can reach your chats, and nothing else. It cannot open Settings or change anything.
+The page then names the terminal that paired, and you can close the page. A paired terminal can reach your chats, and nothing else. It cannot open Settings or change any setting. In the terminal app, approval cards appear in the chat and you can answer them there, so anything a card guards still waits for your answer before it happens.
 
 To stop a terminal:
 
