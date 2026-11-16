@@ -275,7 +275,12 @@ describe('connector card: web search', () => {
 
   test('names that merely contain the letters are not search tools', async () => {
     for (const toolName of ['research_notes', 'example_tool']) {
-      const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { id: '1' } }), makeCtx());
+      // The named destination keeps the call carded, so the reason below is the one being judged:
+      // a name that merely contains the letters of a search tool is an unrecognized tool.
+      const decision = await classifyTier(
+        connectorCall({ tool_name: toolName, params: { target: 'https://api.example.com/data', n: 2 } }),
+        makeCtx(),
+      );
       expect(decision.reason).toBe('unrecognized_tool');
     }
   });
@@ -425,11 +430,15 @@ describe('connector card: unknown tools stay fail-closed', () => {
 
   test('a local connector without a server host shows no host', async () => {
     const decision = await classifyTier(
-      connectorCall({ tool_name: 'frobnicate', server_host: undefined, params: { id: '1' } }),
+      connectorCall({
+        tool_name: 'frobnicate',
+        server_host: undefined,
+        params: { target: 'https://api.example.com/data', id: '1' },
+      }),
       makeCtx(),
     );
     expect(cardOf(decision).destination_host).toBeNull();
-    expect(cardOf(decision).outbound_text).toBe('id: 1');
+    expect(cardOf(decision).outbound_text).toBe('target: https://api.example.com/data\nid: 1');
   });
 
   test('built-in tools never carry outbound fields', async () => {
@@ -541,7 +550,11 @@ describe('card copy', () => {
     ['install_package', "Once this runs, it can't be undone."],
     ['frobnicate', 'It is not clear whether this can be undone.'],
   ])('%s explains itself in plain second person', async (toolName, expected) => {
-    const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { id: '1' } }), makeCtx());
+    // frobnicate names a mailbox so it reaches its card: an unclaimed call carrying only an id is
+    // refused under the carried-payload rule before any card is built, and a named destination
+    // would make it a send card with different copy.
+    const params = toolName === 'frobnicate' ? { id: '1', mailbox: 'Depot' } : { id: '1' };
+    const decision = await classifyTier(connectorCall({ tool_name: toolName, params }), makeCtx());
     expect(cardOf(decision).cannot_be_undone).toBe(expected);
   });
 
@@ -721,7 +734,11 @@ describe('card for a call that was gated some other way', () => {
 describe('connector card does not change the tier', () => {
   test('a family match and an unknown name both stay Tier 3 with an approval token', async () => {
     for (const toolName of ['web_search', 'frobnicate']) {
-      const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { query: 'q' } }), makeCtx());
+      // The unknown name names its destination, so it is carded rather than refused under the
+      // carried-payload rule: what is being judged here is the tier and the token, not the rule.
+      const params =
+        toolName === 'frobnicate' ? { query: 'q', target: 'https://api.example.com/data' } : { query: 'q' };
+      const decision = await classifyTier(connectorCall({ tool_name: toolName, params }), makeCtx());
       expect(decision.tier).toBe(3);
       expect(decision.auto_deny).toBeNull();
       expect(decision.approval_token_id).not.toBeNull();
@@ -745,7 +762,7 @@ describe('connector card does not change the tier', () => {
   });
 
   test('extraction still reports external-service actions without a destination as unverifiable', () => {
-    const result = extractCardFields({ tool_name: 'send_message', canonical_params: { text: 'hi' }, tool_type: 'mcp' });
+    const result = extractCardFields({ tool_name: 'send_message', canonical_params: { body: 'hi' }, tool_type: 'mcp' });
     expect(result.external_service).toBe(true);
     expect(result.destination_unverifiable).toBe(true);
   });

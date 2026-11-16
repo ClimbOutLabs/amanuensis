@@ -98,7 +98,11 @@ describe('connector send cards', () => {
   });
 
   test('still cuts a long value on a call that sends nothing', async () => {
-    const decision = await classify(mailCall('lookup_note', { text: 'a'.repeat(OUTBOUND_VALUE_MAX_CHARS + 5) }));
+    // The mailbox anchors the call in the connector's own store, so the carried-payload refusal
+    // does not claim it and the card still shows the long value cut.
+    const decision = await classify(
+      mailCall('lookup_note', { mailbox: 'Notes', text: 'a'.repeat(OUTBOUND_VALUE_MAX_CHARS + 5) }),
+    );
     expect(decision.auto_deny).toBeNull();
     expect(decision.card?.outbound_truncated).toBe(true);
   });
@@ -282,8 +286,8 @@ describe('hidden sends: one rule for every spelling', () => {
     }
   });
 
-  test('a send_message with only a draft id stays denied for its missing destination', async () => {
-    expect((await classify(mailCall('send_message', { draftId: 'd1' }))).auto_deny).toBe('destination_unverifiable');
+  test('a send_message with only a draft id is refused as a saved draft the card cannot show', async () => {
+    expect((await classify(mailCall('send_message', { draftId: 'd1' }))).auto_deny).toBe('incomplete_send_card');
   });
 
   test.each<[string, Record<string, unknown>]>([

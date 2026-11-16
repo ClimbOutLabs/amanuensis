@@ -188,7 +188,10 @@ describe('the designated search provider', () => {
     const unlisted = harness({ searchProvider: true });
     const held = await unlisted.toolSet.toolCallInfo({ name: 'read_page', arguments: { query: 'weather in Oslo' } });
     expect(held.tier).toBe(3);
-    expect(held.is_approval_required).toBe(true);
+    // Not listed, so the search flow does not own the call, and a query with no verifiable
+    // destination is refused rather than carded. A call that carries nothing still asks.
+    expect(held.is_approval_required).toBe(false);
+    expect(held.pre_dispatch_failure?.kind).toBe('policy_blocked');
     expect(isApprovalRequiredResponse(await unlisted.toolSet.callTool({ name: 'read_page', arguments: {} }))).toBe(
       true,
     );
@@ -556,7 +559,14 @@ describe('the loop breaker', () => {
 describe('a map the user approved, and the text the next silent search is checked against', () => {
   it('holds a server secret split between an approved map and a silent search', async () => {
     const secret = 'synthetic-server-secret-value-0003';
-    const mapTool: ToolSchema = { name: 'render_map', description: 'Shows a map.', inputSchema: schema };
+    // The map tool declares itself read-only and closed-world: it only reads map data and
+    // shows it, so its card still asks and its text is checked the same way.
+    const mapTool: ToolSchema = {
+      name: 'render_map',
+      description: 'Shows a map.',
+      inputSchema: schema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    };
     const h = harness({ searchProvider: true, secrets: [secret], tools: [searchTool, mapTool] });
     await h.toolSet.callTool({ name: 'render_map', arguments: { query: secret.slice(0, 16) } }, { status: 'allow' });
     const second = await runSearch(h, secret.slice(16));
@@ -756,13 +766,20 @@ describe('Tavily as the designated search provider', () => {
     expect((await extract([page, 'https://evil.example/collect?d=notes'])).tier).toBe(3);
   });
 
-  it('keeps asking for the Tavily tools its preset does not list', async () => {
+  it('refuses the Tavily tools its preset does not list, since a query with no verifiable destination is never carded', async () => {
     const h = harness({ serverName: 'tavily', searchProvider: true, searchTools, tools, result: results });
-    for (const name of ['tavily_crawl', 'tavily_map', 'tavily_research', 'tavily_feedback']) {
+    for (const name of ['tavily_map', 'tavily_research', 'tavily_feedback']) {
       const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
       expect(info.tier).toBe(3);
-      expect(info.is_approval_required).toBe(true);
+      expect(info.is_approval_required).toBe(false);
+      expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
     }
+    // A crawl is claimed by the fetch family, which describes it as fetching a page and does
+    // not send, so it keeps that family's card rather than the refusal.
+    const crawl = await h.toolSet.toolCallInfo({ name: 'tavily_crawl', arguments: { query: 'oslo' } });
+    expect(crawl.tier).toBe(3);
+    expect(crawl.is_approval_required).toBe(true);
+    expect(crawl.tier3_card?.plain_what).toBe('Fetch a web page?');
   });
 
   it('asks for the same tools when Tavily does not hold the role', async () => {
@@ -800,17 +817,11 @@ describe('a write-capable connector designated as the search provider', () => {
     }
   });
 
-  it('keeps every unannotated or write tool on the normal approval path', async () => {
+  it('keeps every unannotated or write tool off the silent path on the designated provider', async () => {
     const h = harness({ serverName: 'github', searchProvider: true, tools });
-    for (const name of [
-      'create_issue',
-      'add_issue_comment',
-      'merge_pull_request',
-      'push_files',
-      'create_or_update_file',
-      'fork_repository',
-      'run_workflow',
-    ]) {
+    // Writes a connector family claims, and a write escalated by its own destructive hint,
+    // keep the approval path: they ask, with a card that shows the arguments.
+    for (const name of ['push_files', 'create_or_update_file', 'run_workflow']) {
       const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
       expect(info.tier).toBe(3);
       expect(info.is_approval_required).toBe(true);
@@ -818,8 +829,36 @@ describe('a write-capable connector designated as the search provider', () => {
       const response = await h.toolSet.callTool({ name, arguments: { query: 'oslo' } });
       expect(isApprovalRequiredResponse(response)).toBe(true);
     }
+    // An unclaimed write that carries words and names no destination is refused outright
+    // under the unverifiable-destination rule. Either way, nothing here ever runs silently.
+    for (const name of ['create_issue', 'add_issue_comment', 'merge_pull_request', 'fork_repository']) {
+      const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
+      expect(info.tier).toBe(3);
+      expect(info.is_approval_required).toBe(false);
+      expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
+      expect(info.silent_search_query).toBeUndefined();
+      const response = await h.toolSet.callTool({ name, arguments: { query: 'oslo' } });
+      expect(isApprovalRequiredResponse(response)).toBe(false);
+    }
     expect(h.dispatched).toEqual([]);
-    expect(h.audit).toEqual([]);
+    // The carded writes were never run, so they leave no audit row. Each refusal is audited
+    // as an auto-denied call, once when the call is classified and once at dispatch.
+    expect(h.audit).toHaveLength(8);
+    for (const row of h.audit) {
+      expect(row).toMatchObject({ outcome: 'auto_denied', auto_deny_reason: 'destination_unverifiable', tier: 3 });
+    }
+    expect(h.audit.map(row => row.tool_name).sort()).toEqual(
+      [
+        'add_issue_comment',
+        'add_issue_comment',
+        'create_issue',
+        'create_issue',
+        'fork_repository',
+        'fork_repository',
+        'merge_pull_request',
+        'merge_pull_request',
+      ].sort(),
+    );
   });
 
   it('does not let a server claim read-only on a tool whose name says it writes or deletes', async () => {
