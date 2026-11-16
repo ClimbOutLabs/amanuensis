@@ -164,7 +164,7 @@ describe('compaction during a later turn and the earlier turn the chat view draw
               services: input.sentinel_services,
               web_search: base.webSearchTurn,
             }),
-            searchProvider: { tools: [], plumbing_fields: [] },
+            searchProvider: { tools: [], page_read_tools: [], plumbing_fields: [], served_in_process: false },
           });
           return {
             ...resolved,

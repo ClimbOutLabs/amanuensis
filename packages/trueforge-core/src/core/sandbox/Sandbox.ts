@@ -95,6 +95,7 @@ import {
   sandboxCommandUsesUnstructuredOperation,
   sandboxCommandWebEgressRejection,
   sandboxInvocationPolicy,
+  sandboxUnstructuredOperationName,
   sandboxVerifyCommandUsesInlineEval,
   sandboxVerifyCommandUsesUnsafeSyntax,
   type SandboxCommandEffect,
@@ -1940,6 +1941,22 @@ function execInterpreterGuardFailure(input: {
   return verdict.verdict === 'reject' ? interpreterInvocationRefusal(verdict.reason) : undefined;
 }
 
+/**
+ * Names what was refused and the route that works. run_code is offline, so a job that needs a website (often a
+ * skill whose instructions loop over curl) has to go through a script file run by exec instead.
+ */
+function unstructuredCommandRefusal(command: string): string {
+  return (
+    `This command was not run because it uses ${sandboxUnstructuredOperationName(command)}. ` +
+    'exec runs plain commands only, so the approval shows exactly what runs; pipes between plain commands are fine. ' +
+    'Do not retry it in another shell form. ' +
+    "For a loop, several steps, or one command's output feeding the next, write the steps as a Python script with write_file and run that file with exec, for example python3 fetch.py. " +
+    'That script reaches the same websites a plain command could. run_code is offline and cannot reach any website. ' +
+    'To read a file use cat, head or sed -n; to edit one use apply_patch or replace_text. ' +
+    "To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields."
+  );
+}
+
 const OFFLINE_NETWORK_COMMAND_REFUSAL =
   'This sandbox is offline by design, so this command cannot reach the internet and was not run. Do not retry it and do not try another tool for the same job. Tell the user in plain words that you cannot open websites from here.';
 
@@ -2017,7 +2034,7 @@ function sandboxExecPreflightFailure(input: {
     (input.purpose === 'inspect' || input.purpose === 'edit' || input.purpose === 'execute') &&
     sandboxCommandUsesUnstructuredOperation(input.command)
   ) {
-    return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Inspect a file with a plain exec command such as cat, head or sed -n, use write_file for a new file, apply_patch/replace_text for an edit, or run_code for Python or Node code. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
+    return unstructuredCommandRefusal(input.command);
   }
   // Verification has to stay observable: redirection, substitution, and
   // backgrounding hide what the check actually ran, so a green result would
@@ -2034,9 +2051,11 @@ function sandboxExecPreflightFailure(input: {
   ) {
     return 'Inline code evaluation (python -c, node -e), heredocs, and tee are not allowed for verify-purpose exec calls. Put the check in a shell script and run it by name so the verification step stays reviewable. Python and Node code cannot run through exec at all.';
   }
+  // A skill's approved websites are reached the way the skill says, so curl is not redirected to the web tool;
+  // the gateway still refuses every other site.
   const webEgressRejection = sandboxCommandWebEgressRejection({
     command: input.command,
-    webConnectorAttached: input.webConnectorAttached,
+    webConnectorAttached: input.webConnectorAttached && !input.skillNetworkGranted,
     webConnectorToolHint: input.webConnectorToolHint,
   });
   if (webEgressRejection !== undefined) {
@@ -2308,6 +2327,7 @@ export class Sandbox extends LocalToolMCP {
   private tools = [
     defineTool({
       name: SANDBOX_EXEC_TOOL_NAME,
+      requiresNetwork: false,
       // Rendered in getTools(): the provider is not known when this field initializes.
       description: '',
       schema: sandboxExecSchema,
@@ -2315,6 +2335,7 @@ export class Sandbox extends LocalToolMCP {
     }),
     defineTool({
       name: SANDBOX_RUN_CODE_TOOL_NAME,
+      requiresNetwork: false,
       // Description is rendered per turn in getTools(): the /ingress list is dynamic.
       description: '',
       schema: RunCodeInputSchema,
@@ -2322,36 +2343,42 @@ export class Sandbox extends LocalToolMCP {
     }),
     defineTool({
       name: SANDBOX_APPLY_PATCH_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_APPLY_PATCH_DESCRIPTION,
       schema: sandboxApplyPatchSchema,
       handler: (input, approvalDecision, context) => this.handleApplyPatch(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_REPLACE_TEXT_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_REPLACE_TEXT_DESCRIPTION,
       schema: sandboxReplaceTextSchema,
       handler: (input, approvalDecision, context) => this.handleReplaceText(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_WRITE_FILE_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_WRITE_FILE_DESCRIPTION,
       schema: sandboxWriteFileSchema,
       handler: (input, approvalDecision, context) => this.handleWriteFile(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION,
       schema: sandboxRunRegisteredCommandSchema,
       handler: (input, approvalDecision, context) => this.handleRunRegisteredCommand(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_RUN_SKILL_SCRIPT_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_RUN_SKILL_SCRIPT_DESCRIPTION,
       schema: sandboxRunSkillScriptSchema,
       handler: (input, approvalDecision, context) => this.handleRunSkillScript(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
+      requiresNetwork: false,
       description: SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_DESCRIPTION,
       schema: sandboxImplementationPlanSchema,
       handler: (input, approvalDecision) => this.handleSubmitImplementationPlan(input, approvalDecision),
@@ -2640,6 +2667,7 @@ export class Sandbox extends LocalToolMCP {
           canonical_params: effectiveArguments ?? {},
           tool_type: 'truefoundry-system',
           sandbox_effect: effect,
+          requires_network: info.requires_network,
           mcp_hints: {
             read_only_hint: info.read_only_hint,
             destructive_hint: info.destructive_hint,

@@ -290,6 +290,7 @@ describe('no card copy carries an internal id', () => {
         inReplyTo: '',
         references: '',
         fromName: '',
+        fromAddress: 'ada@example.test',
         nameLeftOff: false,
         replyTo: null,
       },

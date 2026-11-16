@@ -74,3 +74,9 @@ export type McpServerManifestAuth = z.infer<typeof McpServerManifestAuthSchema>;
 
 /** Names of the tools of a web search provider that may run without asking. */
 export const McpSearchToolsSchema = z.array(z.string().min(1).max(128)).max(16);
+
+/** Bare names of the tools a server itself declared at connect time as changing things. */
+export const McpDeclaredChangeToolsSchema = z.array(z.string().min(1).max(128)).max(64);
+
+/** Argument names of a search provider's tools that carry its own bookkeeping, not the user's text. */
+export const McpSearchPlumbingFieldsSchema = z.array(z.string().min(1).max(128)).max(16);

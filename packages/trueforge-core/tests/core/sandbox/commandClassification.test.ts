@@ -8,6 +8,7 @@ import {
   sandboxCommandUsesUnstructuredOperation,
   sandboxCommandWebEgressRejection,
   sandboxInvocationPolicy,
+  sandboxUnstructuredOperationName,
   sandboxVerifyCommandMasksExitStatus,
   sandboxVerifyCommandUsesInlineEval,
   sandboxVerifyCommandUsesUnsafeSyntax,
@@ -675,5 +676,27 @@ describe('sandbox command admission', () => {
         }),
       ).toBeUndefined();
     });
+  });
+});
+
+describe('sandboxUnstructuredOperationName', () => {
+  it.each([
+    [
+      `for id in $(curl -s "https://hn.example/top.json" | jq -r '.[:10]'); do curl -s "https://hn.example/item/$id.json"; done`,
+      'command substitution',
+    ],
+    ['printf "%s" "`date`"', 'command substitution'],
+    ['cat <<EOF\nhi\nEOF', 'a heredoc'],
+    ['echo hi > out.txt', 'redirection'],
+    ['pnpm anything | tee test.log', 'tee'],
+    ['python3 -c "print(1)"', 'inline Python'],
+    ['sleep 5 &', 'shell syntax that hides what runs'],
+  ])('names what was refused in %s', (command, words) => {
+    expect(sandboxCommandUsesUnstructuredOperation(command)).toBe(true);
+    expect(sandboxUnstructuredOperationName(command)).toContain(words);
+  });
+
+  it('does not count a quoted $( inside single quotes', () => {
+    expect(sandboxUnstructuredOperationName("echo '$(x)' > out")).toContain('redirection');
   });
 });

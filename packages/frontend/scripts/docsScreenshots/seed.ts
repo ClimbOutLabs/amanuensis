@@ -4,7 +4,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { Page } from 'playwright-core';
 
 import { TENANT_ID } from '../../../trueforge/src/apis/sessions.ts';
+import { createLocalUser } from '../../../trueforge/src/auth/localSignIn.ts';
 import { DeliveryStore } from '../../../trueforge/src/db/deliveryStore.ts';
+import { SqliteLocalUserStore } from '../../../trueforge/src/db/sqlite/local-user-store/SqliteLocalUserStore.ts';
 import { formatRunTime } from '../../../trueforge/src/runtime/scheduleCapability.ts';
 import type { ApprovalTestServer } from '../../../trueforge/tests/fixtures/approvalTestServer.ts';
 import {
@@ -54,15 +56,16 @@ export interface OwnerApi {
   call: (input: { method: string; path: string; body?: unknown }) => Promise<unknown>;
 }
 
-/** Creates the owner's sign-in, as the first-run form does, and keeps the cookie it sets. */
+/** Makes the owner's sign-in as the terminal command does, then signs in on the page and keeps the cookie it sets. */
 export async function signUpOwner(api: ApprovalTestServer): Promise<OwnerApi> {
-  const form = new URLSearchParams({
+  const made = await createLocalUser({
+    store: new SqliteLocalUserStore(api.db()),
     email: OWNER.email,
     password: OWNER_PASSWORD,
-    password_confirm: OWNER_PASSWORD,
-    return_to: '/',
   });
-  const created = await api.request('/api/v1/auth/create-account', {
+  if (!made.ok) throw new Error(`The demo sign-in was not created: ${made.message}`);
+  const form = new URLSearchParams({ email: OWNER.email, password: OWNER_PASSWORD, return_to: '/' });
+  const created = await api.request('/api/v1/auth/login', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', 'sec-fetch-site': 'same-origin' },
     body: form.toString(),
@@ -70,7 +73,7 @@ export async function signUpOwner(api: ApprovalTestServer): Promise<OwnerApi> {
   const match = /(?:^|,\s*)(id_token)=([^;]+)/.exec(created.headers.get('set-cookie') ?? '');
   const [, name, value] = match ?? [];
   if (name === undefined || value === undefined) {
-    throw new Error(`The demo sign-in was not created (${String(created.status)}): ${await created.text()}`);
+    throw new Error(`The demo owner did not sign in (${String(created.status)}): ${await created.text()}`);
   }
   const call: OwnerApi['call'] = async ({ method, path, body }) => {
     const response = await api.request(path, {

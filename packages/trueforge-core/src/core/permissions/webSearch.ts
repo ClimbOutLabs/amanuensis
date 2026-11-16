@@ -15,7 +15,6 @@ import {
 } from '../memory/pagesToolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
 import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
-import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
 import { BROWSER_OPEN_SILENT_REASON, BROWSER_OPEN_TOOL_NAME, isBrowserToolName } from './browserToolNames';
 import {
   type ChatProvenance,
@@ -80,10 +79,18 @@ export function isSearchAskReason(reason: string): boolean {
 
 /** What the host lets the designated search provider's connector do silently, resolved for one turn. */
 export interface SearchProviderGrant {
-  /** Tools that run without asking even when the server does not declare them read-only. */
+  /** Search tools that run without asking even when the server does not declare them read-only. Their results are recorded as search hits. */
   tools: readonly string[];
+  /** Page-read tools that run without asking on the same terms. What they return is recorded as page text, never as search hits. */
+  page_read_tools: readonly string[];
   /** Top-level argument names that are provider plumbing, not user text. */
   plumbing_fields: readonly string[];
+  /**
+   * The host serves this provider's search itself, in process, rather than through the connector's
+   * remote endpoint. Captured on the connector record when the person designated it; the chat
+   * resolver and the guide read it instead of recognising the provider by its address.
+   */
+  served_in_process: boolean;
 }
 
 export interface WebSearchTurnState {
@@ -213,8 +220,8 @@ export function pageImageUrls(text: string): string[] {
  * from the page text so the page's own words stay framed as untrusted data. A space only accepts an
  * https picture, so an http one is left out rather than offered and then refused.
  */
-export function pagePicturesNote(input: { tool_name: string; text: string }): string | undefined {
-  if (!isPageReaderTool(baseToolName(input.tool_name))) {
+export function pagePicturesNote(input: { page_reader: boolean; text: string }): string | undefined {
+  if (!input.page_reader) {
     return undefined;
   }
   const shown = pagePictures(input.text)
@@ -268,18 +275,33 @@ export interface HostToolStamp {
   host_tool: boolean;
   /** The call went to the connector the person designated as the search provider. */
   search_provider: boolean;
+  /** The call ran one of the search tools the designated provider's record declares. */
+  search_result: boolean;
+  /** The call ran one of the page-read tools the designated provider's record declares. */
+  page_reader: boolean;
 }
 
 /** The stamp of a call the host recorded nothing about: it earns no standing. */
-export const NO_HOST_STAMP: HostToolStamp = { host_tool: false, search_provider: false };
+export const NO_HOST_STAMP: HostToolStamp = {
+  host_tool: false,
+  search_provider: false,
+  search_result: false,
+  page_reader: false,
+};
 
 /** Reads the host's stamp from the call info it wrote; a call with no info earns no standing. */
 export function hostToolStamp(
-  info: Pick<InternalToolCallInfo, 'type' | 'search_provider_call'> | undefined,
+  info:
+    Pick<InternalToolCallInfo, 'type' | 'search_provider_call' | 'search_result_call' | 'page_read_call'> | undefined,
 ): HostToolStamp {
   return info === undefined
     ? NO_HOST_STAMP
-    : { host_tool: info.type === 'truefoundry-system', search_provider: info.search_provider_call === true };
+    : {
+        host_tool: info.type === 'truefoundry-system',
+        search_provider: info.search_provider_call === true,
+        search_result: info.search_result_call === true,
+        page_reader: info.page_read_call === true,
+      };
 }
 
 /**
@@ -293,12 +315,12 @@ export function toolReturnsOutsideContent(input: { tool_name: string; stamp: Hos
 }
 
 /** The kind of content a tool's result is, so a card or a memory note can say where something was read. */
-export function readSourceOf(toolName: string): ReadSource {
+export function readSourceOf(toolName: string, stamp: HostToolStamp): ReadSource {
   const baseName = baseToolName(toolName);
   if (isBrowserToolName(baseName)) {
     return 'browser_page';
   }
-  if (isSearchResultTool(baseName) || isPageReaderTool(baseName)) {
+  if (stamp.search_provider && (stamp.search_result || stamp.page_reader)) {
     return 'page';
   }
   if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {
@@ -325,14 +347,13 @@ export function recordToolResultProvenance(input: {
   texts: readonly string[];
 }): void {
   const { provenance } = input.state;
-  const baseName = baseToolName(input.tool_name);
-  const searchTool = input.stamp.search_provider && isSearchResultTool(baseName);
+  const searchTool = input.stamp.search_provider && input.stamp.search_result;
   if (searchTool && !namesUrl(input.argument_values)) {
     recordSearchResults({ provenance, texts: input.texts });
     return;
   }
-  const source = readSourceOf(baseName);
-  const pageReader = input.stamp.search_provider && isPageReaderTool(baseName);
+  const source = readSourceOf(input.tool_name, input.stamp);
+  const pageReader = input.stamp.search_provider && input.stamp.page_reader;
   for (const text of input.texts) {
     if (source === 'email') {
       recordEmailText({ provenance, text });

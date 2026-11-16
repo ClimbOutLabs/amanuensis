@@ -29,27 +29,45 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const TRUEFORGE_ROOT = fileURLToPath(new URL('../../trueforge/', import.meta.url));
+
+/** One instance's environment: local sign-in, against a throwaway data directory. */
+function instanceEnv(dataDir: string, port: number): Record<string, string> {
+  return {
+    PATH: process.env['PATH'] ?? '',
+    HOME: dataDir,
+    NODE_OPTIONS: '--conditions=trueforge-dev',
+    NODE_ENV: 'production',
+    STANDALONE: 'true',
+    TRUEFORGE_AUTH_MODE: 'local',
+    HOST: 'localhost',
+    PORT: String(port),
+    ACCESS_LOGS: 'false',
+    MEMORY_EMBEDDINGS_ENABLED: 'false',
+    SQLITE_PATH: path.join(dataDir, 'db', 'db.sqlite'),
+    MEMORY_MARKDOWN_DIR: path.join(dataDir, 'memory'),
+    PERSONA_KNOWLEDGE_DIR: path.join(dataDir, 'persona'),
+    APP_DATA_DIR_SUFFIX: `auth-local-test-${path.basename(dataDir)}`,
+  };
+}
+
+/** Makes the sign-in the way a person does, with `aman create-account` and the answers piped in. */
+async function createAccountInTerminal(dataDir: string, port: number): Promise<void> {
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/cli/main.ts', 'create-account'], {
+    cwd: TRUEFORGE_ROOT,
+    env: instanceEnv(dataDir, port),
+    stdio: ['pipe', 'ignore', 'inherit'],
+  });
+  child.stdin.end(`${EMAIL}\n${PASSWORD}\n${PASSWORD}\n`);
+  const code = await new Promise<number | null>(resolve => child.once('exit', resolve));
+  assert.equal(code, 0, 'create-account did not make the sign-in');
+}
+
 /** Boots the real server in local sign-in mode against a throwaway data directory. */
 async function bootLocalServer(dataDir: string, port: number): Promise<ChildProcess> {
-  const trueforgeRoot = fileURLToPath(new URL('../../trueforge/', import.meta.url));
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
-    cwd: trueforgeRoot,
-    env: {
-      PATH: process.env['PATH'] ?? '',
-      HOME: dataDir,
-      NODE_OPTIONS: '--conditions=trueforge-dev',
-      NODE_ENV: 'production',
-      STANDALONE: 'true',
-      TRUEFORGE_AUTH_MODE: 'local',
-      HOST: 'localhost',
-      PORT: String(port),
-      ACCESS_LOGS: 'false',
-      MEMORY_EMBEDDINGS_ENABLED: 'false',
-      SQLITE_PATH: path.join(dataDir, 'db', 'db.sqlite'),
-      MEMORY_MARKDOWN_DIR: path.join(dataDir, 'memory'),
-      PERSONA_KNOWLEDGE_DIR: path.join(dataDir, 'persona'),
-      APP_DATA_DIR_SUFFIX: `auth-local-test-${path.basename(dataDir)}`,
-    },
+    cwd: TRUEFORGE_ROOT,
+    env: instanceEnv(dataDir, port),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const base = `http://localhost:${String(port)}`;
@@ -74,57 +92,67 @@ async function bootLocalServer(dataDir: string, port: number): Promise<ChildProc
   }
 }
 
-test('local sign-in: create, sign out, wrong password, sign in', { timeout: 240_000 }, async () => {
-  const dataDir = await mkdtemp(path.join(tmpdir(), 'amn-auth-local-'));
-  const port = await freePort();
-  const base = `http://localhost:${String(port)}`;
-  let server: ChildProcess | undefined;
-  let browser: Browser | undefined;
-  try {
-    server = await bootLocalServer(dataDir, port);
-    browser = await chromium.launch({
-      executablePath: findChromiumExecutable(chromium.executablePath()),
-      headless: true,
-    });
-    const page = await browser.newPage();
+test(
+  'local sign-in: made in the terminal, then sign in, sign out, wrong password, sign in',
+  { timeout: 240_000 },
+  async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), 'amn-auth-local-'));
+    const port = await freePort();
+    const base = `http://localhost:${String(port)}`;
+    let server: ChildProcess | undefined;
+    let browser: Browser | undefined;
+    try {
+      server = await bootLocalServer(dataDir, port);
+      browser = await chromium.launch({
+        executablePath: findChromiumExecutable(chromium.executablePath()),
+        headless: true,
+      });
+      const page = await browser.newPage();
 
-    // First run: the create form, and creating it signs the person in.
-    await page.goto(`${base}/api/v1/auth/login`, { waitUntil: 'domcontentloaded' });
-    await page.getByRole('heading', { name: 'Create your sign-in' }).waitFor({ state: 'visible' });
-    await page.getByLabel('Email').fill(EMAIL);
-    await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
-    await page.getByLabel('Type the password again').fill(PASSWORD);
-    await page.getByRole('button', { name: 'Create sign-in' }).click();
-    await page.waitForURL(`${base}/`);
+      // First run: the page names the terminal command and offers nothing to fill in.
+      await page.goto(`${base}/api/v1/auth/login`, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('heading', { name: 'Set up your sign-in' }).waitFor({ state: 'visible' });
+      await page.getByText('npx amanuensis --create-account').first().waitFor({ state: 'visible' });
+      assert.equal(await page.locator('input').count(), 0);
 
-    // Signed in: the login page sends the person straight through.
-    await page.goto(`${base}/api/v1/auth/login`, { waitUntil: 'domcontentloaded' });
-    assert.equal(page.url(), `${base}/`);
+      // Made at the terminal, the sign-in is then used on the page.
+      await createAccountInTerminal(dataDir, port);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.getByRole('heading', { name: 'Sign in' }).waitFor({ state: 'visible' });
+      await page.getByLabel('Email').fill(EMAIL);
+      await page.getByLabel('Password').fill(PASSWORD);
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      await page.waitForURL(`${base}/`);
 
-    // Sign out through the same route the app uses, then the form is a plain sign-in.
-    await page.evaluate(async () => {
-      await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' });
-    });
-    await page.goto(`${base}/api/v1/auth/login`, { waitUntil: 'domcontentloaded' });
-    await page.getByRole('heading', { name: 'Sign in' }).waitFor({ state: 'visible' });
-    assert.equal(await page.getByRole('heading', { name: 'Create your sign-in' }).count(), 0);
+      // Signed in: the login page sends the person straight through.
+      await page.goto(`${base}/api/v1/auth/login`, { waitUntil: 'domcontentloaded' });
+      assert.equal(page.url(), `${base}/`);
 
-    // A wrong password gets the one refusal sentence.
-    await page.getByLabel('Email').fill(EMAIL);
-    await page.getByLabel('Password').fill('not the password');
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await page.getByText('That email or password is not right').waitFor({ state: 'visible' });
+      // Sign out through the same route the app uses, then the form is a plain sign-in.
+      await page.evaluate(async () => {
+        await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' });
+      });
+      await page.goto(`${base}/api/v1/auth/login`, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('heading', { name: 'Sign in' }).waitFor({ state: 'visible' });
+      assert.equal(await page.getByRole('heading', { name: 'Set up your sign-in' }).count(), 0);
 
-    // The right password signs in.
-    await page.getByLabel('Password').fill(PASSWORD);
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await page.waitForURL(`${base}/`);
-  } finally {
-    await browser?.close();
-    if (server !== undefined) {
-      server.kill('SIGKILL');
-      await new Promise<void>(resolve => server.once('exit', () => resolve()));
+      // A wrong password gets the one refusal sentence.
+      await page.getByLabel('Email').fill(EMAIL);
+      await page.getByLabel('Password').fill('not the password');
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      await page.getByText('That email or password is not right').waitFor({ state: 'visible' });
+
+      // The right password signs in.
+      await page.getByLabel('Password').fill(PASSWORD);
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      await page.waitForURL(`${base}/`);
+    } finally {
+      await browser?.close();
+      if (server !== undefined) {
+        server.kill('SIGKILL');
+        await new Promise<void>(resolve => server.once('exit', () => resolve()));
+      }
+      await rm(dataDir, { recursive: true, force: true });
     }
-    await rm(dataDir, { recursive: true, force: true });
-  }
-});
+  },
+);
