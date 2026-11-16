@@ -51,7 +51,7 @@ export const DeleteShownMemoryRequestSchema = z
   .openapi('DeleteShownMemoryRequest');
 
 export const DeleteShownMemoryResultSchema = z
-  .object({ deleted: z.number().int().min(1).describe('How many stored copies were deleted.') })
+  .object({ deleted: z.number().int().min(1).describe('How many stored copies and page lines were deleted.') })
   .openapi('DeleteShownMemoryResult');
 
 export const DeleteShownMemoryResponseSchema = z

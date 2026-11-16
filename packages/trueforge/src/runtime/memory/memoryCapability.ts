@@ -1509,6 +1509,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
         maxPages: this.config.pages.maxCount,
         maxTokens: this.config.pages.maxTokens,
         gate: await gate,
+        exclusions: await this.readRecallExclusions(),
       });
       if (loaded.skippedFiles.length > 0) {
         this.logger.warn(

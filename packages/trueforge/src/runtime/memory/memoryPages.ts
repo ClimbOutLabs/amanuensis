@@ -360,6 +360,17 @@ export function withFactMarker(page: MemoryPage, input: { at: FactLocation; mark
 }
 
 /** The page without this fact's line. */
+/** The page without the lines `drop` picks, in any section; the same page when it picks none. */
+export function withoutLines(page: MemoryPage, drop: (line: PageLine) => boolean): MemoryPage {
+  if (!page.sections.some(section => section.lines.some(drop))) {
+    return page;
+  }
+  return {
+    ...page,
+    sections: page.sections.map(section => ({ ...section, lines: section.lines.filter(line => !drop(line)) })),
+  };
+}
+
 export function removeFact(page: MemoryPage, input: { at: FactLocation }): MemoryPage {
   return replaceLine({ page, at: input.at, lines: [] });
 }
