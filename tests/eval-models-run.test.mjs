@@ -5,6 +5,13 @@ import path from 'node:path';
 import test from 'node:test';
 import { collectToolCalls, runCheck } from '../scripts/eval-models/checks.mjs';
 import { DROP_EXIT_CODE, parseModelArgs } from '../scripts/eval-models/cli.mjs';
+import {
+  checkScheduledRun,
+  cleanUpJourney,
+  plainScheduleName,
+  readBrief,
+  snapshotJourney,
+} from '../scripts/eval-models/journey.mjs';
 import { buildJudgePrompt, parseVerdict } from '../scripts/eval-models/judge.mjs';
 import { findDrops } from '../scripts/eval-models/report.mjs';
 import { modelCost, runEvalModels } from '../scripts/eval-models/run.mjs';
@@ -290,4 +297,95 @@ test('a run grades every case, removes its memories and space, and writes the co
   } finally {
     await rm(outDir, { recursive: true, force: true });
   }
+});
+
+function journeyClient({ title = 'Morning brief · Monday, March 2', reply }) {
+  const state = {
+    schedules: [{ id: 'old', name: 'old-one', manifest: {} }],
+    agents: [{ id: 'agent-old', name: 'old-one' }],
+    deleted: [],
+  };
+  return {
+    state,
+    async listSchedules() {
+      return state.schedules;
+    },
+    async listAgents() {
+      return state.agents;
+    },
+    async runScheduleNow(id) {
+      assert.equal(id, 'new');
+      return { id: 'run-1' };
+    },
+    async listRecentSessions() {
+      return [{ id: 'chat-1', title, source: { type: 'schedule', id: 'new', run_id: 'run-1' } }];
+    },
+    async listTurns() {
+      return [{ id: 'turn-1', state: { status: 'done', output: { content: reply } } }];
+    },
+    async deleteSchedule(id) {
+      state.deleted.push(id);
+    },
+    async deleteAgent(id) {
+      state.deleted.push(id);
+    },
+  };
+}
+
+test('a scheduled run is checked like a person would see it, then everything it made is removed', async () => {
+  const brief = '```json\n{"digest":"A quiet day.","items":[]}\n```';
+  const client = journeyClient({ reply: brief });
+  const before = await snapshotJourney({ client });
+  client.state.schedules.push({
+    id: 'new',
+    name: 'morning-brief',
+    manifest: { task: 'Give me my morning brief. Read it all.', cron: '30 7 * * 1-5', timezone: 'Europe/London' },
+  });
+  client.state.agents.push({ id: 'agent-new', name: 'morning-brief' });
+  const results = await checkScheduledRun({
+    client,
+    before,
+    expect: { cron: '30 7 * * 1-5', timezone: 'Europe/London' },
+    pollIntervalMs: 1,
+  });
+  assert.deepEqual(
+    results.filter(item => !item.pass),
+    [],
+  );
+  assert.equal(results.length, 6);
+  assert.deepEqual(await cleanUpJourney({ client, before }), []);
+  assert.deepEqual(client.state.deleted, ['new', 'agent-new']);
+});
+
+test('a scheduled run fails its checks when the time is wrong, the chat is misnamed or no brief is written', async () => {
+  const client = journeyClient({ title: 'Please set up a brief', reply: 'Here is your brief.' });
+  const before = await snapshotJourney({ client });
+  client.state.schedules.push({
+    id: 'new',
+    name: 'morning-brief',
+    manifest: { task: 'Summarize my day.', cron: '0 8 * * *', timezone: 'UTC' },
+  });
+  const failed = (
+    await checkScheduledRun({
+      client,
+      before,
+      expect: { cron: '30 7 * * 1-5', timezone: 'Europe/London' },
+      pollIntervalMs: 1,
+    })
+  )
+    .filter(item => !item.pass)
+    .map(item => item.check);
+  assert.deepEqual(failed, [
+    'the schedule is a morning brief',
+    'the schedule runs at 30 7 * * 1-5 in Europe/London',
+    "the run's chat is named Morning brief",
+    'the run wrote a brief',
+  ]);
+});
+
+test('a schedule name reads the way the app names its chats, and only a brief with a digest and items counts', () => {
+  assert.equal(plainScheduleName('morning-brief'), 'Morning brief');
+  assert.equal(readBrief('```json\n{"digest":"d","items":[]}\n```')?.digest, 'd');
+  assert.equal(readBrief('```json\n{"items":[]}\n```'), undefined);
+  assert.equal(readBrief('no json here'), undefined);
 });
