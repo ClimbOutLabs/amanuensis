@@ -13,6 +13,7 @@ import {
   OWN_WORDS_SOURCES,
   readMemoryPage,
   unmarkedBulletText,
+  withoutLines,
   type MemoryPage,
   type PageKind,
   type PageLine,
@@ -317,16 +318,31 @@ function dateSpan(marker: FactMarker): string | undefined {
   return undefined;
 }
 
-function renderLine(line: PageLine): string | undefined {
+/**
+ * The words a page line shows as a bullet, before its bracketed source; undefined for a line that is not a
+ * bullet, such as a plain sentence. The chat's memory panel shows these words, and acts on a line by them.
+ */
+export function pageLineShownText(line: PageLine): string | undefined {
   if (line.kind === 'unreadable') {
     const text = singleLine(line.raw.replace(COMMENT_PATTERN, '').replace(/^\s*[-*]\s+/, ''));
-    return text === '' ? undefined : `- ${text} (${NOT_CONFIRMED_TRAILER})`;
+    return text === '' ? undefined : text;
+  }
+  if (line.kind === 'other') {
+    const bullet = unmarkedBulletText(line.raw);
+    return bullet === undefined ? undefined : singleLine(bullet);
+  }
+  return singleLine(line.fact.text);
+}
+
+function renderLine(line: PageLine): string | undefined {
+  const shown = pageLineShownText(line);
+  if (line.kind === 'unreadable') {
+    return shown === undefined ? undefined : `- ${shown} (${NOT_CONFIRMED_TRAILER})`;
   }
   if (line.kind === 'other') {
     // A bullet with no marker is one the person typed by hand, so it reads as their own words.
-    const bullet = unmarkedBulletText(line.raw);
-    if (bullet !== undefined) {
-      return `- ${singleLine(bullet)} (${SOURCE_LABELS.you_edited})`;
+    if (shown !== undefined) {
+      return `- ${shown} (${SOURCE_LABELS.you_edited})`;
     }
     const text = pageSafeLine(line.raw);
     return text === '' ? undefined : text;
@@ -334,7 +350,7 @@ function renderLine(line: PageLine): string | undefined {
   const span = dateSpan(line.fact.marker);
   const trailer =
     span === undefined ? SOURCE_LABELS[line.fact.marker.src] : `${SOURCE_LABELS[line.fact.marker.src]}, ${span}`;
-  return `- ${singleLine(line.fact.text)} (${trailer})`;
+  return shown === undefined ? undefined : `- ${shown} (${trailer})`;
 }
 
 /**
@@ -538,7 +554,10 @@ export async function loadPagesForMessage(input: {
   today?: string | undefined;
   maxPages: number;
   maxTokens: number;
+  /** Lines this chat left out; they are not shown. Left out, every line is shown. */
+  skipLine?: ((line: PageLine) => boolean) | undefined;
 }): Promise<{ pages: LoadedPage[]; stats: PageLoadStats; skippedFiles: string[] }> {
+  const skipLine = input.skipLine ?? (() => false);
   const candidates: Candidate[] = [];
   const skippedFiles: string[] = [];
   for (const [vaultIndex, vaultDir] of input.vaultDirs.entries()) {
@@ -601,6 +620,7 @@ export async function loadPagesForMessage(input: {
     if (page === undefined) {
       continue;
     }
+    page = withoutLines(page, skipLine);
     settled.add(key);
     stats.candidates += 1;
     const rendered = renderPageLines({ title: candidate.match.title, page, today: input.today });
@@ -643,7 +663,10 @@ export async function loadPagesForMessage(input: {
         });
   for (const { hit, chosen } of groupHits(hits)) {
     stats.candidates += 1;
-    const shown = pageWithLines({ page: hit.page, chosen });
+    const shown = withoutLines(pageWithLines({ page: hit.page, chosen }), skipLine);
+    if (!shown.sections.some(section => section.lines.length > 0)) {
+      continue;
+    }
     const rendered = renderPageLines({
       title: hit.title,
       page: shown,

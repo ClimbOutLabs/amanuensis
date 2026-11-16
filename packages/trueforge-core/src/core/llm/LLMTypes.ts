@@ -305,6 +305,12 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'Set from the classifier decision when this consequential call may take a chat grant for a target its card names. Never model-authored.',
     ),
+  site_grantable_open: z
+    .boolean()
+    .optional()
+    .describe(
+      'Set from the classifier decision when this browser open may take a chat grant for its whole site. Never model-authored.',
+    ),
   own_calendar_change: z
     .boolean()
     .optional()

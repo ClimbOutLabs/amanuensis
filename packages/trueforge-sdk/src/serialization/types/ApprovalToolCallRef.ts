@@ -16,6 +16,10 @@ export const ApprovalToolCallRef: core.serialization.ObjectSchema<
     ),
     canAlwaysAllow: core.serialization.property("can_always_allow", core.serialization.boolean().optional()),
     canChatAllow: core.serialization.property("can_chat_allow", core.serialization.boolean().optional()),
+    chatGrantScope: core.serialization.property(
+        "chat_grant_scope",
+        core.serialization.stringLiteral("site").optionalNullable(),
+    ),
     expiresAt: core.serialization.property("expires_at", core.serialization.string().optional()),
     held: core.serialization.booleanLiteral(true).optional(),
     id: core.serialization.string(),
@@ -30,6 +34,7 @@ export declare namespace ApprovalToolCallRef {
         always_allow_covers?: "maps" | null;
         can_always_allow?: boolean | null;
         can_chat_allow?: boolean | null;
+        chat_grant_scope?: ("site" | null | undefined) | null;
         expires_at?: string | null;
         held?: true | null;
         id: string;

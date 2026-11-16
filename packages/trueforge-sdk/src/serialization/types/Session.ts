@@ -16,6 +16,10 @@ export const Session: core.serialization.ObjectSchema<serializers.Session.Raw, T
             "approval_grants",
             core.serialization.list(core.serialization.string()),
         ),
+        approvalRefusals: core.serialization.property(
+            "approval_refusals",
+            core.serialization.list(core.serialization.string()),
+        ),
         createdAt: core.serialization.property("created_at", core.serialization.string()),
         createdBySubject: core.serialization.property("created_by_subject", CreatedBySubject),
         folderId: core.serialization.property("folder_id", core.serialization.string().nullable()),
@@ -33,6 +37,7 @@ export declare namespace Session {
     export interface Raw {
         agent: SessionAgent.Raw;
         approval_grants: string[];
+        approval_refusals: string[];
         created_at: string;
         created_by_subject: CreatedBySubject.Raw;
         folder_id?: string | null;

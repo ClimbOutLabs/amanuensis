@@ -49,6 +49,7 @@ describePg('PostgresRepositoryStore', () => {
           folder_id: null,
           last_turn_id: null,
           approval_grants: sql`'[]'::jsonb`,
+          approval_refusals: sql`'[]'::jsonb`,
           task_checklist: sql`'{"revision":0,"items":[]}'::jsonb`,
           custom: null,
           metadata: sql`'{}'::jsonb`,

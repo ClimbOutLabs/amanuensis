@@ -88,6 +88,7 @@ export function toWireSession(record: SessionRecord): Session {
     created_at: record.created_at.toISOString(),
     updated_at: record.updated_at.toISOString(),
     approval_grants: record.approval_grants,
+    approval_refusals: record.approval_refusals,
     metrics: record.metrics,
     metadata: record.metadata,
     source: record.source,

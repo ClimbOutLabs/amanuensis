@@ -95,7 +95,7 @@ export type RailRecallFact = {
   source: RailRecallFactSource;
   /** Where the fact came from and how long ago, in plain words, for the row's second line. */
   origin: string;
-  /** The page the line sits on. A page line is changed on its page, so its row has no controls. */
+  /** The page the line sits on; Delete takes the line off that page. */
   page?: string;
 };
 
@@ -601,23 +601,21 @@ export const RailChatDesk: FC<{
               <li key={fact.text} className="aman-runtime-rail__desk-fact">
                 <div className="aman-runtime-rail__desk-fact-head">
                   <span className="aman-runtime-rail__desk-fact-text">{fact.shown}</span>
-                  {fact.page === undefined && (
-                    <button
-                      type="button"
-                      className="aman-runtime-rail__desk-pull"
-                      aria-label={`Take this out of this chat: ${fact.shown}`}
-                      title="Not in this chat"
-                      onClick={() => {
-                        pullOut(fact);
-                      }}
-                    >
-                      ×
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="aman-runtime-rail__desk-pull"
+                    aria-label={`Take this out of this chat: ${fact.shown}`}
+                    title="Not in this chat"
+                    onClick={() => {
+                      pullOut(fact);
+                    }}
+                  >
+                    ×
+                  </button>
                 </div>
                 <span className="aman-runtime-rail__desk-fact-origin">
                   {fact.origin}
-                  {deskApi !== undefined && fact.page === undefined && confirming !== fact.text && (
+                  {deskApi !== undefined && confirming !== fact.text && (
                     <button
                       type="button"
                       className="aman-runtime-rail__desk-forget aman-runtime-rail__desk-delete"
@@ -633,7 +631,11 @@ export const RailChatDesk: FC<{
                 </span>
                 {confirming === fact.text && (
                   <div className="aman-runtime-rail__desk-confirm" role="group" aria-label="Delete this memory?">
-                    <span>Delete this memory everywhere? It cannot be brought back.</span>
+                    <span>
+                      {fact.page === undefined
+                        ? 'Delete this memory everywhere? It cannot be brought back.'
+                        : `Delete this line from the page for ${fact.page}? It cannot be brought back.`}
+                    </span>
                     <span className="aman-runtime-rail__desk-confirm-actions">
                       <button
                         type="button"
@@ -671,7 +673,6 @@ export const RailChatDesk: FC<{
             {facts.length === 0
               ? 'Nothing from memory was used for your last message.'
               : 'Used for your last message. The × leaves a memory out of this chat only. Delete removes it everywhere.'}
-            {facts.some(fact => fact.page !== undefined) && ' A line from a page is changed on its page.'}
             {onOpenMemorySettings !== undefined && (
               <>
                 {' '}

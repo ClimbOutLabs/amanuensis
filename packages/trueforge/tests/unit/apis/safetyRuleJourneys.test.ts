@@ -20,7 +20,12 @@ import { SkillNetworkGateway } from '../../../src/sandbox/skillnet/skillNetworkG
 import { skillNetworkTokens } from '../../../src/sandbox/skillnet/skillNetworkTokens';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
-import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import {
+  MODEL_FQN,
+  SCRIPTED_PROVIDER_KEY,
+  startApprovalTestServer,
+  type ApprovalTestServer,
+} from '../../fixtures/approvalTestServer';
 import { HARBOUR_ADDRESS, installRecordedTavily } from '../../fixtures/groundedFinderFixtures';
 import {
   HA_CALL_ACTION_TOOL,
@@ -1203,6 +1208,18 @@ describe('a connector read the person always allows', () => {
   );
 
   it(
+    "never sends one of this computer's own keys, and no card shows it",
+    async () => {
+      const before = server.mcp.getPageInvocations();
+      // The scripted model's provider key is one of this computer's own secrets, shaped like one short id.
+      const held = (await readPage({ page_id: SCRIPTED_PROVIDER_KEY })).cards;
+      expect(JSON.stringify(held)).not.toContain(SCRIPTED_PROVIDER_KEY);
+      expect(server.mcp.getPageInvocations()).toBe(before);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
     'asks again once the connector points at another address',
     async () => {
       expect((await readPage({ page_id: PAGE_ID })).cards).toEqual([]);
@@ -1751,6 +1768,34 @@ describe('a skill that reaches a site on the internet', () => {
   }): Promise<void> {
     await (await sendTurn({ server, chatId, input: answer({ card, scope }) })).text();
   }
+
+  it(
+    'a loop a skill writes asks every time with its exact text, and runs exactly that once allowed',
+    async () => {
+      const chatId = await startChat();
+      const loop = `for day in mon tue; do ${SKILL_FETCH_COMMAND} ${SKILL_SITE}; done > notes.txt`;
+      const askToRun = () => {
+        server.model.next({ toolArguments: { command: loop, purpose: 'inspect', intent: 'Fetch the notes.' } });
+        return runTurn({ server, chatId, input: ask('exec') });
+      };
+      const runsBefore = sandbox.commands.filter(command => command === loop).length;
+
+      const card = onlyCard(await askToRun());
+      expect(card.tier3_card?.parsed_command).toBe(loop);
+      expect(card.can_always_allow).toBe(false);
+      expect(card.can_chat_allow).toBe(false);
+      const refused = await sendTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
+      expect(refused.status).toBe(422);
+      expect(sandbox.commands.filter(command => command === loop).length).toBe(runsBefore);
+
+      await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
+      expect(sandbox.commands.filter(command => command === loop).length).toBe(runsBefore + 1);
+
+      // Allowing it once is not a standing grant: the same loop asks again.
+      expect(onlyCard(await askToRun()).can_always_allow).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
   it(
     'asks before the skill reaches its site for the first time, and reaches nothing until then',
