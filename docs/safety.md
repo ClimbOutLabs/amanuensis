@@ -52,7 +52,7 @@ Aman sorts every action into one of three groups before it runs.
 
     Nothing runs for these:
 
-    - A send whose destination can't be checked. Aman decides a connector call is a send from what it carries, such as a recipient, an amount or message text, not from the tool's name. A call that carries words or an id but shows no place the card can check is refused.
+    - A send whose destination can't be checked. Aman decides a connector call is a send from what it carries, such as a recipient, an amount or message text, not from the tool's name. A call that carries words or an id but shows no place the card can check is refused, unless the tool says it only reads information. Then Aman asks you, as before.
     - A send whose card would hide a recipient or cut off its content.
     - Anything that needs the internet while offline mode is on.
 
