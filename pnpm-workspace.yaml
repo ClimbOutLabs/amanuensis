@@ -40,6 +40,17 @@ overrides:
   # Optional peer of @truefoundry/assistant-ui-runtime that ships no license.
   # The runtime patch drops its only import, so it is never installed.
   truefoundry-gateway-sdk: '-'
+  # dompurify: monaco-editor never ships a patched version; pin to safe floor.
+  'dompurify@3': '3.4.17'
+  # undici@5: no 5.x patch exists; @actions/http-client pulls this in via mcp-evals devDep.
+  'undici@5': '7.30.1'
+  # @ag-ui/core: @openuidev/react-headless pins ^0.0.53 across all releases; 1.0.0 uses zod@4.
+  '@ag-ui/core@0': '1.0.0'
+  # zod@3: @anthropic-ai/sandbox-runtime pins ^3.24.1 and never moves to zod@4.
+  'zod@3': '4.4.0'
+  # @opentelemetry/resources@3.0.0 is vulnerable (AIKIDO-2026-461086 range 3.0.0-3.1.0);
+  # @daytona/sdk@0.230.0 and its otel siblings all pin exactly 3.0.0.
+  '@opentelemetry/resources@3': '3.1.1'
 
 patchedDependencies:
   '@openuidev/react-lang@0.2.15': patches/@openuidev__react-lang@0.2.15.patch
