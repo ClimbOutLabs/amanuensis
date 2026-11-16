@@ -1,5 +1,11 @@
 import { createLocalUser, verifyLocalSignIn } from '../../../src/auth/localSignIn';
+import { hashTerminalKey, mintTerminalKey } from '../../../src/auth/terminalKey';
 import { runResetPassword, type ResetPasswordDeps } from '../../../src/cli/resetPassword';
+import type { ILocalUserStore } from '../../../src/db/localUserStore';
+import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { createSqliteDb } from '../../../src/db/sqlite/client';
+import { SqliteLocalUserStore } from '../../../src/db/sqlite/local-user-store/SqliteLocalUserStore';
+import { TerminalKeyStore } from '../../../src/db/terminalKeyStore';
 import { fakeIo } from './fakeIo';
 import { MemoryLocalUserStore } from './memoryLocalUserStore';
 
@@ -103,5 +109,66 @@ describe('reset-password', () => {
 
     expect(code).toBe(1);
     expect(io.err.join('')).toContain('No sign-in is set up yet');
+  });
+});
+
+describe('reset-password against the real stores', () => {
+  async function realSetup() {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const store = new SqliteLocalUserStore(db);
+    const created = await createLocalUser({ store, email: EMAIL, password: OLD_PASSWORD });
+    if (!created.ok) {
+      throw new Error('Test setup failed to create the user');
+    }
+    return { db, store, userId: created.user.id };
+  }
+
+  function realDeps(store: ILocalUserStore): ResetPasswordDeps {
+    return {
+      serverRunning: () => Promise.resolve(false),
+      openStore: () => Promise.resolve({ store, close: () => Promise.resolve() }),
+      readPasswordPair: () => Promise.resolve({ password: NEW_PASSWORD, confirm: NEW_PASSWORD }),
+    };
+  }
+
+  it('revokes every paired terminal key with the reset', async () => {
+    const { db, store, userId } = await realSetup();
+    const terminalKeyStore = new TerminalKeyStore(db);
+    const key = mintTerminalKey();
+    await terminalKeyStore.create({
+      id: 'key-1',
+      tenant_id: 'default',
+      subject_id: userId,
+      subject_type: 'user',
+      subject_display_name: 'Owner',
+      device_name: 'Pippa',
+      key_hash: hashTerminalKey(key),
+      created_at: new Date().toISOString(),
+      last_used_at: new Date().toISOString(),
+      revoked_at: null,
+    });
+
+    const code = await runResetPassword({ args: [], io: fakeIo(), deps: realDeps(store) });
+
+    expect(code).toBe(0);
+    const record = await terminalKeyStore.findByKeyHash(hashTerminalKey(key));
+    expect(record?.revoked_at).not.toBeNull();
+    await db.destroy();
+  });
+
+  it('changes nothing when the revocation write fails', async () => {
+    const { db, store } = await realSetup();
+    // The revocation half of the write cannot land: the key table is gone, as a
+    // failed disk or a lost connection would make its update fail.
+    await db.schema.dropTable('terminal_key').execute();
+
+    await expect(runResetPassword({ args: [], io: fakeIo(), deps: realDeps(store) })).rejects.toThrow();
+
+    await expect(verifyLocalSignIn({ store, email: EMAIL, password: OLD_PASSWORD })).resolves.toBeDefined();
+    await expect(verifyLocalSignIn({ store, email: EMAIL, password: NEW_PASSWORD })).resolves.toBeUndefined();
+    const after = await store.getUser();
+    expect(after?.session_version).toBe(1);
+    await db.destroy();
   });
 });

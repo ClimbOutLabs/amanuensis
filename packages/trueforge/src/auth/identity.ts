@@ -24,6 +24,12 @@ export interface RequestContext {
   roles: string[];
   /** Raw bearer token for the caller, or `null` when standalone has no credential. */
   user_credential: string | null;
+  /**
+   * The id of the paired terminal key this request authenticated with, when it used one.
+   * Never the key itself. A caller with this set is limited to the chat scope at the
+   * auth layer (see terminalScope.ts) and is never an admin.
+   */
+  terminal_key_id?: string;
 }
 
 export const STANDALONE_REQUEST_CONTEXT: RequestContext = {

@@ -61,17 +61,42 @@ export function runLocalUserStoreContractSuite(getStore: () => ILocalUserStore):
     expect(user).toBeDefined();
   });
 
-  it('replaces the hash and raises the session version in the same write', async () => {
+  it('replaces the hash, raises the session version and reports the revocation in the same write', async () => {
     const store = getStore();
     await store.createUser(record());
-    await expect(store.replacePasswordHash({ password_hash: 'hash-two', updated_at: LATER })).resolves.toBe(true);
-    await expect(store.getUser()).resolves.toEqual(
-      record({ password_hash: 'hash-two', session_version: 2, updated_at: LATER }),
-    );
+    const before = new Date().toISOString();
+    await expect(
+      store.replacePasswordHashAndRevokeTerminalKeys({
+        password_hash: 'hash-two',
+        tenant_id: 'default',
+        subject_id: 'user-1',
+        revoked_at: LATER,
+      }),
+    ).resolves.toEqual({ replaced: true, revoked_count: 0 });
+    const after = new Date().toISOString();
+    const user = await store.getUser();
+    if (user === undefined) {
+      throw new Error('the local user vanished');
+    }
+    expect(user.password_hash).toBe('hash-two');
+    expect(user.session_version).toBe(2);
+    expect(user.created_at).toBe(NOW);
+    // The store stamps updated_at itself, inside the write: the value is the
+    // write's own moment, inside the window bracketing this call, and never a
+    // moment a caller minted before the write began.
+    expect(user.updated_at >= before).toBe(true);
+    expect(user.updated_at <= after).toBe(true);
   });
 
-  it('reports false when replacing a password with no user stored', async () => {
+  it('reports replaced false from the password write when no user is stored', async () => {
     const store = getStore();
-    await expect(store.replacePasswordHash({ password_hash: 'hash-two', updated_at: LATER })).resolves.toBe(false);
+    await expect(
+      store.replacePasswordHashAndRevokeTerminalKeys({
+        password_hash: 'hash-two',
+        tenant_id: 'default',
+        subject_id: 'user-1',
+        revoked_at: LATER,
+      }),
+    ).resolves.toEqual({ replaced: false, revoked_count: 0 });
   });
 }

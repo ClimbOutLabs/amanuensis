@@ -32,6 +32,7 @@
     "route:repository": "No topic yet: letting a chat work on a code project.",
     "route:sessionMetrics": "Not a screen: internal numbers for the operator.",
     "route:spaceFolder": "No topic yet: putting saved pages in folders.",
+    "route:terminalPairing": "Not a screen: the pairing handshake between a terminal and the web app. The screens a person sees, confirming a pairing and the list of paired terminals, come with the web step of the terminal app work.",
     "route:today": "Not a screen: the read behind the rail's desk on Home.",
     "settings:about": "No topic yet: the About panel shows the version and build; the help check also reports it."
   },

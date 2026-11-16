@@ -60,7 +60,10 @@ export async function openLocalUserStore({
     await db.destroy();
     throw error;
   }
-  return { store: new SqliteLocalUserStore(db), close: () => db.destroy() };
+  return {
+    store: new SqliteLocalUserStore(db),
+    close: () => db.destroy(),
+  };
 }
 
 /** One hidden line from a raw-mode terminal: characters are read, never echoed. Ctrl-C stops. */

@@ -1,5 +1,5 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, type AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import type { Context, MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
@@ -116,6 +116,8 @@ export function createAuthRouter(params: {
   authMiddleware: MiddlewareHandler;
   /** Present only in local sign-in mode. */
   localSignIn?: LocalSignInDeps;
+  /** Where the password change's terminal key revocation is recorded, when wired. */
+  audit?: AuditLogWriter;
 }) {
   const router = new OpenAPIHono();
   const local = params.localSignIn;
@@ -337,6 +339,24 @@ export function createAuthRouter(params: {
         throw new HTTPException(400, { message: result.message });
       }
       permit.finish('success');
+      // The change itself already revoked every paired terminal key, inside the
+      // same store write as the new password; what remains is the audit row.
+      if (result.revoked_terminal_keys > 0 && params.audit !== undefined) {
+        try {
+          await params.audit.record({
+            tenant_id: requestContext.tenant_id,
+            created_by: user.id,
+            conversation_id: '',
+            tier: 1,
+            tool_name: 'terminal_key.revoked_all',
+            description: 'All paired terminal keys were revoked because the password changed.',
+            outcome: 'logged',
+            auto_deny_reason: null,
+          });
+        } catch (auditError) {
+          params.logger.error('Failed to record a terminal key audit row', extractErrorLogFields(auditError));
+        }
+      }
       // The stored session version just went up; re-issue so this session survives its own change.
       await issueLocalSession(c, result.user);
       return c.body(null, 204);

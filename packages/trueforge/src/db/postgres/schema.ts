@@ -66,6 +66,7 @@ export const TABLES_TO_MOVE = [
   'approval_token',
   'brief_item_completion',
   'recall_exclusion',
+  'terminal_key',
   'delivery',
   'delivery_attempt',
   'reach_settings',

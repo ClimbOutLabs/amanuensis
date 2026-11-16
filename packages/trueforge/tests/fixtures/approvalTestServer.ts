@@ -56,6 +56,7 @@ import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceSto
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { TelegramStore } from '../../src/db/telegramStore';
+import { TerminalKeyStore } from '../../src/db/terminalKeyStore';
 import { evalSources, type EvalSources } from '../../src/eval/fixtures';
 import { closePersonaKnowledgeIndexers } from '../../src/personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
@@ -192,10 +193,11 @@ function buildApp(input: {
   });
   const personaStore = new SqlitePersonaStore(db);
   const localUserStore = input.localSignIn ? new SqliteLocalUserStore(db) : undefined;
+  const terminalKeyStore = new TerminalKeyStore(db);
   const authenticator =
     localUserStore === undefined
       ? input.authenticator
-      : createAuthenticator({ mode: TrueForgeAuthMode.Local, localUserStore, globalSettingsStore });
+      : createAuthenticator({ mode: TrueForgeAuthMode.Local, localUserStore, globalSettingsStore, terminalKeyStore });
   return createServerApp({
     chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
     chatSearchIndexer: new ChatSearchIndexer({
@@ -241,6 +243,7 @@ function buildApp(input: {
     sentinelSettingsStore,
     briefItemStore: new BriefItemCompletionStore(db),
     recallExclusionStore: new RecallExclusionStore(db),
+    terminalKeyStore,
     ...deliveryDeps(db),
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),

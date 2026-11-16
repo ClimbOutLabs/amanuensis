@@ -4,6 +4,7 @@
  * Auth is applied at the /api/v1/settings mount boundary in app.ts (admin when auth is enabled).
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
+import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
@@ -16,6 +17,7 @@ import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
+import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import type { NightlyMemoryJob } from '../runtime/memory/nightlyService';
@@ -37,6 +39,7 @@ import { createModelProvidersRouter } from './modelProviders';
 import { createRunCodeRouter } from './runCode';
 import { createSandboxProvidersRouter } from './sandboxProviders';
 import { createSkillsRouter, type ResolveSkillStore } from './skills';
+import { createTerminalKeysRouter } from './terminalKeys';
 import { createTokenFactoryUsageRouter } from './tokenFactoryUsage';
 import { createToolOutputScreensRouter } from './toolOutputScreens';
 
@@ -53,6 +56,9 @@ export interface SettingsRouterDeps<TTransaction> {
   readSkillFiles?: ReadSkillFiles;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Paired terminal keys, for the list and revoke in Settings. */
+  terminalKeyStore: ITerminalKeyStore;
+  audit: AuditLogWriter;
   personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
   tokenFactoryBudget: TokenFactoryBudget;
   /** Runs the memory tidy-up now, and tells where one stands. */
@@ -182,5 +188,14 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
     }),
   );
   router.route('/token-factory-usage', createTokenFactoryUsageRouter({ budget: deps.tokenFactoryBudget }));
+  router.route(
+    '/terminal-keys',
+    createTerminalKeysRouter({
+      terminalKeyStore: deps.terminalKeyStore,
+      audit: deps.audit,
+      logger: deps.logger,
+      resolveRequestContext: deps.resolveRequestContext,
+    }),
+  );
   return router;
 }

@@ -20,16 +20,23 @@ export class MemoryLocalUserStore implements ILocalUserStore {
     return Promise.resolve();
   }
 
-  replacePasswordHash(input: { password_hash: string; updated_at: string }): Promise<boolean> {
+  replacePasswordHashAndRevokeTerminalKeys(input: {
+    password_hash: string;
+    tenant_id: string;
+    subject_id: string;
+    revoked_at: string;
+  }): Promise<{ replaced: boolean; revoked_count: number }> {
     if (this.#user === undefined) {
-      return Promise.resolve(false);
+      return Promise.resolve({ replaced: false, revoked_count: 0 });
     }
     this.#user = {
       ...this.#user,
       password_hash: input.password_hash,
       session_version: this.#user.session_version + 1,
-      updated_at: input.updated_at,
+      // Stamped by the store, as the database stores stamp it inside their write.
+      updated_at: new Date().toISOString(),
     };
-    return Promise.resolve(true);
+    // No terminal keys live beside this memory store, so the revocation lands on none.
+    return Promise.resolve({ replaced: true, revoked_count: 0 });
   }
 }

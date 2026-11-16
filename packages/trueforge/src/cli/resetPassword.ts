@@ -21,7 +21,10 @@ export interface ResetPasswordDeps {
   /** True when the server answers on its own address; a reset under a running server is refused. */
   serverRunning(): Promise<boolean>;
   /** Opens the instance's local user store; only called once the command line has been accepted. */
-  openStore(): Promise<{ store: ILocalUserStore; close: () => Promise<void> }>;
+  openStore(): Promise<{
+    store: ILocalUserStore;
+    close: () => Promise<void>;
+  }>;
   /** The new password typed twice: hidden on a terminal, two lines when piped in. */
   readPasswordPair(): Promise<{ password: string; confirm: string }>;
 }
@@ -66,6 +69,8 @@ export async function runResetPassword({
       await io.stderr(`${LOCAL_PASSWORDS_DO_NOT_MATCH_MESSAGE}\n`);
       return 1;
     }
+    // The reset itself revokes every paired terminal key, inside the same store
+    // write as the new password, so the two can never come apart.
     const result = await resetLocalUserPassword({ store, new_password: pair.password });
     if (!result.ok) {
       await io.stderr(`${result.message}\n`);

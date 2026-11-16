@@ -441,6 +441,10 @@
       "set": "reach",
       "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
+    "route:terminalPairing": {
+      "set": "account",
+      "tests": []
+    },
     "route:text": {
       "set": "reach",
       "tests": []
@@ -862,6 +866,7 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
+    "route:terminalPairing",
     "route:text",
     "route:today",
     "route:tokenFactoryUsage",

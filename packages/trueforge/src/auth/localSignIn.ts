@@ -102,11 +102,14 @@ export async function verifyLocalSignIn(params: {
   return matches ? user : undefined;
 }
 
-export type ChangeLocalPasswordResult = { ok: true; user: LocalUserRecord } | { ok: false; message: string };
+export type ChangeLocalPasswordResult =
+  { ok: true; user: LocalUserRecord; revoked_terminal_keys: number } | { ok: false; message: string };
 
 /**
  * Change the password from a live session: the current password must check out first.
- * The store raises the session version with the hash, so every other session ends;
+ * The store write raises the session version and revokes every paired terminal key
+ * in the same transaction, so every other session and every key ends together, and
+ * a failure anywhere in the write leaves the old password, and the keys, untouched;
  * the returned record carries the new version so this session can be re-issued.
  */
 export async function changeLocalUserPassword(params: {
@@ -127,26 +130,30 @@ export async function changeLocalUserPassword(params: {
   if (passwordProblem !== undefined) {
     return { ok: false, message: passwordProblem };
   }
-  const replaced = await params.store.replacePasswordHash({
+  const replaced = await params.store.replacePasswordHashAndRevokeTerminalKeys({
     password_hash: await hashPasswordValue(params.new_password),
-    updated_at: new Date().toISOString(),
+    // Local sign-in exists only on a standalone install, whose tenant is always this one.
+    tenant_id: 'default',
+    subject_id: user.id,
+    revoked_at: new Date().toISOString(),
   });
-  if (!replaced) {
+  if (!replaced.replaced) {
     return { ok: false, message: LOCAL_WRONG_CREDENTIALS_MESSAGE };
   }
   const updated = await params.store.getUser();
   if (updated === undefined) {
     return { ok: false, message: LOCAL_WRONG_CREDENTIALS_MESSAGE };
   }
-  return { ok: true, user: updated };
+  return { ok: true, user: updated, revoked_terminal_keys: replaced.revoked_count };
 }
 
 export type ResetLocalPasswordResult = { ok: true } | { ok: false; message: string };
 
 /**
  * The terminal reset: replaces the hash with no current-password check, for the person
- * standing at the machine. The store raises the session version with the hash, so every
- * live session ends and the person signs in with the new password.
+ * standing at the machine. The store write raises the session version and revokes
+ * every paired terminal key in the same transaction, so every live session and key
+ * ends together and the person signs in with the new password.
  */
 export async function resetLocalUserPassword(params: {
   store: ILocalUserStore;
@@ -160,9 +167,11 @@ export async function resetLocalUserPassword(params: {
   if (passwordProblem !== undefined) {
     return { ok: false, message: passwordProblem };
   }
-  const replaced = await params.store.replacePasswordHash({
+  const replaced = await params.store.replacePasswordHashAndRevokeTerminalKeys({
     password_hash: await hashPasswordValue(params.new_password),
-    updated_at: new Date().toISOString(),
+    tenant_id: 'default',
+    subject_id: user.id,
+    revoked_at: new Date().toISOString(),
   });
-  return replaced ? { ok: true } : { ok: false, message: LOCAL_NO_SIGN_IN_MESSAGE };
+  return replaced.replaced ? { ok: true } : { ok: false, message: LOCAL_NO_SIGN_IN_MESSAGE };
 }

@@ -1,11 +1,14 @@
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
+import type { Logger } from 'winston';
 
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ILocalUserStore } from '../db/localUserStore';
+import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 import type { Authenticator } from './authenticator';
 import { STANDALONE_ADMIN_ROLE, type RequestContext } from './identity';
 import { getOrCreateLocalSessionSecret, verifyLocalSessionToken } from './localSession';
+import { carriesTerminalKey, resolveTerminalKeyContext } from './terminalKey';
 import { extractRequestToken } from './token';
 
 /**
@@ -17,14 +20,42 @@ import { extractRequestToken } from './token';
 export class LocalAuthenticator implements Authenticator {
   readonly #localUserStore: ILocalUserStore;
   readonly #globalSettingsStore: IGlobalSettingsStore;
+  readonly #terminalKeyStore: ITerminalKeyStore | undefined;
+  readonly #logger: Logger | undefined;
   #secret: Promise<Uint8Array> | undefined;
 
-  constructor(params: { localUserStore: ILocalUserStore; globalSettingsStore: IGlobalSettingsStore }) {
+  constructor(params: {
+    localUserStore: ILocalUserStore;
+    globalSettingsStore: IGlobalSettingsStore;
+    terminalKeyStore?: ITerminalKeyStore;
+    logger?: Logger;
+  }) {
     this.#localUserStore = params.localUserStore;
     this.#globalSettingsStore = params.globalSettingsStore;
+    this.#terminalKeyStore = params.terminalKeyStore;
+    this.#logger = params.logger;
   }
 
   async authenticate(c: Context): Promise<RequestContext> {
+    // A paired terminal key is a Bearer token of its own shape, checked against the
+    // terminal key store before the token is read as a session token. A terminal key
+    // that is unknown or revoked signs nobody in. The stored user's updated time is
+    // the last password change (it moves at account creation and at a change or
+    // reset, and nowhere else), so a key claimed before that change is refused
+    // here even when its row landed after the change's revocation had run.
+    if (carriesTerminalKey(c)) {
+      const localUser = await this.#localUserStore.getUser();
+      const terminalContext = await resolveTerminalKeyContext({
+        store: this.#terminalKeyStore,
+        context: c,
+        ...(this.#logger === undefined ? {} : { logger: this.#logger }),
+        ...(localUser === undefined ? {} : { passwordChangedAt: localUser.updated_at }),
+      });
+      if (terminalContext === undefined) {
+        throw new HTTPException(401, { message: 'Authentication required' });
+      }
+      return terminalContext;
+    }
     const token = extractRequestToken(c);
     if (!token) {
       throw new HTTPException(401, { message: 'Authentication required' });
