@@ -18,7 +18,7 @@ import { createContext } from "../core/context.js";
 // entry-point changes can drop it), so import it directly here.
 import "../core/ops/index.js";
 import { type OperationContent, registry } from "../core/registry.js";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 import {
   getAuthorizedScopes,
   getOAuth2Client,
@@ -129,7 +129,7 @@ export function buildMcpServer(options: { toolPrefix?: string } = {}): {
     return {
       tools: toMcpTools(availableTools).map((tool) => {
         const op = registry.get(tool.name);
-        const outputSchema = op?.outputSchema ? zodToJsonSchema(op.outputSchema) : undefined;
+        const outputSchema = op?.outputSchema ? z.toJSONSchema(op.outputSchema) : undefined;
         return {
           ...tool,
           name: prefixedToolName(tool.name, toolPrefix),

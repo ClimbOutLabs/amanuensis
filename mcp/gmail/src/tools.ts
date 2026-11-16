@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 // Schema definitions
 export const InlineImageSchema = z
@@ -1354,15 +1353,13 @@ export const toolDefinitions: ToolDefinition[] = [
   },
 ];
 
-// Convert tool definitions to MCP tool format.
-// Cast to any keeps TypeScript from chasing zod 3.25+'s deep generics, which
-// otherwise hit "Type instantiation is excessively deep" on this call.
-// The JSON schema output is dynamically validated by MCP clients regardless.
+// Convert tool definitions to MCP tool format. Input schemas describe what a
+// caller may send, so they are rendered in zod's "input" mode.
 export function toMcpTools(tools: ToolDefinition[]) {
   return tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: zodToJsonSchema(tool.schema as any),
+    inputSchema: z.toJSONSchema(tool.schema, { io: "input" }),
     annotations: tool.annotations,
   }));
 }
