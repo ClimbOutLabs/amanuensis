@@ -91,6 +91,43 @@ export function plainBooleanSchema(schema: Record<string, unknown>): Record<stri
 }
 
 /**
+ * Whether a schema meets the strict tool rules: every object lists all of its properties as required.
+ * Providers that enforce strict mode refuse the whole request when a strict tool breaks this, so a tool
+ * with an optional field is sent without strict instead.
+ */
+export function meetsStrictSchemaRules(schema: Record<string, unknown>): boolean {
+  if (isRecord(schema['properties'])) {
+    const required = Array.isArray(schema['required']) ? schema['required'] : [];
+    const properties = schema['properties'];
+    if (!Object.keys(properties).every(key => required.includes(key))) {
+      return false;
+    }
+    if (!Object.values(properties).every(value => !isRecord(value) || meetsStrictSchemaRules(value))) {
+      return false;
+    }
+  }
+  for (const key of ['items', 'additionalProperties'] as const) {
+    const child = schema[key];
+    if (isRecord(child) && !meetsStrictSchemaRules(child)) {
+      return false;
+    }
+  }
+  for (const key of ['anyOf', 'oneOf', 'allOf'] as const) {
+    const members = schema[key];
+    if (Array.isArray(members) && !members.every(member => !isRecord(member) || meetsStrictSchemaRules(member))) {
+      return false;
+    }
+  }
+  for (const key of ['$defs', 'definitions'] as const) {
+    const container = schema[key];
+    if (isRecord(container) && !Object.values(container).every(def => !isRecord(def) || meetsStrictSchemaRules(def))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Whether a listTools failure means the server itself could not be reached (a connection or
  * transport failure, status 502 or above), as opposed to a problem with the request. Mirrors
  * the unavailable-connector test AgentThread applies to tool metadata failures: a host policy
@@ -205,12 +242,13 @@ export async function convertMCPServersToTools(params: {
       // Keep local definition containers so `$ref`s inside `properties` (e.g. FastMCP-style
       // `#/$defs/<Model>` pointers to nested pydantic models) resolve on the wire.
       const { $defs, definitions } = mcpTool.inputSchema;
+      const strict = managedServers.has(toolSet) && meetsStrictSchemaRules(mcpTool.inputSchema);
       tools.push({
         type: 'function',
         function: {
           name: toolName,
           description: description,
-          ...(managedServers.has(toolSet) ? { strict: true } : {}),
+          ...(strict ? { strict: true } : {}),
           parameters: {
             type: 'object',
             properties: Object.fromEntries(
