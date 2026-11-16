@@ -71,6 +71,7 @@ Nothing here changes a skill that stays.
 - The approved call carries the name and the website list. If either differs when the person answers, the approval no longer covers the call and nothing is removed.
 - Allow does what Settings' Remove does: deletes the record, which takes its websites with it, and drops its allow-once answers in open chats. Not now changes nothing.
 - After a call that finishes while the chat is open, the app takes the skill out of that chat and reads the skill lists again.
+- The server also takes the skill out of the setup of the chat it was removed from. Other chats that still name it skip it when they run. After a call that finishes while the chat is open, the app takes the skill out of its own copy of that chat and reads the skill lists again.
 
 ## Privacy
 

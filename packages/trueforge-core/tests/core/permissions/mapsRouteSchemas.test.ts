@@ -1,5 +1,4 @@
 import { MapsRouteResultSchema, MapsTravelModeSchema } from '../../../src/core/permissions/mapsRouteSchemas';
-import { requiresNetwork } from '../../../src/core/permissions/networkRequirements';
 
 const base = {
   status: 'ok',
@@ -47,12 +46,5 @@ describe('MapsRouteResultSchema', () => {
   it('rejects an unknown mode', () => {
     expect(MapsTravelModeSchema.safeParse('hovercraft').success).toBe(false);
     expect(MapsRouteResultSchema.safeParse({ ...base, mode: 'hovercraft' }).success).toBe(false);
-  });
-});
-
-describe('maps network requirements', () => {
-  it('marks the route tool as needing the network so offline mode filters it', () => {
-    expect(requiresNetwork({ tool_name: 'render_route', provenance: 'first-party' })).toBe(true);
-    expect(requiresNetwork({ tool_name: 'render_map', provenance: 'first-party' })).toBe(true);
   });
 });

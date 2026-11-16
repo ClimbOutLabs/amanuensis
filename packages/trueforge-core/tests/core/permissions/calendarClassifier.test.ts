@@ -94,6 +94,7 @@ const REVIEW: CalendarWriteReview = {
   description: '',
   attendees: [],
   guests_emailed: false,
+  guests_line: '',
   one_of_repeating: false,
   before: null,
   incomplete_reason: null,

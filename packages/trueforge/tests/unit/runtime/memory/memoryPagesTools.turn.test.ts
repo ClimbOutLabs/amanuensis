@@ -107,6 +107,7 @@ class MailReader extends LocalToolMCP {
     return [
       defineTool({
         name: 'gmail__read_email',
+        requiresNetwork: true,
         description: 'Read an email.',
         schema: z.object({}),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },

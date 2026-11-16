@@ -264,6 +264,7 @@ class ConnectionOfferToolSet extends LocalToolMCP {
     const ids: [string, ...string[]] = [first.id, ...others.map(connector => connector.id)];
     const schema = connectionOfferInputSchema(ids);
     const invalidInput = () => `That connector cannot be offered here. Call again with one of: ${ids.join(', ')}.`;
+    // Both tools read and write this app's own settings and connector list, so offline mode keeps them.
     this.#tools = [
       defineTool({
         name: CONNECTION_OFFER_STATUS_TOOL_NAME,
@@ -272,6 +273,7 @@ class ConnectionOfferToolSet extends LocalToolMCP {
         schema,
         invalidInput,
         annotations: CONNECTION_OFFER_READ_ANNOTATIONS,
+        requiresNetwork: false,
         handler: input => this.#status(input.connector),
       }),
       defineTool({
@@ -281,6 +283,7 @@ class ConnectionOfferToolSet extends LocalToolMCP {
         schema,
         invalidInput,
         annotations: CONNECTION_OFFER_DECLINE_ANNOTATIONS,
+        requiresNetwork: false,
         handler: input => this.#decline(input.connector),
       }),
     ];

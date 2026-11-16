@@ -94,13 +94,23 @@ describe('local sign-in configuration', () => {
     await expect(
       loadConfig({ TRUEFORGE_AUTH_MODE: 'local', PUBLIC_BASE_URL: 'http://192.168.1.20:8790' }),
     ).rejects.toThrow(
-      'Local sign-in works on this computer or behind https. Set PUBLIC_BASE_URL to an https address, or use the Docker install.',
+      'Local sign-in works on this computer or behind https. Change every plain http address in PUBLIC_BASE_URL and ALLOWED_ORIGINS to https, or use the Docker install.',
     );
   });
 
   it('refuses a plain-http private address in ALLOWED_ORIGINS in local mode', async () => {
     await expect(
       loadConfig({ TRUEFORGE_AUTH_MODE: 'local', ALLOWED_ORIGINS: 'http://192.168.1.20:8790' }),
+    ).rejects.toThrow(/Local sign-in works on this computer or behind https/);
+  });
+
+  it('refuses a plain-http private address in ALLOWED_ORIGINS even behind an https PUBLIC_BASE_URL', async () => {
+    await expect(
+      loadConfig({
+        TRUEFORGE_AUTH_MODE: 'local',
+        PUBLIC_BASE_URL: 'https://aman.example',
+        ALLOWED_ORIGINS: 'https://aman.example,http://192.168.1.20:8790',
+      }),
     ).rejects.toThrow(/Local sign-in works on this computer or behind https/);
   });
 

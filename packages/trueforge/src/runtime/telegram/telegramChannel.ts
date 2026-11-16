@@ -395,6 +395,7 @@ async function handleMessage(
       session_id: started.session_id,
       turn_id: started.turn_id,
       chat_id,
+      origin: 'telegram',
     });
   } catch (error) {
     deps.logger.warn('A Telegram message could not be started as a turn', {
@@ -483,6 +484,7 @@ async function handleCallback(
       session_id: started.session_id,
       turn_id: started.turn_id,
       chat_id: approval.chat_id,
+      origin: 'telegram',
     });
     await answer(
       parsed.decision === 'allow' ? 'Approved. The answer will arrive here.' : 'Denied. The answer will arrive here.',

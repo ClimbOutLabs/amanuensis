@@ -42,6 +42,8 @@ export type RailTodayNeedsOkItem = {
 export type RailToday = {
   calendar: RailTodayEvent[] | null;
   free_after: string | null;
+  /** True when a calendar is connected but none of it could be read just now. */
+  calendar_unread: boolean;
   due: RailTodayDueReminder[];
   needs_ok: RailTodayNeedsOkItem[];
   /** True when more actions are waiting than the Needs your OK list shows. */
@@ -342,7 +344,11 @@ export const RailHomeDesk: FC<{
     <>
       {today.calendar !== null && (
         <DeskSection title="Today">
-          {today.calendar.length === 0 ? (
+          {today.calendar_unread ? (
+            <p className="aman-runtime-rail__desk-note">
+              Couldn't read your calendar just now. If this stays, open Settings, then Connectors, and check Calendar.
+            </p>
+          ) : today.calendar.length === 0 ? (
             <p className="aman-runtime-rail__desk-note">Nothing on the calendar.</p>
           ) : (
             <ul className="aman-runtime-rail__desk-list">

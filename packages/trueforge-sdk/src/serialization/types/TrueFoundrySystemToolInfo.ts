@@ -19,6 +19,7 @@ export const TrueFoundrySystemToolInfo: core.serialization.ObjectSchema<
     name: core.serialization.string(),
     openWorldHint: core.serialization.property("open_world_hint", core.serialization.boolean().optional()),
     readOnlyHint: core.serialization.property("read_only_hint", core.serialization.boolean().optional()),
+    requiresNetwork: core.serialization.property("requires_network", core.serialization.boolean().optional()),
     type: core.serialization.stringLiteral("truefoundry-system"),
 });
 
@@ -31,6 +32,7 @@ export declare namespace TrueFoundrySystemToolInfo {
         name: string;
         open_world_hint?: boolean | null;
         read_only_hint?: boolean | null;
+        requires_network?: boolean | null;
         type: "truefoundry-system";
     }
 }

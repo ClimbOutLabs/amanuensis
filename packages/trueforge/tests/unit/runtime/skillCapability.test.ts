@@ -109,7 +109,7 @@ async function setup() {
     sandboxReady: true,
     lookup: hub.lookup,
     readFiles: hub.readFiles,
-    turnOnForChat: () => Promise.resolve(true),
+    chatSkills: { turnOn: () => Promise.resolve(true), turnOff: () => Promise.resolve() },
     sentinel,
   };
   const tools = new SkillToolSet(options);
@@ -512,7 +512,10 @@ describe('in an incognito chat', () => {
       sandboxReady: true,
       lookup: { fetchImpl: () => Promise.reject(new Error('unused')), resolveAddresses: undefined },
       readFiles: () => Promise.reject(new Error('unused')),
-      turnOnForChat: () => Promise.reject(new Error('unused')),
+      chatSkills: {
+        turnOn: () => Promise.reject(new Error('unused')),
+        turnOff: () => Promise.reject(new Error('unused')),
+      },
       sentinel,
       keepsNothing: true,
     });
@@ -525,14 +528,17 @@ describe('in an incognito chat', () => {
   });
 });
 
-describe('turning an added skill on for the chat', () => {
+describe('turning a skill on or off for the chat', () => {
   it('says the skill is on for this chat, or that it could not be turned on', async () => {
     const built = await setup();
     const { result } = await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
     expect(resultText(result)).toContain('It is on for this chat from the next message.');
 
     const off = await setup();
-    const tools = new SkillToolSet({ ...off.options, turnOnForChat: () => Promise.resolve(false) });
+    const tools = new SkillToolSet({
+      ...off.options,
+      chatSkills: { ...off.options.chatSkills, turnOn: () => Promise.resolve(false) },
+    });
     const refused = await dispatch({ built: { ...off, tools }, args: RELEASE_NOTES, decision: { status: 'allow' } });
     expect(resultText(refused.result)).toContain('could not be turned on for this chat');
     expect(await off.saved()).toHaveLength(1);
@@ -568,7 +574,7 @@ describe('turning an added skill on for the chat', () => {
 
   it('adds the skill to the chat once, keeping what was on', async () => {
     const chat = sessionStore({ type: 'inline', spec: spec(true, [{ name: 'pdf' }]) });
-    const turnOn = chatSkillSwitch({ sessionStore: chat.store, tenant_id: TENANT, session_id: 'chat-1' });
+    const { turnOn } = chatSkillSwitch({ sessionStore: chat.store, tenant_id: TENANT, session_id: 'chat-1' });
     await expect(turnOn({ name: 'release-notes' })).resolves.toBe(true);
     await expect(turnOn({ name: 'release-notes' })).resolves.toBe(true);
     expect(chat.state.updates).toBe(1);
@@ -578,12 +584,48 @@ describe('turning an added skill on for the chat', () => {
     ]);
   });
 
+  it('takes a removed skill out of the chat, keeping the rest', async () => {
+    const chat = sessionStore({ type: 'inline', spec: spec(true, [{ name: 'pdf' }, { name: 'release-notes' }]) });
+    const { turnOff } = chatSkillSwitch({ sessionStore: chat.store, tenant_id: TENANT, session_id: 'chat-1' });
+    await turnOff({ name: 'release-notes' });
+    await turnOff({ name: 'release-notes' });
+    expect(chat.state.updates).toBe(1);
+    expect(chat.state.agent.type === 'inline' && chat.state.agent.spec.skills?.map(skill => skill.name)).toEqual([
+      'pdf',
+    ]);
+  });
+
+  it('turns the skill off in the chat it was removed from', async () => {
+    const built = await setup();
+    await dispatch({ built, args: RELEASE_NOTES, decision: { status: 'allow' } });
+    const turnedOff: string[] = [];
+    const tools = new SkillToolSet({
+      ...built.options,
+      chatSkills: {
+        ...built.options.chatSkills,
+        turnOff: ({ name }) => {
+          turnedOff.push(name);
+          return Promise.reject(new Error('the chat could not be saved'));
+        },
+      },
+    });
+    const { result } = await dispatch({
+      built: { ...built, tools },
+      name: 'remove_skill',
+      args: { name: 'release-notes' },
+      decision: { status: 'allow' },
+    });
+    expect(resultText(result)).toContain('Removed the skill release-notes.');
+    expect(turnedOff).toEqual(['release-notes']);
+    expect(await built.saved()).toEqual([]);
+  });
+
   it('leaves a chat without the sandbox, or one that runs a saved agent, as it is', async () => {
     for (const chat of [
       sessionStore({ type: 'inline', spec: spec(false) }),
       sessionStore({ type: 'reference', id: 'agent-1', name: 'helper' }),
     ]) {
-      const turnOn = chatSkillSwitch({ sessionStore: chat.store, tenant_id: TENANT, session_id: 'chat-1' });
+      const { turnOn } = chatSkillSwitch({ sessionStore: chat.store, tenant_id: TENANT, session_id: 'chat-1' });
       await expect(turnOn({ name: 'release-notes' })).resolves.toBe(false);
       expect(chat.state.updates).toBe(0);
     }
