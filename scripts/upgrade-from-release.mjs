@@ -294,14 +294,24 @@ try {
     toTarball = await pack({ cwd: rootDir, packDir: await mkdtemp(path.join(workDir, 'pack-new-')) });
   }
 
-  app = await startPackedApp({ tarballPath: fromTarball, dataDir, port });
+  app = await startPackedApp({
+    tarballPath: fromTarball,
+    dataDir,
+    port,
+    account: { email: EMAIL, password: PASSWORD },
+  });
+  // Releases before the sign-in moved to the first-start prompt still make it on the page instead.
+  const firstPage = await globalThis.fetch(`${app.origin}/api/v1/auth/login`);
+  const madeOnPage = (await firstPage.text()).includes('Create your sign-in');
   const created = await formPost({
     origin: app.origin,
-    pathname: '/api/v1/auth/create-account',
-    fields: { email: EMAIL, password: PASSWORD, password_confirm: PASSWORD },
+    pathname: madeOnPage ? '/api/v1/auth/create-account' : '/api/v1/auth/login',
+    fields: madeOnPage
+      ? { email: EMAIL, password: PASSWORD, password_confirm: PASSWORD }
+      : { email: EMAIL, password: PASSWORD },
   });
   await created.text();
-  check(created.status === 302, `Creating the sign-in on the release answered ${String(created.status)}.`);
+  check(created.status === 302, `Signing in on the release answered ${String(created.status)}.`);
   const before = client({ origin: app.origin, cookie: sessionCookie(created) });
   const keptOnce = await fillOnce({ api: before });
   const kept = [...keptOnce, ...(await fill({ api: before, tag: 'before' }))];

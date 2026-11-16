@@ -90,8 +90,13 @@ function readToday(value: unknown): RailToday | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
-  const { calendar, free_after, due, needs_ok, needs_ok_more, as_of } = value;
-  if (!isStringOrNull(free_after) || typeof needs_ok_more !== 'boolean' || typeof as_of !== 'string') {
+  const { calendar, free_after, calendar_unread, due, needs_ok, needs_ok_more, as_of } = value;
+  if (
+    !isStringOrNull(free_after) ||
+    typeof calendar_unread !== 'boolean' ||
+    typeof needs_ok_more !== 'boolean' ||
+    typeof as_of !== 'string'
+  ) {
     return undefined;
   }
   if (calendar !== null && !Array.isArray(calendar)) {
@@ -113,6 +118,7 @@ function readToday(value: unknown): RailToday | undefined {
   return {
     calendar: events === null ? null : events.filter(event => event !== undefined),
     free_after,
+    calendar_unread,
     due: reminders.filter(reminder => reminder !== undefined),
     needs_ok: held.filter(item => item !== undefined),
     needs_ok_more,

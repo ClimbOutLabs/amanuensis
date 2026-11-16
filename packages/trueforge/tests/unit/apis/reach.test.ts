@@ -182,6 +182,27 @@ describe('reach routes', () => {
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_source).toBe('email_connector');
     });
 
+    it('says whether the mail read from reports sender confirmation, as its checkpoint recorded', async () => {
+      const { call, noticingStore } = await watching();
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_sender_confirmation).toBeNull();
+      await noticingStore.setCheckpoint({
+        ...OWNER,
+        watcher: 'mail',
+        ...failingSince(5),
+        source: 'email_connector',
+        sender_confirmation: false,
+      });
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_sender_confirmation).toBe(false);
+      await noticingStore.setCheckpoint({
+        ...OWNER,
+        watcher: 'mail',
+        ...failingSince(5),
+        source: 'google',
+        sender_confirmation: true,
+      });
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_sender_confirmation).toBe(true);
+    });
+
     it('says nothing about mail that works, or that has failed for less than an hour', async () => {
       const { call, noticingStore } = await watching();
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
@@ -261,7 +282,12 @@ describe('reach routes', () => {
       await reachStore.put({ ...OWNER, settings: defaultReachSettings('UTC') });
       const off = GetReachResponseSchema.parse(await (await call('')).json()).data;
       expect(off.settings.noticing_on).toBe(false);
-      expect([off.mail_problem, off.calendar_problem, off.mail_source]).toEqual([null, null, null]);
+      expect([off.mail_problem, off.calendar_problem, off.mail_source, off.mail_sender_confirmation]).toEqual([
+        null,
+        null,
+        null,
+        null,
+      ]);
     });
   });
 

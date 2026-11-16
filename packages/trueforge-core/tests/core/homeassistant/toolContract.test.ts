@@ -1,5 +1,6 @@
 import {
   HOME_ASSISTANT_REFUSAL,
+  homeAssistantDeclaredChangeTools,
   homeAssistantDomainOfEntity,
   homeAssistantDomainsLabel,
   homeAssistantEntityLabel,
@@ -11,7 +12,7 @@ import {
   homeAssistantToolBase,
   homeAssistantToolPrefix,
   isHomeAssistantCallActionTool,
-  isHomeAssistantKnownChangeTool,
+  isHomeAssistantDeclaredChangeTool,
   isHomeAssistantLiveContextTool,
   isHomeAssistantNameOnlyTarget,
   isHomeAssistantReadTool,
@@ -35,17 +36,44 @@ describe('Home Assistant tool names', () => {
     expect(isHomeAssistantCallActionTool('homeassistant__GetLiveContext')).toBe(false);
   });
 
-  it('knows the change tools by name, and no others', () => {
-    expect(isHomeAssistantKnownChangeTool('HassTurnOn')).toBe(true);
-    expect(isHomeAssistantKnownChangeTool('intent__HassTurnOff')).toBe(true);
-    expect(isHomeAssistantKnownChangeTool('HassClimateSetTemperature')).toBe(true);
-    expect(isHomeAssistantKnownChangeTool('light__HassLightSet')).toBe(true);
-    expect(isHomeAssistantKnownChangeTool('HassSetPosition')).toBe(true);
-    expect(isHomeAssistantKnownChangeTool('HassMediaPlay')).toBe(true);
-    expect(isHomeAssistantKnownChangeTool('homeassistant__call_action')).toBe(false);
-    expect(isHomeAssistantKnownChangeTool('HassBrewCoffee')).toBe(false);
-    expect(isHomeAssistantKnownChangeTool('turn_off')).toBe(false);
-    expect(isHomeAssistantKnownChangeTool('GetLiveContext')).toBe(false);
+  it('captures the change tools from the server own tool list, by what each tool declares', () => {
+    const declared = homeAssistantDeclaredChangeTools([
+      { name: 'intent__HassTurnOn', annotations: { readOnlyHint: false } },
+      { name: 'HassTurnOff', annotations: { readOnlyHint: false } },
+      { name: 'light__HassLightSet', annotations: { readOnlyHint: false } },
+      { name: 'GetLiveContext', annotations: { readOnlyHint: true } },
+      { name: 'HassGetState', annotations: { readOnlyHint: true } },
+      // No declaration either way: the server did not say, so the tool is not captured.
+      { name: 'HassUndeclared' },
+      { name: 'HassAlsoUndeclared', annotations: {} },
+      // The same bare name under two prefixes is captured once.
+      { name: 'media__HassMediaPlay', annotations: { readOnlyHint: false } },
+      { name: 'HassMediaPlay', annotations: { readOnlyHint: false } },
+    ]);
+    expect(declared).toEqual(['HassTurnOn', 'HassTurnOff', 'HassLightSet', 'HassMediaPlay']);
+  });
+
+  it('reads grant eligibility from the stored declaration, never from the tool name', () => {
+    const declared = homeAssistantDeclaredChangeTools([
+      { name: 'intent__HassTurnOn', annotations: { readOnlyHint: false } },
+      // An invented tool, in no list Aman ships: the server declares it a change, so it counts.
+      { name: 'HassBrewCoffee', annotations: { readOnlyHint: false } },
+    ]);
+    expect(isHomeAssistantDeclaredChangeTool({ tool_name: 'HassTurnOn', declared_change_tools: declared })).toBe(true);
+    expect(
+      isHomeAssistantDeclaredChangeTool({ tool_name: 'intent__HassTurnOn', declared_change_tools: declared }),
+    ).toBe(true);
+    expect(isHomeAssistantDeclaredChangeTool({ tool_name: 'HassBrewCoffee', declared_change_tools: declared })).toBe(
+      true,
+    );
+    // A name from the old shipped list earns nothing when the server did not declare it.
+    expect(isHomeAssistantDeclaredChangeTool({ tool_name: 'HassLightSet', declared_change_tools: declared })).toBe(
+      false,
+    );
+    expect(isHomeAssistantDeclaredChangeTool({ tool_name: 'HassTurnOn', declared_change_tools: [] })).toBe(false);
+    expect(isHomeAssistantDeclaredChangeTool({ tool_name: 'GetLiveContext', declared_change_tools: declared })).toBe(
+      false,
+    );
   });
 
   it('knows the live-context tool under any prefix', () => {

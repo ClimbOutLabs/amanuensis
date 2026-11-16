@@ -220,6 +220,8 @@ export interface InertMcpServer {
   setCalendarEvents: (events: readonly InertCalendarEvent[] | undefined) => void;
   /** The arguments of every calendar `list_events` call so far, in the order they arrived. */
   calendarListCalls: () => readonly Record<string, unknown>[];
+  /** While set, `list_events` refuses with these words, as the connector does when it cannot read. */
+  setCalendarRefusal: (text: string | undefined) => void;
   /** Sets the result shape the next (and every subsequent) `search_memory` call answers with. */
   setSearchMemoryMode: (mode: MemoryToolMode) => void;
   /**
@@ -264,6 +266,8 @@ interface CalendarEvents {
   byAccount: Readonly<Record<string, readonly InertCalendarEvent[]>> | undefined;
   /** The arguments of every `list_events` call, in the order they arrived. */
   listCalls: Record<string, unknown>[];
+  /** The words every `list_events` call is refused with while set. */
+  refusal: string | undefined;
 }
 
 interface MemoryModes {
@@ -604,6 +608,25 @@ function buildMcpServer({
             return textResult('[]');
           }
           calendarEvents.listCalls.push({ ...args });
+          // The real connector refuses a window bound that carries its own offset when a zone is
+          // given too, so the fake refuses it the same way, in the same words.
+          const offsetBound = (['from', 'to'] as const).find(
+            key => typeof args[key] === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(args[key]),
+          );
+          if (calendarEvents.refusal !== undefined) {
+            return { content: [{ type: 'text' as const, text: calendarEvents.refusal }], isError: true };
+          }
+          if (offsetBound !== undefined && typeof args['timezone'] === 'string') {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `caldav-mcp: ${offsetBound} carries its own offset and a timezone (${args['timezone']}) was given as well. Pass one or the other, so there is no question which one was meant.`,
+                },
+              ],
+              isError: true,
+            };
+          }
           const account = typeof args['account'] === 'string' ? args['account'] : undefined;
           const events =
             account !== undefined && calendarEvents.byAccount !== undefined
@@ -709,6 +732,7 @@ export async function startInertMcpServer(options?: {
     current: options?.calendarEvents,
     byAccount: options?.calendarEventsByAccount,
     listCalls: [],
+    refusal: undefined,
   };
   const gates: WriteGate[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
@@ -907,6 +931,9 @@ export async function startInertMcpServer(options?: {
       calendarEvents.current = events;
     },
     calendarListCalls: () => calendarEvents.listCalls,
+    setCalendarRefusal: text => {
+      calendarEvents.refusal = text;
+    },
     setSearchMemoryMode: mode => {
       memoryModes.search = mode;
     },

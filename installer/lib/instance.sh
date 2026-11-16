@@ -154,9 +154,8 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (the owner) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address
+  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins allowed redirects app_ports lan_ports lan_forwards lan_proxy lan_on=0 listen tls_on=0 tls_host=0 tls_volume=0 tls_port address tls_config prefix
   dir=$(instance_dir "$name")
-  instance_tailscale_https_move "$name" "$app_image"
   owner_name_backfill "$name"
   web_push_backfill "$name" "$app_image"
   speech_secret_backfill "$name"
@@ -167,27 +166,43 @@ instance_render() {
   email=$(reg_get "$name" owner_email)
   client_id=$(reg_get "$name" client_id)
   if instance_sandbox_wanted "$name"; then sandbox_on=1; else sandbox_on=0; fi
-  # An instance opened on the network publishes the app on each private address it lists; any other stays on 127.0.0.1.
+  # The app is published on 127.0.0.1. An instance opened on the network also listens on each private address of this
+  # computer it lists, through the lan service, which carries the https port and the plain port that sends to https.
   origins=$(reg_get "$name" origins)
+  allowed=$(instance_allowed_origins "$name")
   redirects="      - $public_url/api/v1/auth/callback"
   app_ports="      - '127.0.0.1:$app_port:8790'"
+  lan_ports=
+  lan_forwards=
+  lan_proxy=0
+  listen=
+  if [ -n "$allowed" ]; then
+    redirects=$(printf '%s\n' "$allowed" | tr ',' '\n' | sed 's|^|      - |; s|$|/api/v1/auth/callback|')
+  fi
   if [ -n "$origins" ]; then
-    redirects=$(printf '%s\n' "$origins" | tr ',' '\n' | sed 's|^|      - |; s|$|/api/v1/auth/callback|')
-    app_ports=$(network_bind_addresses "$origins" | sed "s|^|      - '|; s|\$|:$app_port:8790'|")
     if tls_active "$name"; then
       tls_on=1
       tls_port=$(reg_get "$name" tls_port)
-      app_ports=''
-      while IFS= read -r address; do
-        if [ "$address" = 127.0.0.1 ]; then
-          app_ports="${app_ports:+$app_ports$'\n'}      - '127.0.0.1:$app_port:8790'"
-        else
-          app_ports="${app_ports:+$app_ports$'\n'}      - '$address:$app_port:$TLS_HTTP_IN'"
-        fi
-        app_ports="$app_ports"$'\n'"      - '$address:$tls_port:$TLS_HTTPS_IN'"
-      done < <(network_bind_addresses "$origins")
+      app_ports="$app_ports"$'\n'"      - '127.0.0.1:$tls_port:$TLS_HTTPS_IN'"
+      lan_forwards="r($TLS_HTTP_IN,$TLS_HTTP_IN);r($TLS_HTTPS_IN,$TLS_HTTPS_IN);"
+      lan_proxy=1
+    else
+      lan_forwards="r($APP_CONTAINER_PORT,$APP_CONTAINER_PORT);"
     fi
+    while IFS= read -r address; do
+      [ "$address" != 127.0.0.1 ] || continue
+      listen="${listen:+$listen }$address"
+      if [ "$tls_on" = 1 ]; then
+        lan_ports="${lan_ports:+$lan_ports$'\n'}      - '$address:$app_port:$TLS_HTTP_IN'"
+        lan_ports="$lan_ports"$'\n'"      - '$address:$tls_port:$TLS_HTTPS_IN'"
+      else
+        lan_ports="${lan_ports:+$lan_ports$'\n'}      - '$address:$app_port:$APP_CONTAINER_PORT'"
+      fi
+    done < <(network_bind_addresses "$origins")
   fi
+  if [ -n "$lan_ports" ]; then lan_on=1; fi
+  # What the lan service listens on, so a later command can tell when this computer no longer has one of them.
+  reg_set "$name" listen_addresses "$listen"
   # Texts through Twilio get a listener of their own beside the app. Its port is published on 127.0.0.1 only, for
   # Tailscale Funnel or a web server on this computer to carry on to Twilio. The app port is never opened for it.
   local sms_port sms_env sms_listen
@@ -207,7 +222,7 @@ instance_render() {
   fi
   # Only the app reaches the sign-in service when it passes the sign-in pages through; a browser that goes to the
   # published sign-in port directly needs the service on every address of the namespace.
-  if [ -n "$origins" ] || [ "$(gateway_flag "$origins" "$public_url")" = 1 ]; then login_bind=127.0.0.1; fi
+  if [ -n "$allowed" ] || [ "$(gateway_flag "$allowed" "$public_url")" = 1 ]; then login_bind=127.0.0.1; fi
   edge_on=0
   login_host=
   if edge_wanted "$name"; then
@@ -255,14 +270,22 @@ instance_render() {
   if [ "$tls_on" = 1 ]; then
     if tls_home_in_volume; then tls_volume=1; else tls_host=1; fi
   fi
+  # The front end reads its settings and certificate only when it starts, and Compose cannot see a change inside a
+  # mounted file, so a fingerprint of both goes on the service: when either changes, the next start makes it again.
+  tls_config=
+  if [ "$tls_on" = 1 ]; then
+    tls_prepare "$name" "$app_image"
+    tls_config=$({ cat "$dir/tls.Caddyfile" "$(tls_leaf_dir "$name")/leaf.crt" 2>/dev/null || true; } | sha256_stdin)
+  fi
+  prefix=$(container_prefix "$name")
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
+    "NAME=$name" "CONTAINER_PREFIX=$prefix" "SHORT_NAME=${prefix#aman-}" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
     "IF_BROWSER=$browser_on" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
+    "IF_LAN=$lan_on" "LAN_PORTS=$lan_ports" "LAN_FORWARDS=$lan_forwards" "LAN_PROXY=$lan_proxy" \
     "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
-    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" "${local_model_args[@]}" | write_if_changed "$dir/compose.yaml" 644 || true
-  if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
+    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" "TLS_CONFIG=$tls_config" "${local_model_args[@]}" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
     "ISSUER=$login_url/dex" "LOGIN_BIND=$login_bind" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
@@ -486,19 +509,9 @@ instance_state() {
 }
 
 instance_up() {
-  local name=$1 rc=0 recreate=() clash
+  local name=$1 rc=0 recreate=()
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
   step_begin "start-$name" "Starting instance $name"
-  # Tailscale would take the port the moment the instance stops, so a start that would stop it is not begun.
-  clash=$(instance_tailscale_clash "$name")
-  if [ -n "$clash" ]; then
-    if [ "$clash" = "$(reg_get "$name" app_port)" ]; then
-      UI_FD=2 ui_step_end fail "Instance $name was not started. Tailscale serve on this computer is set up for port $clash, which the instance uses." "Turn that entry off, for example with: sudo tailscale serve --https=$clash off. Then run install.sh again."
-    else
-      UI_FD=2 ui_step_end fail "Instance $name was not started. Tailscale serve on this computer is set up for its https port $clash." "Run: install.sh instance refresh $name. It moves https to a free port."
-    fi
-    return 1
-  fi
   # A whole-project start removes the containers of services the compose file no longer lists (--remove-orphans),
   # so a service dropped from the file, like the https front end when an instance closes back to this computer,
   # does not linger as an orphan. Every whole-project start follows this rule.
@@ -599,7 +612,7 @@ record_source_checkout() {
 
 # The files the aman command is made of: the shim and the helper files it finds at ../lib next to its folder, here and
 # in a checkout alike.
-AMAN_COMMAND_LIBS="ui shared diagnose network schedule host-report"
+AMAN_COMMAND_LIBS="ui help shared diagnose network schedule host-report"
 
 aman_command_current() {
   local lib
@@ -823,46 +836,7 @@ instance_address_change() { # name; prints open, close, refresh or nothing
     if [ -n "$(reg_get "$name" origins)" ]; then printf 'close'; fi
   elif [ -n "$(reg_get "$name" origins)" ] && [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ]; then
     printf 'refresh'
-  elif [ -n "$(reg_get "$name" origins)" ] && tls_port_taken_by_tailscale "$name"; then
-    printf 'refresh'
   fi
-}
-
-# Moves the https port the installer picked off a port Tailscale serve was set up for since, so the compose file drawn
-# next never publishes it. Every start from a freshly drawn compose file goes through here.
-instance_tailscale_https_move() { # name app_image
-  [ -n "$(reg_get "$1" origins)" ] && tls_port_taken_by_tailscale "$1" || return 0
-  instance_apply_addresses "$1" refresh "$2"
-}
-
-# The first port of an instance that Tailscale serve is set up for, or nothing.
-instance_tailscale_clash() { # name
-  local port
-  [ -n "$(reg_get "$1" origins)" ] || return 0
-  for port in $(reg_get "$1" app_port) $(reg_get "$1" tls_port); do
-    if tailscale_serves_port "$port"; then
-      printf '%s' "$port"
-      return 0
-    fi
-  done
-}
-
-# True when the https port the installer picked for an instance is one Tailscale serve was set up for since.
-tls_port_taken_by_tailscale() { # name
-  local port
-  port=$(reg_get "$1" tls_port)
-  [ -n "$port" ] && tailscale_serves_port "$port"
-}
-
-# An instance opened on the network publishes its app port on this computer's Tailscale address too. When Tailscale
-# serve is set up for that port, Tailscale takes it while the instance restarts, so this stops before anything is
-# stopped. The app port is the one devices open, so it is never moved by itself.
-instance_tailscale_port_check() { # name
-  local name=$1 port
-  [ -n "$(reg_get "$name" origins)" ] || return 0
-  port=$(reg_get "$name" app_port)
-  [ -n "$port" ] && tailscale_serves_port "$port" || return 0
-  die "Tailscale serve on this computer is set up for port $port, which instance $name uses, so Tailscale would take the port while the instance restarts. Nothing was stopped. Turn that entry off, for example with: sudo tailscale serve --https=$port off (tailscale serve status lists the entries). Then run this again."
 }
 
 # Writes the list of addresses of an instance into its record and its settings: read again from this computer, plus
@@ -872,7 +846,7 @@ instance_tailscale_port_check() { # name
 # fails, the record is put back as it was and the run stops, so the instance keeps serving plain http and the next
 # plain run tries the move again.
 instance_apply_addresses() { # name open|close|refresh app_image
-  local name=$1 mode=$2 app_image=$3 origins='' extras env tls='' tls_port='' app_port old_tls_port='' old_origins='' had_origins=0 fingerprint_before='' moved_from=
+  local name=$1 mode=$2 app_image=$3 origins='' extras env tls='' tls_port='' app_port old_tls_port='' old_origins='' had_origins=0 fingerprint_before=''
   env="$(instance_dir "$name")/.env"
   app_port=$(reg_get "$name" app_port)
   extras=${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)}
@@ -882,18 +856,8 @@ instance_apply_addresses() { # name open|close|refresh app_image
     origins=$(network_origin_list "$app_port" '' $extras)
     if [ "$tls" = local ] && origins_reach_the_network "$origins"; then
       tls_port=$(reg_get "$name" tls_port)
-      moved_from=
-      # The https port was picked by the installer, so one that Tailscale serve was set up for since is picked again
-      # before anything restarts; Tailscale answers on that port at this computer's Tailscale address in any case.
-      if [ -n "$tls_port" ] && tailscale_serves_port "$tls_port"; then
-        moved_from=$tls_port
-        tls_port=
-      fi
       if [ -z "$tls_port" ]; then
         tls_port=$(pick_port 8443 "$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port)") || die "No free port was found on this computer for https near 8443."
-      fi
-      if [ -n "$moved_from" ]; then
-        say "Tailscale serve on this computer is set up for port $moved_from, so instance $name now opens over https on port $tls_port. On each device, open it with the new port."
       fi
       # shellcheck disable=SC2086
       origins=$(network_origin_list "$app_port" "$tls_port" $extras)
@@ -930,14 +894,14 @@ instance_apply_addresses() { # name open|close|refresh app_image
   reg_set "$name" tls_port "$tls_port"
   reg_set "$name" origins "$origins"
   reg_set "$name" extra_hosts "$extras"
-  env_managed_set "$env" ALLOWED_ORIGINS "$origins"
+  env_managed_set "$env" ALLOWED_ORIGINS "$(instance_allowed_origins "$name")"
   log_event "instance $name addresses $mode"
 }
 
 # ---- create / list / remove -------------------------------------------------------------------
 
 instance_create() {
-  local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0
+  local other dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0
   dir=$(instance_dir "$I_NAME")
   if reg_exists "$I_NAME"; then
     say "Instance $I_NAME already exists. Making sure it is running."
@@ -945,6 +909,9 @@ instance_create() {
     instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
     instance_up "$I_NAME"
     return
+  fi
+  if other=$(container_prefix_owner "$I_NAME"); then
+    die "Instance $other already uses the name $(container_prefix "$I_NAME") in Docker, so instance $I_NAME cannot be made. Run this again with another name."
   fi
   issuer_check "$I_ISSUER"
   if [ -n "$I_ORIGINS" ]; then network_on=1; fi
@@ -1010,7 +977,6 @@ origin_kind() { # origin
   host=$(origin_host "$1")
   case "$host" in
     127.0.0.1 | localhost) echo loopback ;;
-    *.ts.net) echo tailscale ;;
     *.local) echo local ;;
     *) if valid_ipv4 "$host"; then echo address; else echo name; fi ;;
   esac
@@ -1020,15 +986,15 @@ origin_kind() { # origin
 # ones that only work on this computer.
 origins_display_order() { # comma list
   local kind origin
-  for kind in address tailscale local name loopback; do
+  for kind in address local name loopback; do
     while IFS= read -r origin; do
       if [ "$(origin_kind "$origin")" = "$kind" ]; then printf '%s\n' "$origin"; fi
     done < <(printf '%s\n' "$1" | tr ',' '\n')
   done
 }
 
-# The address to open an instance at: the public one when there is one, else the name that survives this computer's
-# address changing (Tailscale, then the home network name), else its first network address, else this computer only.
+# The address to open an instance at: the public one when there is one, else the home network name, else its first
+# network address, else this computer only.
 best_origin() { # name
   local url origins kind origin
   url=$(reg_get "$1" public_url)
@@ -1037,7 +1003,7 @@ best_origin() { # name
     printf '%s\n' "$url"
     return 0
   fi
-  for kind in tailscale local address name loopback; do
+  for kind in local address name loopback; do
     while IFS= read -r origin; do
       if [ "$(origin_kind "$origin")" = "$kind" ]; then
         printf '%s\n' "$origin"
@@ -1061,7 +1027,7 @@ trust_steps_due() { # name
 print_instance_summary() {
   local name=$1 url count origin first=1 origins full=$SUMMARY_FULL
   url=$(reg_get "$name" public_url)
-  origins=$(reg_get "$name" origins)
+  origins=$(instance_allowed_origins "$name")
   count=$(reg_names | wc -l | tr -d ' ')
   if [ "$count" -gt 1 ] || [ "$full" = 1 ]; then ui_heading "Instance $name"; fi
   if [ "$full" = 1 ]; then
@@ -1204,6 +1170,25 @@ warn_if_installed_older() {
     warn "The installed Aman is not the same version as this copy of its code. To use this code, run: installer/install.sh upgrade"
 }
 
+# Where an instance may be opened: its own addresses and names, then the forwards its owner added with aman address add
+# (another program, such as Tailscale serve or a web server on the network, that passes visitors on to the app at
+# 127.0.0.1). An instance that stays on this computer and has forwards lists its own two names too, so sign-in works at
+# each of them.
+instance_allowed_origins() { # name
+  local origins forwards port
+  origins=$(reg_get "$1" origins)
+  forwards=$(reg_get "$1" forwards)
+  if [ -z "$forwards" ]; then
+    printf '%s' "$origins"
+    return
+  fi
+  if [ -z "$origins" ]; then
+    port=$(reg_get "$1" app_port)
+    origins="http://127.0.0.1:$port,http://localhost:$port"
+  fi
+  printf '%s,%s' "$origins" "$forwards"
+}
+
 # 1 for an instance with a public https address: its app then passes the sign-in pages through and limits guessing.
 gateway_flag() { # origins public_url
   if [ -z "$1" ] && ! is_loopback_origin "$2"; then printf 1; else printf 0; fi
@@ -1212,16 +1197,17 @@ gateway_flag() { # origins public_url
 # The settings the template gives an instance from its record: its addresses, its sign-in client and owner, and new
 # secrets. Prints them; writes nothing.
 instance_env_from_record() { # name
-  local name=$1 network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 tf_cap
-  if [ -n "$(reg_get "$name" origins)" ]; then network_on=1; fi
+  local name=$1 network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 tf_cap allowed
+  allowed=$(instance_allowed_origins "$name")
+  if [ -n "$allowed" ]; then network_on=1; fi
   tf_cap=$(reg_get "$name" tf_cap)
   if [ -n "$tf_cap" ]; then tf_cap_on=1; fi
   if [ "$(reg_get "$name" demo)" = 1 ]; then demo_on=1; fi
   if [ "$(reg_get "$name" token_factory)" = 1 ]; then tf_on=1; fi
   render_template "$TEMPLATES_DIR/instance/env.tpl" \
-    "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
+    "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$allowed" \
     "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
-    "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
+    "IF_GATEWAY=$(gateway_flag "$allowed" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
     "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
     "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on"
 }
@@ -1365,7 +1351,6 @@ cmd_instance_refresh() {
   lock_acquire
   load_installed_release
   warn_if_installed_older
-  instance_tailscale_port_check "$name"
   change=$(instance_address_change "$name")
   if [ -n "$change" ]; then
     instance_apply_addresses "$name" "$change" "$REL_APP_TAG"
@@ -1386,14 +1371,39 @@ refresh_report() { # name
   AMAN_REPORT_COMMAND=refresh DOCTOR_TIMEOUT=180 run_doctor --json --instance "$1" >/dev/null 2>&1 || true
 }
 
+# What Docker lists an instance's containers under: "aman-" and the name, written once even when the name starts with it.
+# An "aman-x" made back when an "x" could sit beside it keeps "aman-" twice, so the two never share names.
+container_prefix() { # name
+  if [ "${1#aman-}" != "$1" ] && reg_exists "${1#aman-}"; then
+    printf 'aman-%s\n' "$1"
+  else
+    printf 'aman-%s\n' "${1#aman-}"
+  fi
+}
+
+# The instance whose containers would have the same names as a new instance's, such as "aman-x" for a new "x".
+container_prefix_owner() { # name
+  local other prefix
+  prefix=$(container_prefix "$1")
+  for other in $(reg_names); do
+    if [ "$other" != "$1" ] && [ "$(container_prefix "$other")" = "$prefix" ]; then
+      printf '%s\n' "$other"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # A name typed for a new instance must also be free; naming an existing one is only for re-running instance add on it.
 new_instance_name_problem() {
-  local problem
+  local problem other
   problem=$(name_problem "$1")
   if [ -n "$problem" ]; then
     echo "$problem"
   elif reg_exists "$1"; then
     echo "An instance called $1 already exists. Pick another name."
+  elif other=$(container_prefix_owner "$1"); then
+    echo "Instance $other already uses the name $(container_prefix "$1") in Docker. Pick another name."
   fi
 }
 

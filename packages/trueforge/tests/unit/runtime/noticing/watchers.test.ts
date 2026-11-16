@@ -59,6 +59,7 @@ function sourceOf({
     readText: () => Promise.resolve(''),
     laterInThread: () => Promise.resolve([]),
     trustedAuthenticationServers: trusted,
+    reportsSenderConfirmation: trusted.length > 0,
   };
   return { source, asked };
 }
@@ -211,6 +212,7 @@ describe('readMailWindow when the rest of the window runs out of time', () => {
       readText: () => Promise.resolve(''),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     const read = await readMailWindow({
       source,
@@ -253,6 +255,7 @@ describe('readMailWindow when the rest of the window fails after the stretch tha
       readText: () => Promise.resolve(''),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     const read = await readMailWindow({
       source,
@@ -290,6 +293,7 @@ describe('watchMail when a message cannot be read', () => {
       },
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     return { source, read };
   }
@@ -559,6 +563,7 @@ describe('watchMail when a list fails', () => {
       readText: () => Promise.resolve('Amount due by November 7'),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     return { source, windows };
   };
@@ -676,6 +681,7 @@ describe('watchMail keeps trouble and progress on every way of stopping', () => 
         readText: readText ?? (() => Promise.resolve('Amount due by November 7')),
         laterInThread: () => Promise.resolve([]),
         trustedAuthenticationServers: [],
+        reportsSenderConfirmation: false,
       },
     };
   };
@@ -746,6 +752,7 @@ describe('watchMail when a list fails', () => {
       readText: () => Promise.resolve(''),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     let stuck: StuckMessage | undefined;
     for (let pass = 0; pass < 6; pass += 1) {
@@ -777,6 +784,7 @@ describe('watchMail when a list fails', () => {
       readText: () => Promise.resolve('Amount due by November 7'),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     const first = await watchMail({ ...base, source });
     // The mail before the failing seconds was read in the same pass, and the pass says where it got stuck.
@@ -813,6 +821,7 @@ describe('watchMail when a list fails', () => {
       readText: () => Promise.resolve(''),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     const first = await watchMail({ ...base, source, now: NOW });
     const later = await watchMail({
@@ -862,6 +871,7 @@ describe('watchMail when a message keeps failing', () => {
         },
         laterInThread: () => Promise.resolve([]),
         trustedAuthenticationServers: [],
+        reportsSenderConfirmation: false,
       },
     };
   };
@@ -955,7 +965,11 @@ describe('watchMail when a message keeps failing', () => {
       [plain, []],
     ] as const) {
       const { source } = sourceWith({ inbox: [bill('a', 1), item, bill('c', 3)], failing: { [item.id]: busy } });
-      const read: TimedMailSource = { ...source, trustedAuthenticationServers: ['mx.example.net'] };
+      const read: TimedMailSource = {
+        ...source,
+        trustedAuthenticationServers: ['mx.example.net'],
+        reportsSenderConfirmation: true,
+      };
       const found = await run({
         source: {
           ...read,
@@ -988,6 +1002,7 @@ describe('watchMail when a message has held up passes for hours', () => {
       },
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     return { source, read };
   };
@@ -1092,6 +1107,7 @@ describe('watchMail with a flood and a bad header', () => {
       readText: () => Promise.resolve('Amount due by November 7'),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     return { source, lists };
   };
@@ -1150,6 +1166,7 @@ describe('watchMail window and thread checks', () => {
       readText: () => Promise.resolve('Amount due by December 20'),
       laterInThread: later,
       trustedAuthenticationServers: [],
+      reportsSenderConfirmation: false,
     };
     const found = await watchMail({
       source,

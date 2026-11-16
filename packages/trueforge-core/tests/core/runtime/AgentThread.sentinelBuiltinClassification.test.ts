@@ -35,12 +35,14 @@ class SyntheticTools extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: 'synthetic_write',
+      requiresNetwork: false,
       description: 'Synthetic write op with no effect hints.',
       schema: z.object({}).strict(),
       handler: () => Promise.resolve(toolResultResponse({ text: '{}' })),
     }),
     defineTool({
       name: 'synthetic_read',
+      requiresNetwork: false,
       description: 'Synthetic read op declaring itself read-only.',
       schema: z.object({}).strict(),
       annotations: { readOnlyHint: true },

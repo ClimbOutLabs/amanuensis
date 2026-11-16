@@ -248,6 +248,7 @@ const CaldavTimeValueSchema = z.object({
 });
 
 const CaldavListEventsResultSchema = z.object({
+  isError: z.boolean().optional(),
   structuredContent: z
     .object({
       events: z.array(
@@ -263,6 +264,17 @@ const CaldavListEventsResultSchema = z.object({
 });
 
 type CaldavTimeValue = z.infer<typeof CaldavTimeValueSchema>;
+
+const CaldavErrorTextSchema = z.object({
+  content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
+});
+
+/** The connector's own words for a refused read, for the log; its error text names no event. */
+function caldavErrorText(result: unknown): string {
+  const parsed = CaldavErrorTextSchema.safeParse(result);
+  const text = parsed.success ? parsed.data.content.find(part => part.type === 'text')?.text : undefined;
+  return text === undefined ? 'no reason given' : text.slice(0, 300);
+}
 
 /** The instant a CalDAV time value names: its own offset when it carries one, else its zone, else the person's. */
 function caldavInstant(time: CaldavTimeValue, personZone: string): Date | null {
@@ -329,9 +341,14 @@ function caldavDayEvent(
   };
 }
 
+/** A local midnight as wall-clock time with no offset, the form the connector reads in the zone it is given. */
+function wallMidnight(day: CalendarDay): string {
+  return `${isoDay(day)}T00:00:00`;
+}
+
 async function fetchCaldavEvents(
   deps: TodayCalendarDeps,
-  input: { account: CalendarAccountRef; window: { start: Date; end: Date }; zone: string },
+  input: { account: CalendarAccountRef; days: { first: CalendarDay; end: CalendarDay }; zone: string },
 ): Promise<DayEvent[]> {
   const record = await deps.mcpServerStore.getServer({ tenant_id: deps.tenant_id, name: CALDAV_SERVER_NAME });
   if (record?.manifest.type !== 'remote') {
@@ -351,8 +368,10 @@ async function fetchCaldavEvents(
   const response = await remote.callTool({
     name: 'list_events',
     arguments: {
-      from: input.window.start.toISOString(),
-      to: input.window.end.toISOString(),
+      // Wall-clock bounds read in the zone: the connector refuses a bound that carries its own
+      // offset beside a zone, and the zone is still needed to place events that name none.
+      from: wallMidnight(input.days.first),
+      to: wallMidnight(input.days.end),
       timezone: input.zone,
       limit: EVENT_CAP,
       // One read per account, so each event keeps the account it came from.
@@ -360,11 +379,13 @@ async function fetchCaldavEvents(
     },
   });
   if (!('result' in response)) {
-    return [];
+    throw new Error('The calendar connector asked for a sign-in the rail cannot give.');
   }
+  // A refusal or an answer without events is a failed read, never an empty day: the day would
+  // otherwise read "Nothing on the calendar" while the connector was saying why it read nothing.
   const parsed = CaldavListEventsResultSchema.safeParse(response.result);
-  if (!parsed.success || parsed.data.structuredContent === undefined) {
-    return [];
+  if (!parsed.success || parsed.data.isError === true || parsed.data.structuredContent === undefined) {
+    throw new Error(`The calendar connector did not list the events: ${caldavErrorText(response.result)}`);
   }
   const events: DayEvent[] = [];
   for (const shaped of parsed.data.structuredContent.events) {
@@ -376,6 +397,12 @@ async function fetchCaldavEvents(
   return events;
 }
 
+/** One account's events, and whether they were read at all: an unread account answers no events. */
+interface AccountRead {
+  events: DayEvent[];
+  read: boolean;
+}
+
 /** One account's window of events, from the cache while it is fresh for this same local day. */
 async function accountEvents(
   deps: TodayCalendarDeps,
@@ -384,15 +411,16 @@ async function accountEvents(
     account: CalendarAccountRef;
     day_key: string;
     window: { start: Date; end: Date };
+    days: { first: CalendarDay; end: CalendarDay };
     zone: string;
   },
-): Promise<DayEvent[]> {
+): Promise<AccountRead> {
   const key = `${input.owner.tenant_id}:${input.owner.created_by}:${input.account.source}:${input.account.account_id}:${input.zone}`;
   const cached = cacheByAccount.get(key);
   const nowMs = deps.now().getTime();
   if (cached !== undefined) {
     if (cached.day_key === input.day_key && nowMs - cached.fetched_at_ms < TODAY_CALENDAR_CACHE_MS) {
-      return cached.events;
+      return { events: cached.events, read: true };
     }
   }
   let events: DayEvent[];
@@ -405,7 +433,7 @@ async function accountEvents(
             window: input.window,
             zone: input.zone,
           })
-        : await fetchCaldavEvents(deps, { account: input.account, window: input.window, zone: input.zone });
+        : await fetchCaldavEvents(deps, { account: input.account, days: input.days, zone: input.zone });
   } catch (error) {
     // A calendar that cannot be read leaves the day as the other accounts give it; the failure is logged, never hidden.
     deps.logger.warn('Calendar could not be read for the rail', extractErrorLogFields(error));
@@ -413,12 +441,12 @@ async function accountEvents(
     // it is still recent: an old read served as today's would mislead, so past the bound the
     // account counts as unread, the same as having no cache at all.
     if (cached !== undefined && deps.now().getTime() - cached.fetched_at_ms < TODAY_CALENDAR_MAX_STALE_MS) {
-      return cached.events;
+      return { events: cached.events, read: true };
     }
-    return [];
+    return { events: [], read: false };
   }
   cacheByAccount.set(key, { fetched_at_ms: nowMs, day_key: input.day_key, events });
-  return events;
+  return { events, read: true };
 }
 
 /**
@@ -442,17 +470,18 @@ export function freeAfterMs(input: { events: readonly DayEvent[]; now_ms: number
 /**
  * The local day's events from every connected account, plus the next morning's first event once
  * the day is over, and the day's free-after time. `calendar` is null when no calendar
- * account is connected at all.
+ * account is connected at all. `calendar_unread` is true when accounts are connected but none
+ * could be read: the day is then unknown, so it claims no free time either.
  */
 export async function readTodayCalendar(
   deps: TodayCalendarDeps,
   input: { owner: GoogleOwner; timeZone: string | undefined },
-): Promise<{ calendar: TodayCalendarEvent[] | null; free_after: string | null }> {
+): Promise<{ calendar: TodayCalendarEvent[] | null; free_after: string | null; calendar_unread: boolean }> {
   const now = deps.now();
   const zone = zoneOf(input.timeZone);
   const today = parseDateOnly(resolveLocalTime(now, zone).date) ?? parseDateOnly(now.toISOString().slice(0, 10));
   if (today === undefined) {
-    return { calendar: null, free_after: null };
+    return { calendar: null, free_after: null, calendar_unread: false };
   }
   const dayStart = zonedMidnight(today, zone);
   const dayEnd = zonedMidnight(addDays({ day: today, days: 1 }), zone);
@@ -460,13 +489,19 @@ export async function readTodayCalendar(
 
   const accounts = await connectedAccounts(deps, input.owner);
   if (accounts.length === 0) {
-    return { calendar: null, free_after: null };
+    return { calendar: null, free_after: null, calendar_unread: false };
   }
   const window = { start: dayStart, end: windowEnd };
+  const days = { first: today, end: addDays({ day: today, days: 2 }) };
   const perAccount = await Promise.all(
-    accounts.map(account => accountEvents(deps, { owner: input.owner, account, day_key: isoDay(today), window, zone })),
+    accounts.map(account =>
+      accountEvents(deps, { owner: input.owner, account, day_key: isoDay(today), window, days, zone }),
+    ),
   );
-  const all = perAccount.flat();
+  if (perAccount.every(account => !account.read)) {
+    return { calendar: [], free_after: null, calendar_unread: true };
+  }
+  const all = perAccount.flatMap(account => account.events);
   const nowMs = now.getTime();
   const todays = all
     .filter(event => event.start_ms < dayEnd.getTime() && event.end_ms > dayStart.getTime())
@@ -490,5 +525,6 @@ export async function readTodayCalendar(
   return {
     calendar: shown,
     free_after: free === null ? null : new Date(free).toISOString(),
+    calendar_unread: false,
   };
 }

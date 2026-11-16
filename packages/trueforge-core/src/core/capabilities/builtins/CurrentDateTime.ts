@@ -26,6 +26,7 @@ export class CurrentDateTime extends LocalToolMCP {
   private tools: ToolDefinition[] = [
     defineTool({
       name: GET_CURRENT_DATETIME_TOOL_NAME,
+      requiresNetwork: false,
       description:
         "Returns the current date, weekday and time in the person's own time zone, with the IANA zone and its UTC " +
         'offset. When their zone is not known the answer is in UTC and says so. Also reports unix epoch MS.',

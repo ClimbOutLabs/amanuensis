@@ -2,7 +2,7 @@
 
 Aman is a private assistant that runs on your own computer. This page shows what you need, then walks you to the install guide for your computer.
 
-Setting Aman up takes about 45 minutes. Most of that is waiting while things download and build. You answer a few questions and choose a password at the start, and then it runs on its own.
+Setting Aman up may take a while, depending on your internet connection. Most of that is waiting while things download and build. You answer a few questions and choose a password at the start, and then it runs on its own.
 
 ## What you need
 
