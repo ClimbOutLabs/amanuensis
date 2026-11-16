@@ -1,7 +1,8 @@
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import { recordUntrustedText } from '../../../src/core/permissions/provenance';
 import type { TierDecision } from '../../../src/core/permissions/tier';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 const readOnlyClosedWorld = { read_only_hint: true, open_world_hint: false, destructive_hint: false };
@@ -99,8 +100,10 @@ describe('connector send cards', () => {
   });
 
   test('shows a long value on a call that sends nothing whole too', async () => {
+    // The mailbox anchors the call in the connector's own store, so the carried-payload refusal
+    // does not claim it and the card shows the long value.
     const text = `${'a'.repeat(5000)}LAST-WORDS`;
-    const decision = await classify(mailCall('lookup_note', { text }));
+    const decision = await classify(mailCall('lookup_note', { mailbox: 'Notes', text }));
     expect(decision.auto_deny).toBeNull();
     expect(decision.card?.outbound_text).toContain(text);
   });
@@ -293,8 +296,8 @@ describe('hidden sends: one rule for every spelling', () => {
     }
   });
 
-  test('a send_message with only a draft id stays denied for its missing destination', async () => {
-    expect((await classify(mailCall('send_message', { draftId: 'd1' }))).auto_deny).toBe('destination_unverifiable');
+  test('a send_message with only a draft id is refused as a saved draft the card cannot show', async () => {
+    expect((await classify(mailCall('send_message', { draftId: 'd1' }))).auto_deny).toBe('incomplete_send_card');
   });
 
   test.each<[string, Record<string, unknown>]>([

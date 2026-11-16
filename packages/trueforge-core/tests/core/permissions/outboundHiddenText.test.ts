@@ -1,6 +1,7 @@
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import { extractCardFields, renderOutboundArguments } from '../../../src/core/permissions/extractorRegistry';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 const HIDDEN_REFUSAL =
@@ -275,5 +276,13 @@ describe('long keys', () => {
     const { decision, refused } = await denial('post_message', { channel: '#general', [keyOf(500)]: 'hello' });
     expect(refused).toBe(false);
     expect(decision.card?.outbound_text).toContain(`${keyOf(500)}: hello`);
+  });
+
+  test('a call that sends nothing is carded with the whole key, not refused', async () => {
+    // The mailbox anchors the call in the connector's own store, so the carried-payload refusal
+    // does not claim it and the long key is shown on its card.
+    const { decision, refused } = await denial('frobnicate', { mailbox: 'Depot', [keyOf(201)]: 'x' });
+    expect(refused).toBe(false);
+    expect(decision.card?.outbound_text).toContain(`${keyOf(201)}: x`);
   });
 });

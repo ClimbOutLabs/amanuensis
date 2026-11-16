@@ -54,6 +54,14 @@ export const INERT_SEARCH_MESSAGES_TOOL = 'search_messages';
 export const INERT_SEARCH_NOTES_TOOL = 'search_notes';
 export const INERT_WRITE_TOOL = 'inert_write';
 export const INERT_UNANNOTATED_TOOL = 'inert_unannotated';
+/**
+ * The folder in the connector's own store that the write and unannotated tools act on. A call
+ * that carries words, names no place and is not declared read-only is refused as a send the card
+ * cannot show; naming this folder keeps the call inside the connector, so it still asks.
+ */
+export const INERT_MAILBOX = 'inert';
+/** The tools whose scripted calls name `INERT_MAILBOX`. The echo tool is declared read-only, so it needs none. */
+export const INERT_MAILBOX_TOOLS = [INERT_WRITE_TOOL, INERT_UNANNOTATED_TOOL] as const;
 export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
 export const INERT_SEARCH_MEMORY_TOOL = 'search_memory';
 /** Opt-in (`startInertMcpServer({ webSearch: true })`), so the default tool list stays unchanged. */
@@ -438,7 +446,7 @@ function buildMcpServer({
     INERT_WRITE_TOOL,
     {
       description: 'Records a value. Annotated as a write so the approval gate covers it.',
-      inputSchema: { text: z.string() },
+      inputSchema: { text: z.string(), mailbox: z.string().optional() },
       annotations: { readOnlyHint: false },
     },
     async ({ text }) => {
@@ -458,7 +466,7 @@ function buildMcpServer({
     INERT_UNANNOTATED_TOOL,
     {
       description: 'Carries no annotations, so it matches `@unclassified` and is gated by default.',
-      inputSchema: { text: z.string() },
+      inputSchema: { text: z.string(), mailbox: z.string().optional() },
     },
     ({ text }) => {
       counters.unannotated += 1;

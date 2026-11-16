@@ -25,6 +25,7 @@ import { HARBOUR_ADDRESS, installRecordedTavily } from '../../fixtures/groundedF
 import {
   HA_CALL_ACTION_TOOL,
   HA_LAMP,
+  HA_THERMOSTAT,
   HA_UNFAMILIAR_TOOL,
   startHomeAssistantStub,
   type HomeAssistantStub,
@@ -1345,6 +1346,28 @@ describe('the Home Assistant connector', () => {
   );
 
   it(
+    'lets "Always allow everywhere" cover the heating on a connector saved before it kept the tools it may change',
+    async () => {
+      const setHeating = async (chatId: string) => {
+        server.model.next({ toolArguments: { entity_id: HA_THERMOSTAT, temperature: 19 } });
+        return cards(await runTurn({ server, chatId, input: ask('HassClimateSetTemperature') }));
+      };
+      const chatId = await createChat(server, HOME_AGENT_SPEC);
+      const [card] = await setHeating(chatId);
+      if (card === undefined) {
+        throw new Error('setting the heating showed no card');
+      }
+      expect(card.can_always_allow).toBe(true);
+      await runTurn({ server, chatId, input: answer({ card, scope: 'always' }) });
+      expect(home.invocations('HassClimateSetTemperature')).toBe(1);
+
+      expect(await setHeating(await createChat(server, HOME_AGENT_SPEC))).toEqual([]);
+      expect(home.invocations('HassClimateSetTemperature')).toBe(2);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
     'still turns a lamp off after one approval',
     async () => {
       const chatId = await createChat(server, HOME_AGENT_SPEC);
@@ -1474,7 +1497,9 @@ describe('a connector tool named like a search tool', () => {
       const chatId = await chatThatSearchedTheConnector();
       server.model.next({ toolArguments: DRAFT });
       const card = onlyCard(await runTurn({ server, chatId, input: ask('draft_email') }));
-      expect(card.tier3_card?.plain_what).toContain(`This goes to ${ADDRESS}, whose address was in a page Aman read.`);
+      expect(card.tier3_card?.plain_what).toContain(
+        `This goes to ${ADDRESS}, whose address was in a tool result Aman read.`,
+      );
     },
     TURN_TIMEOUT_MS,
   );

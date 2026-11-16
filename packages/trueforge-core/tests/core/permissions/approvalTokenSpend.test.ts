@@ -1,7 +1,7 @@
 import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
-import type { ClassifyContext } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
+import type { ClassifyContext } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { testApprovalOwner } from './approvalTokenFixtures';
 

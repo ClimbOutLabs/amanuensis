@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
-  downloadPinnedModelFiles,
   EMBEDDING_DIMENSIONS,
   EMBEDDING_MODEL_ID,
   EMBEDDING_MODEL_REVISION,
@@ -39,13 +38,10 @@ function makePipeline(texts: string[], vector: number[] = goodVector()): { tolis
 interface FakeHarness {
   modelRefs: string[];
   seenTexts: string[][];
-  downloadCalls: number;
-  /** Simulates the raw-bytes download step; may throw to simulate failure. */
-  downloadImpl: (modelDir: string) => Promise<void>;
 }
 
-function newHarness(downloadImpl: (modelDir: string) => Promise<void>): FakeHarness {
-  return { modelRefs: [], seenTexts: [], downloadCalls: 0, downloadImpl };
+function newHarness(): FakeHarness {
+  return { modelRefs: [], seenTexts: [] };
 }
 
 function fakeCreatePipeline(harness: FakeHarness) {
@@ -56,13 +52,6 @@ function fakeCreatePipeline(harness: FakeHarness) {
       return makePipeline(texts);
     };
     return pipeline;
-  };
-}
-
-function fakeDownload(harness: FakeHarness, modelDir: string) {
-  return async (): Promise<void> => {
-    harness.downloadCalls += 1;
-    await harness.downloadImpl(modelDir);
   };
 }
 
@@ -78,7 +67,7 @@ async function writeTinyFiles(modelDir: string): Promise<void> {
   }
 }
 
-async function poisonedDownload(modelDir: string): Promise<void> {
+async function writePoisonedFiles(modelDir: string): Promise<void> {
   const snapshot = path.join(modelDir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION);
   await mkdir(path.join(snapshot, 'onnx'), { recursive: true });
   await writeFile(path.join(snapshot, 'config.json'), 'poisoned', 'utf8');
@@ -163,146 +152,16 @@ describe('verifyModelFiles', () => {
   });
 });
 
-describe('downloadPinnedModelFiles', () => {
-  const bodies: Record<string, string> = {
-    'config.json': 'tiny config',
-    'onnx/model.bin': 'tiny weights',
-  };
-
-  function fakeFetch(): typeof fetch {
-    return async input => {
-      const url = String(input);
-      const relative = url.split('/resolve/')[1]?.split('/').slice(1).join('/') ?? 'missing';
-      return new Response(bodies[relative] ?? 'missing');
-    };
-  }
-
-  it('fetches the pinned revision URLs and stages files atomically with locked-down modes', async () => {
-    const dir = await makeModelDir();
-    try {
-      const seenUrls: string[] = [];
-      const fetchImpl: typeof fetch = async input => {
-        seenUrls.push(String(input));
-        return fakeFetch()(input);
-      };
-      await downloadPinnedModelFiles({ modelDir: dir, expectedFiles: TINY_FILES, fetchImpl });
-      // The exact pinned revision is in every URL: no unpinned bytes accepted.
-      expect(seenUrls).toHaveLength(2);
-      for (const url of seenUrls) {
-        expect(url).toContain(`/resolve/${EMBEDDING_MODEL_REVISION}/`);
-      }
-      const snapshot = path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION);
-      for (const [relative, content] of Object.entries(bodies)) {
-        const full = path.join(snapshot, relative);
-        const fileStat = await stat(full);
-        expect(fileStat.isFile()).toBe(true);
-        // No group/other access on downloaded model bytes.
-        expect(fileStat.mode & 0o077).toBe(0);
-        expect(sha(await readFile(full, 'utf8'))).toBe(sha(content));
-      }
-      // No staging leftovers: a partial download never looks complete.
-      const leftovers: string[] = [];
-      async function walk(current: string): Promise<void> {
-        for (const entry of await readdir(current, { withFileTypes: true })) {
-          const full = path.join(current, entry.name);
-          if (entry.name.endsWith('.part')) {
-            leftovers.push(full);
-          }
-          if (entry.isDirectory()) {
-            await walk(full);
-          }
-        }
-      }
-      await walk(dir);
-      expect(leftovers).toEqual([]);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects a lying content-length without reading the body', async () => {
-    const dir = await makeModelDir();
-    try {
-      const fetchImpl: typeof fetch = async () =>
-        new Response('tiny', { headers: { 'content-length': String(10 * 1024 * 1024 * 1024) } });
-      await expect(downloadPinnedModelFiles({ modelDir: dir, expectedFiles: TINY_FILES, fetchImpl })).rejects.toThrow(
-        'too large',
-      );
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('overwrites pre-existing targets so a retry can repair a failed attempt', async () => {
-    const dir = await makeModelDir();
-    try {
-      // Simulate a previous attempt's leftovers: stale bytes already at the
-      // pinned targets. rename(2) cannot replace these on Windows (EPERM),
-      // so the downloader must clear them before moving staged files in.
-      const snapshot = path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION);
-      for (const relative of Object.keys(bodies)) {
-        const full = path.join(snapshot, relative);
-        await mkdir(path.dirname(full), { recursive: true });
-        await writeFile(full, 'stale bytes from a failed attempt', 'utf8');
-      }
-      await downloadPinnedModelFiles({ modelDir: dir, expectedFiles: TINY_FILES, fetchImpl: fakeFetch() });
-      for (const [relative, content] of Object.entries(bodies)) {
-        expect(sha(await readFile(path.join(snapshot, relative), 'utf8'))).toBe(sha(content));
-      }
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects a streamed body that exceeds the byte cap', async () => {
-    const dir = await makeModelDir();
-    try {
-      const fetchImpl: typeof fetch = async () =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              controller.enqueue(new TextEncoder().encode('0123456789abcdef'));
-              controller.close();
-            },
-          }),
-        );
-      await expect(
-        downloadPinnedModelFiles({
-          modelDir: dir,
-          expectedFiles: TINY_FILES,
-          fetchImpl,
-          maxBytes: 10,
-        }),
-      ).rejects.toThrow('too large');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('throws on HTTP errors without writing files', async () => {
-    const dir = await makeModelDir();
-    try {
-      const fetchImpl: typeof fetch = async () => new Response('nope', { status: 404 });
-      await expect(downloadPinnedModelFiles({ modelDir: dir, expectedFiles: TINY_FILES, fetchImpl })).rejects.toThrow(
-        'HTTP 404',
-      );
-      expect(await verifyModelFiles(dir, TINY_FILES)).toBe(false);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('EmbeddingModel', () => {
   it('applies the E5 query:/passage: prefixes unconditionally', async () => {
     const dir = await makeModelDir();
     try {
-      const harness = newHarness(writeTinyFiles);
+      await writeTinyFiles(dir);
+      const harness = newHarness();
       const model = new EmbeddingModel({
         modelDir: dir,
         expectedFiles: TINY_FILES,
         createPipeline: fakeCreatePipeline(harness),
-        downloadModelFiles: fakeDownload(harness, dir),
       });
       expect(await model.ensureReady()).toBe(true);
       await model.embedQueries(['hello']);
@@ -314,130 +173,95 @@ describe('EmbeddingModel', () => {
     }
   });
 
-  it('stays offline when the cache is pre-seeded and valid', async () => {
+  it('loads a valid model folder from the verified revision directory', async () => {
     const dir = await makeModelDir();
     try {
       await writeTinyFiles(dir);
-      const harness = newHarness(async () => {
-        throw new Error('download must not run for a valid cache');
-      });
+      const harness = newHarness();
       const model = new EmbeddingModel({
         modelDir: dir,
         expectedFiles: TINY_FILES,
         createPipeline: fakeCreatePipeline(harness),
-        downloadModelFiles: fakeDownload(harness, dir),
       });
       expect(await model.ensureReady()).toBe(true);
-      expect(harness.downloadCalls).toBe(0);
       // Offline loads use the verified revision directory directly, not the
       // model ID: transformers.js with allowRemote=false resolves IDs via
-      // env.localModelPath (no revision) and never finds the pinned cache.
+      // env.localModelPath (no revision) and never finds the pinned files.
       expect(harness.modelRefs).toEqual([path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION)]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it('downloads raw bytes, verifies, then builds the pipeline offline', async () => {
-    const dir = await makeModelDir();
-    try {
-      const order: string[] = [];
-      const harness = newHarness(async modelDir => {
-        order.push('download');
-        await writeTinyFiles(modelDir);
-      });
-      const model = new EmbeddingModel({
-        modelDir: dir,
-        expectedFiles: TINY_FILES,
-        createPipeline: async input => {
-          order.push('pipeline');
-          return fakeCreatePipeline(harness)(input);
-        },
-        downloadModelFiles: fakeDownload(harness, dir),
-      });
-      expect(await model.ensureReady()).toBe(true);
-      // The parser is only ever constructed after the bytes verify.
-      expect(order).toEqual(['download', 'pipeline']);
-      expect(harness.modelRefs).toEqual([path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION)]);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('never builds a pipeline from unverified bytes', async () => {
-    // Regression for the instantiate-before-verify BLOCK: hostile download
-    // bytes must never reach the ONNX parser. The pipeline builder must not
-    // run at all when verification fails.
-    const dir = await makeModelDir();
-    try {
-      const harness = newHarness(poisonedDownload);
-      const model = new EmbeddingModel({
-        modelDir: dir,
-        expectedFiles: TINY_FILES,
-        createPipeline: fakeCreatePipeline(harness),
-        downloadModelFiles: fakeDownload(harness, dir),
-      });
-      expect(await model.ensureReady()).toBe(false);
-      expect(model.currentPhase).toBe('unavailable');
-      expect(harness.modelRefs).toEqual([]);
-      expect(model.failureReason).toContain('integrity check');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('retries the download exactly once, then gives up for the run', async () => {
+  it('never downloads: a missing model stays keyword-only and says where the files go', async () => {
     const dir = await makeModelDir();
     const logs: string[] = [];
+    const fetchSpy = jest.spyOn(globalThis, 'fetch');
     try {
-      const harness = newHarness(async () => {
-        throw new Error('boom');
-      });
+      const harness = newHarness();
       const model = new EmbeddingModel({
         modelDir: dir,
         expectedFiles: TINY_FILES,
         log: message => logs.push(message),
         createPipeline: fakeCreatePipeline(harness),
-        downloadModelFiles: fakeDownload(harness, dir),
       });
       expect(await model.ensureReady()).toBe(false);
-      expect(harness.downloadCalls).toBe(2);
-      // No pipeline is ever built from a failed download.
-      expect(harness.modelRefs).toEqual([]);
       const phase: EmbeddingModelPhase = model.currentPhase;
       expect(phase).toBe('unavailable');
-      // A second ensureReady does not retry within the cooldown.
-      expect(await model.ensureReady()).toBe(false);
-      expect(harness.downloadCalls).toBe(2);
+      expect(harness.modelRefs).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(model.failureReason).toContain(dir);
+      expect(model.failureReason).toContain('Copy the model files there');
       expect(logs.join('\n')).toContain("Smart search isn't available");
+      // A second ensureReady does not check again within the cooldown.
+      expect(await model.ensureReady()).toBe(false);
+      expect(logs).toHaveLength(1);
+    } finally {
+      fetchSpy.mockRestore();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('never builds a pipeline from unverified bytes', async () => {
+    // Tampered bytes must never reach the ONNX parser: the pipeline builder
+    // does not run at all when verification fails.
+    const dir = await makeModelDir();
+    try {
+      await writePoisonedFiles(dir);
+      const harness = newHarness();
+      const model = new EmbeddingModel({
+        modelDir: dir,
+        expectedFiles: TINY_FILES,
+        createPipeline: fakeCreatePipeline(harness),
+      });
+      expect(await model.ensureReady()).toBe(false);
+      expect(model.currentPhase).toBe('unavailable');
+      expect(harness.modelRefs).toEqual([]);
+      expect(model.failureReason).toContain('do not match the pinned ones');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it('wipes a structurally corrupt cache before downloading', async () => {
-    // A stray file can never be repaired by overwriting pinned paths: the
-    // cache is wiped so the download starts clean. verifyModelFiles would
-    // otherwise fail on the stray file forever.
+  it('leaves a model folder with stray files in place and stays keyword-only', async () => {
+    // The folder belongs to whoever filled it: nothing is wiped or rewritten.
     const dir = await makeModelDir();
     try {
       await writeTinyFiles(dir);
-      const snapshot = path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION);
-      const stray = path.join(snapshot, 'evil.bin');
+      const stray = path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION, 'evil.bin');
       await writeFile(stray, 'x', 'utf8');
-      const linkTarget = path.join(snapshot, 'config.json');
+      const linkTarget = path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION, 'config.json');
       await rm(linkTarget);
       await symlink('/etc/hostname', linkTarget);
-      const harness = newHarness(writeTinyFiles);
+      const harness = newHarness();
       const model = new EmbeddingModel({
         modelDir: dir,
         expectedFiles: TINY_FILES,
         createPipeline: fakeCreatePipeline(harness),
-        downloadModelFiles: fakeDownload(harness, dir),
       });
-      expect(await model.ensureReady()).toBe(true);
-      expect(harness.downloadCalls).toBe(1);
-      expect(await verifyModelFiles(dir, TINY_FILES)).toBe(true);
+      expect(await model.ensureReady()).toBe(false);
+      expect(harness.modelRefs).toEqual([]);
+      expect(await readFile(stray, 'utf8')).toBe('x');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -446,7 +270,8 @@ describe('EmbeddingModel', () => {
   it('fails closed when the canary is not unit-norm', async () => {
     const dir = await makeModelDir();
     try {
-      const harness = newHarness(writeTinyFiles);
+      await writeTinyFiles(dir);
+      const harness = newHarness();
       const model = new EmbeddingModel({
         modelDir: dir,
         expectedFiles: TINY_FILES,
@@ -456,7 +281,6 @@ describe('EmbeddingModel', () => {
             makePipeline(texts, new Array(EMBEDDING_DIMENSIONS).fill(0.5));
           return pipeline;
         },
-        downloadModelFiles: fakeDownload(harness, dir),
       });
       expect(await model.ensureReady()).toBe(false);
       expect(model.failureReason).toContain('self-check');
@@ -475,7 +299,8 @@ describe('EmbeddingModel', () => {
     try {
       let calls = 0;
       let failCanary = true;
-      const harness = newHarness(writeTinyFiles);
+      await writeTinyFiles(dir);
+      const harness = newHarness();
       const model = new EmbeddingModel({
         modelDir: dir,
         expectedFiles: TINY_FILES,
@@ -486,7 +311,6 @@ describe('EmbeddingModel', () => {
             makePipeline(texts, failCanary ? new Array(EMBEDDING_DIMENSIONS).fill(0) : goodVector());
           return pipeline;
         },
-        downloadModelFiles: fakeDownload(harness, dir),
       });
       expect(await model.ensureReady()).toBe(false);
       expect(model.currentPhase).toBe('unavailable');
@@ -509,7 +333,8 @@ describe('EmbeddingModel', () => {
     const dir = await makeModelDir();
     try {
       let calls = 0;
-      const harness = newHarness(writeTinyFiles);
+      await writeTinyFiles(dir);
+      const harness = newHarness();
       const model = new EmbeddingModel({
         modelDir: dir,
         expectedFiles: TINY_FILES,
@@ -520,7 +345,6 @@ describe('EmbeddingModel', () => {
           const pipeline: EmbeddingPipeline = async texts => makePipeline(texts);
           return pipeline;
         },
-        downloadModelFiles: fakeDownload(harness, dir),
       });
       const [a, b] = await Promise.all([model.ensureReady(), model.ensureReady()]);
       expect(a).toBe(true);
@@ -535,7 +359,8 @@ describe('EmbeddingModel', () => {
     const dir = await makeModelDir();
     try {
       let calls = 0;
-      const harness = newHarness(writeTinyFiles);
+      await writeTinyFiles(dir);
+      const harness = newHarness();
       const model = new EmbeddingModel({
         modelDir: dir,
         expectedFiles: TINY_FILES,
@@ -552,7 +377,6 @@ describe('EmbeddingModel', () => {
           };
           return pipeline;
         },
-        downloadModelFiles: fakeDownload(harness, dir),
       });
       expect(await model.ensureReady()).toBe(true);
       await expect(model.embedQueries(['a'])).rejects.toThrow('transient onnx failure');

@@ -52,7 +52,7 @@ Aman sorts every action into one of three groups before it runs.
 
     Nothing runs for these:
 
-    - A send whose destination can't be checked.
+    - A send whose destination can't be checked. Aman decides a connector call is a send from what it carries, such as a recipient, an amount or message text, not from the tool's name. A call that carries words or an id but shows no place the card can check is refused, unless the tool says it only reads information. Then Aman asks you, as before.
     - A send whose card would hide a recipient.
     - Anything that needs the internet while offline mode is on.
 
@@ -96,9 +96,9 @@ Aman always shows a card first. Aman itself reads the skill on GitHub, so the na
 
 What you approve is what is added. The skill is saved at the exact version on the card, so a later change to the repository isn't picked up. If the repository changes between the card and your answer, nothing is added and Aman asks again.
 
-Skills from a marketplace don't say which websites they use, so Aman reads all of the skill's files first and lists the websites it found on the card. If the skill makes up web addresses while it runs, the card says so, and those websites stay blocked until you allow each one. Approving is all or nothing: **Allow** adds the skill and lets it reach exactly the websites on the card, and nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. From a chat, Aman can only add a skill. It can't change or remove one.
+Skills from a marketplace don't say which websites they use, so Aman reads all of the skill's files first and lists the websites it found on the card. If the skill makes up web addresses while it runs, the card says so, and those websites stay blocked until you allow each one. Approving is all or nothing: **Allow** adds the skill and lets it reach exactly the websites on the card, and nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. From a chat, Aman can also remove a skill, and that card asks every time too. It can't change one.
 
-An incognito chat can't add a skill. A scheduled run can't add one either, because the tool isn't there.
+An incognito chat can't add or remove a skill. A scheduled run can't either, because the tools aren't there.
 
 ### Commands in the sandbox
 

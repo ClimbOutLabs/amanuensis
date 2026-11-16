@@ -15,24 +15,14 @@ import { realpathSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
-import type { CalendarWriteReview } from '../calendar/eventWrite';
-import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
+import { CALENDAR_SERVER_ID } from '../calendar/toolContract';
 import {
   CONNECTION_OFFER_SERVER_ID,
   CONNECTION_OFFER_STATUS_TOOL_NAME,
   RECORD_CONNECTION_OFFER_DECLINE_TOOL_NAME,
 } from '../connectors/connectionOfferContract';
-import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
-import type { DriveWriteReview } from '../drive/writeReview';
-import { checkCodeOf, hashDraft, type ReviewableDraft } from '../email/gmail/draftReview';
-import type { AnsweredMessage } from '../email/gmail/replyThread';
-import {
-  GMAIL_SERVER_ID,
-  isGmailReadToolName,
-  isGmailWriteToolName,
-  SEND_DRAFT_TOOL_NAME,
-  UPDATE_DRAFT_TOOL_NAME,
-} from '../email/gmail/toolContract';
+import { DRIVE_SERVER_ID } from '../drive/toolContract';
+import { GMAIL_SERVER_ID } from '../email/gmail/toolContract';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
 import {
   isMailDraftToolName,
@@ -43,7 +33,7 @@ import {
   MAIL_FORWARD_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
-import type { BrowserElementReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import type { DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import { isMemoryPagesReadToolName, isMemoryPagesToolName, MEMORY_PAGES_SERVER_ID } from '../memory/pagesToolContract';
 import {
   APPEND_TO_INBOX_TOOL_NAME,
@@ -68,7 +58,12 @@ import {
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import { isSkillWriteToolName, LIST_SKILLS_TOOL_NAME, SKILL_SERVER_ID } from '../skills/toolContract';
+import {
+  isSkillRemoveToolName,
+  isSkillWriteToolName,
+  LIST_SKILLS_TOOL_NAME,
+  SKILL_SERVER_ID,
+} from '../skills/toolContract';
 import {
   isSpaceReadToolName,
   isSpaceWriteToolName,
@@ -80,10 +75,8 @@ import { isRecord } from '../util/records';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
-  approvalTokenExpiry,
   normalizeCwd,
   toJsonSafeParams,
-  type ApprovalTokenScope,
   type ConnectorBinding,
   type ShellApprovalBinding,
 } from './approvalTokens';
@@ -103,12 +96,7 @@ import {
   MAIL_READ_REASON,
   MAIL_SEND_REASON,
 } from './connectorTrust';
-import {
-  classifyContextFor,
-  type SentinelCallIdentity,
-  type SentinelHostContext,
-  type SentinelServices,
-} from './context';
+import { classifyContextFor, type SentinelHostContext } from './context';
 import { escapeDisplayText } from './displayText';
 import {
   extractCardFields,
@@ -126,7 +114,7 @@ import {
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
 } from './mapsToolNames';
-import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { requiresNetwork } from './networkRequirements';
 import { classifyNotesFolderTool } from './notesTier';
 import {
   appendOutboundTrace,
@@ -163,7 +151,8 @@ import {
   withHoldSay,
 } from './searchHoldText';
 import { containsPathLikeValue, containsSecretPath, namesSecretPath } from './secretPaths';
-import { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
+import { DEMO_CONNECTOR_REFUSAL } from './sendAllowlist';
+import { externalServiceWhat, externalServiceWhatSpecific, namedSendWhat } from './sendWording';
 import {
   hashArgv,
   matchAllowlist,
@@ -197,7 +186,7 @@ import {
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
-import { mailboxText, type Tier3Mailbox } from './tierMailbox';
+import { type Tier3Mailbox } from './tierMailbox';
 import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,
@@ -226,145 +215,27 @@ import {
   SEARCH_STEERED_REASON,
   SILENT_SEARCH_LIMIT,
   type SearchAskReason,
-  type WebSearchTurnState,
 } from './webSearch';
 
-import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
 import { isSkillBlockedHost } from '../connectors/apiServices';
 import { MAIL_DRAFT_FIRST_DETAIL, mailDraftKey } from '../email/mailConnector/approvedDrafts';
-import { forwardedSubject, type MailForwardReview } from '../email/mailConnector/forwardReview';
+import { forwardedSubject } from '../email/mailConnector/forwardReview';
 import {
   HOME_ASSISTANT_SERVER_NAME,
   homeAssistantTarget,
   homeAssistantTargetLabel,
 } from '../homeassistant/toolContract';
 import { classifyCaldavTool } from './caldavTier';
-import {
-  calendarCardCopy,
-  emailCardCopy,
-  fileCardCopy,
-  joinLine,
-  paymentCardCopy,
-  sandboxCardCopy,
-  simpleCardCopy,
-} from './cardCopy';
+import { classifyCalendarTool } from './calendarTier';
+import { calendarCardCopy, fileCardCopy, joinLine, paymentCardCopy, sandboxCardCopy, simpleCardCopy } from './cardCopy';
+import { cardSubject, escapedMailbox, plainWhy } from './cardText';
+import { classifyDriveTool } from './driveTier';
+import { classifyGmailTool } from './gmailTier';
 import { classifyHomeAssistantTool } from './homeAssistantTier';
 import { SKILL_SITES_DATA_WARNING, SKILL_SITES_EMAIL_BLOCKED, skillSiteLabel } from './skillSitesCopy';
-
-export interface SentinelAction {
-  /** Original tool name (sandbox name or mcp server tool name). */
-  tool_name: string;
-  /** The exact arguments the server will act on. */
-  canonical_params: Record<string, unknown>;
-  /** 'truefoundry-system' for sandbox and other built-in tools, 'mcp' for MCP tools. */
-  tool_type: 'truefoundry-system' | 'mcp';
-  /** Sandbox command effect when the action ran through the sandbox effect layer. */
-  sandbox_effect?: string | undefined;
-  /** Connector serving an MCP tool; keys the user's standing tool grants. */
-  mcp_server_name?: string | undefined;
-  /** Connector's server id; with `mcp_server_host` it is bound into the approval token. */
-  mcp_server_id?: string | undefined;
-  /** Host of the connector's configured server URL, for the approval card. Never derived from tool arguments. */
-  mcp_server_host?: string | undefined;
-  /** What a standing grant on this connector binds to (see `ToolGrantKey`). Set by the host, never from tool arguments. */
-  mcp_grant_binding?: string | undefined;
-  /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
-  mcp_first_party?: boolean | undefined;
-  /** The CalDAV event a change names, read once before classifying. Set only for the CalDAV connector. */
-  caldav_event?: CaldavEventReview | null | undefined;
-  /** The message an Email forward sends on, read once before classifying. Set only for the Email connector. */
-  mail_forward?: MailForwardReview | null | undefined;
-  /** The user designated this connector as their search provider. Set by the host from the connector record only. */
-  mcp_search_provider?: boolean | undefined;
-  /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
-  mcp_search_tool?: boolean | undefined;
-  /** Top-level argument names the catalog declares as the designated provider's plumbing (session id, model name). Never from tool metadata. */
-  mcp_search_plumbing_fields?: readonly string[] | undefined;
-  mcp_hints: {
-    read_only_hint?: boolean | undefined;
-    destructive_hint?: boolean | undefined;
-    open_world_hint?: boolean | undefined;
-  };
-  /**
-   * Configured maps upstream hosts for the approval card destination. Set by the
-   * server-owned maps tool from server config, never from model params.
-   */
-  maps_hosts?: MapsHosts | undefined;
-  /**
-   * Host-derived folders the document reader may read without asking: the staged uploads
-   * directory and the bound project folder. Set by the documents tool set from the sandbox
-   * and the session binding, never from model params.
-   */
-  document_scope?: DocumentScope | undefined;
-  /**
-   * The message a Gmail write would send or save, as the host holds it. Set by the Gmail tool set from a live
-   * read and the validated call, so the card shows what would really go out.
-   */
-  mail_draft?: ReviewableDraft | undefined;
-  /** For a draft change: the saved draft it replaces, as Gmail holds it now. */
-  mail_replaces?: ReviewableDraft | undefined;
-  /** For a reply: the message in its own thread that it answers, read by the host from Gmail. */
-  mail_reply_in_thread?: AnsweredMessage | undefined;
-  /**
-   * The event a Calendar write would add or change, settled by the Calendar tool set from the validated call and,
-   * for a change, the event as Google holds it now, so the card shows what would really be written.
-   */
-  calendar_write?: CalendarWriteReview | undefined;
-  /**
-   * The Drive write a create or append would make, settled by the Drive tool set from the validated call and,
-   * for an append, the spreadsheet as Google holds it now, so the card shows what would really be written.
-   */
-  drive_write?: DriveWriteReview | undefined;
-  /** The schedule a create or delete would save or remove, settled by the schedule tool set from the store. */
-  schedule_write?: Tier3Schedule | undefined;
-  /** The persona a create would add, settled by the persona tool set from the request and the owner's personas. */
-  persona_write?: Tier3Persona | undefined;
-  /** The skill an install would add, settled by the skill tool set from the place the skill comes from. */
-  skill_install?: Tier3Skill | undefined;
-  /** The schedule a pause or resume would change, settled by the schedule tool set from the store. */
-  schedule_status?: ScheduleStatusReview | undefined;
-  /**
-   * The reminder a set or cancel call touches, settled by the schedule tool set: the activity line of a set and
-   * the card of a cancel read it, never the model's words.
-   */
-  reminder?: ReminderLine | undefined;
-  /**
-   * Context for the element a browser click, type or select acts on, read from the live page first:
-   * the site, its name and role, whether it submits a form, the form's values, and its address when it
-   * is a plain link. Set by the browser tool set from the sidecar's read, never from model params.
-   * Undefined when the host could not read it, which refuses the call before any card.
-   */
-  browser_element?: BrowserElementReview | undefined;
-}
-
-/** What a pause or resume card shows: which schedule, and when it runs, as the store holds it. */
-export interface ScheduleStatusReview {
-  action: 'pause' | 'resume';
-  name: string;
-  when: string;
-  time_zone: string;
-}
-
-/** What is shown about one reminder: when it is due in plain words, and what it says. */
-export interface ReminderLine {
-  when: string | null;
-  what: string | null;
-}
-
-export interface ClassifyContext extends SentinelCallIdentity {
-  services: SentinelServices;
-  /** Host state for the turn's silent web searches. */
-  web_search: WebSearchTurnState;
-  /** How this call's paths are resolved; set by the sandbox provider. Absent means the server's own filesystem. */
-  path_resolution?: PathResolution | undefined;
-  /** Reads file digests from a remote sandbox, so approvals can bind to file content there too. */
-  file_digest?: FileDigest | undefined;
-  /** Asks a remote sandbox whether a path is free, so a write that only creates a file can be told from an edit. */
-  path_missing?: PathMissing | undefined;
-  /** `none` when nothing run in the calling sandbox can reach a network; set by the sandbox provider. Absent means it may. */
-  sandbox_network?: 'none' | undefined;
-}
+import { approvalTokenOwner, demoRefusal, hasStandingScopeGrant, mintPlainToken, steeredSkipped } from './tierShared';
+import type { ClassifyContext, ScheduleStatusReview, SentinelAction } from './tierTypes';
 
 /** Longest place string the approval card shows; the tool schemas cap the same fields at this length. */
 const MAPS_CARD_PLACE_MAX_CHARS = 128;
@@ -495,20 +366,6 @@ function mapsPlainWhat(action: SentinelAction): string {
 function stringParam(params: Record<string, unknown>, key: string): string | null {
   const value = params[key];
   return typeof value === 'string' ? value : null;
-}
-
-function firstSentence(text: string): string {
-  const trimmed = text.trim();
-  const match = /^[^.!?\n]+[.!?]?/.exec(trimmed);
-  return (match !== null ? match[0] : trimmed).trim().slice(0, 280);
-}
-
-/** Null when the agent gave no reason, so the card shows no line instead of an empty one. */
-function plainWhy(agentIntent: string | null): string | null {
-  if (agentIntent === null || agentIntent.trim() === '') {
-    return null;
-  }
-  return firstSentence(agentIntent);
 }
 
 function workspaceScope(ctx: ClassifyContext): TrackedExecutableScope {
@@ -888,11 +745,6 @@ async function mintShellToken(input: { ctx: ClassifyContext; tool_name: string; 
     shell: binding,
   });
   return { token_id: token.token_id, binding };
-}
-
-/** Scope and expiry every approval token is minted with; dispatch redeems under the same identity. */
-function approvalTokenOwner(ctx: ClassifyContext): ApprovalTokenScope & { expires_at: string } {
-  return { tenant_id: ctx.tenant_id, created_by: ctx.created_by, expires_at: approvalTokenExpiry() };
 }
 
 /** Token and parsed binding that let dispatch re-verify an approved shell command. */
@@ -1557,24 +1409,6 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   });
 }
 
-async function mintPlainToken(input: {
-  ctx: ClassifyContext;
-  tool_name: string;
-  params: unknown;
-  connector?: ConnectorBinding | undefined;
-}): Promise<string> {
-  const token = await input.ctx.services.token_store.mint({
-    ...approvalTokenOwner(input.ctx),
-    action_id: actionIdFor({
-      tool_name: input.tool_name,
-      canonical_params: input.params,
-      connector: input.connector,
-    }),
-    canonical_params: input.params,
-  });
-  return token.token_id;
-}
-
 /** The connector an approval is bound to; only a call that came through a configured connector has one. */
 function connectorBindingFor(action: SentinelAction): ConnectorBinding | undefined {
   return action.mcp_server_id === undefined
@@ -1869,47 +1703,6 @@ function sendCardCopy(input: {
       ? paymentCardCopy({ amount: input.amount, recipient: input.recipient, destination: input.destination })
       : simpleCardCopy({ headline: input.plain_what, undo: input.undo, reason: null });
   return input.notice === null ? base : { ...base, consequence: joinLine([input.notice, base.consequence]) };
-}
-
-function externalServiceWhat(input: {
-  tool_name: string;
-  destination: string | null;
-  recipient: string | null;
-  amount: string | null;
-}): string {
-  const name = input.tool_name.toLowerCase();
-  const where = input.recipient ?? input.destination ?? 'an external destination';
-  if (name.includes('email') || name.includes('mail')) {
-    if (name.includes('draft')) {
-      return `Save an email draft for ${where}?`;
-    }
-    if (name.includes('forward')) {
-      return `Forward an email to ${where}?`;
-    }
-    if (name.includes('reply')) {
-      return `Reply to an email, sending it to ${where}?`;
-    }
-    return `Send an email to ${where}?`;
-  }
-  if (name.includes('sms') || name.includes('message') || name.includes('notify')) {
-    return `Send a message to ${where}?`;
-  }
-  if (name.includes('post') || name.includes('publish') || name.includes('tweet')) {
-    return `Publish a post${input.destination === null ? '' : ` to ${input.destination}`}?`;
-  }
-  if (name.includes('share') || name.includes('webhook')) {
-    return `Share data with ${where}?`;
-  }
-  if (
-    name.includes('pay') ||
-    name.includes('spend') ||
-    name.includes('charge') ||
-    name.includes('transfer') ||
-    name.includes('invoice')
-  ) {
-    return `Spend ${input.amount ?? 'money'}${input.destination === null ? '' : ` via ${input.destination}`}?`;
-  }
-  return `Perform an external action affecting ${where}?`;
 }
 
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
@@ -2260,17 +2053,6 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
   });
 }
 
-/** A held call that is skipped rather than asked, for a scheduled run with nobody to answer. */
-function steeredSkipped(ctx: ClassifyContext): TierDecision {
-  const assistant = ctx.web_search.assistantName;
-  return autoDenyDecision({
-    reason: 'steered_by_content',
-    reason_detail: `A link or address in something ${assistant} read chose this, not you.`,
-    owner_message: `One step was skipped, because something ${assistant} read asked for it, not you.`,
-    sensitive_read: false,
-  });
-}
-
 /** A link that adds details to a site only the assistant's own reply named, skipped in a scheduled run. */
 function replyLinkSkipped(ctx: ClassifyContext): TierDecision {
   const assistant = ctx.web_search.assistantName;
@@ -2423,144 +2205,6 @@ function mapsSilentDecision(input: {
     reason_detail: `Maps ran without asking: ${values.join(', ')}`,
     sensitive_read: false,
   });
-}
-
-/** Said on a card when a recipient's name was left off because it looked like an address. */
-const NAME_LEFT_OFF_LINE = ' The name was left off this address because it looked like an address.';
-
-/** Most characters of subject the card shows inside its sentence. */
-const GMAIL_CARD_SUBJECT_MAX_CHARS = 80;
-
-/** One recipient as `Name (address)`, or the bare address when it has no name, so the address is always shown. */
-/** Already-escaped items in a sentence: `A, B and C`. */
-function joinSentence(shown: readonly string[]): string {
-  if (shown.length <= 1) {
-    return shown.join('');
-  }
-  return `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1] ?? ''}`;
-}
-
-function displayList(addresses: readonly string[]): string {
-  return joinSentence(addresses.map(address => escapeDisplayText(address)));
-}
-
-function recipientList(recipients: readonly Tier3Mailbox[]): string {
-  return joinSentence(recipients.map(mailbox => mailboxText(mailbox, { escape: escapeDisplayText })));
-}
-
-/** A recipient for the structured email block: its name and address, each escaped as the card escapes text. */
-function escapedMailbox(mailbox: Tier3Mailbox): Tier3Mailbox {
-  return { name: escapeDisplayText(mailbox.name), address: escapeDisplayText(mailbox.address) };
-}
-
-/** The message as a card shows it. The send receipt shows this same text, so both read it from here. */
-export function messageForDisplay(content: ReviewableDraft) {
-  return {
-    to: content.to.map(escapedMailbox),
-    cc: content.cc.map(escapedMailbox),
-    bcc: content.bcc.map(escapedMailbox),
-    subject: escapeDisplayText(content.subject),
-    body: escapeDisplayText(content.body, { keepNewlines: true }),
-    reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
-  };
-}
-
-function cardText(text: string): string {
-  const chars = Array.from(escapeDisplayText(text));
-  return chars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
-    ? `${chars.slice(0, GMAIL_CARD_SUBJECT_MAX_CHARS - 1).join('')}…`
-    : chars.join('');
-}
-
-function cardSubject(subject: string): string {
-  return `"${cardText(subject).replace(/"/g, '\\"')}"`;
-}
-
-/**
- * The approval card for a Gmail write, built from the message as the host holds it (the draft Gmail stores
- * for a send, the content the call will write for a draft), never from model prose. The whole message is on
- * the card, uncut, so what is approved is everything that is sent. Null when the message was not supplied.
- */
-function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | null }): Tier3Card | null {
-  const { action } = input;
-  const content = action.mail_draft;
-  if (content === undefined) {
-    return null;
-  }
-  const kind =
-    action.tool_name === SEND_DRAFT_TOOL_NAME
-      ? 'send'
-      : action.tool_name === UPDATE_DRAFT_TOOL_NAME
-        ? 'change'
-        : 'save';
-  const parts = [
-    `to ${recipientList(content.to) === '' ? 'no one' : recipientList(content.to)}`,
-    ...(content.cc.length > 0 ? [`Copy: ${recipientList(content.cc)}`] : []),
-    ...(content.bcc.length > 0 ? [`Hidden copy: ${recipientList(content.bcc)}`] : []),
-    ...(content.replyTo === null ? [] : [`Replies go to: ${escapeDisplayText(content.replyTo)}`]),
-  ];
-  const subject = cardSubject(content.subject);
-  const replaces = action.mail_replaces;
-  const recipientsLine = [
-    ...parts,
-    ...(content.fromName === ''
-      ? []
-      : [`Sent as "${escapeDisplayText(content.fromName).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`]),
-  ].join('. ');
-  const answered = action.mail_reply_in_thread;
-  const threadLine =
-    answered === undefined
-      ? ''
-      : ` Reply in the thread: ${cardSubject(answered.subject)}, from ${cardText(answered.from)}.`;
-  const plainWhat =
-    (kind === 'send'
-      ? `Send ${subject} from your Gmail ${recipientsLine}?`
-      : kind === 'change'
-        ? `Change a saved draft in your Gmail? It replaces ${replaces === undefined ? 'the saved draft' : `${cardSubject(replaces.subject)} to ${recipientList(replaces.to) === '' ? 'no one' : recipientList(replaces.to)}`} with ${subject} ${recipientsLine}. It is not sent.`
-        : `Save a draft ${subject} in your Gmail ${recipientsLine}? It is not sent.`) +
-    threadLine +
-    (content.nameLeftOff || replaces?.nameLeftOff === true ? NAME_LEFT_OFF_LINE : '');
-  const email: Tier3Email = {
-    action: kind,
-    ...messageForDisplay(content),
-    from_name: content.fromName === '' ? null : escapeDisplayText(content.fromName),
-    name_left_off: content.nameLeftOff || replaces?.nameLeftOff === true,
-    check_code: kind === 'send' ? checkCodeOf(hashDraft(content)) : null,
-    replaces:
-      replaces === undefined
-        ? null
-        : {
-            subject: escapeDisplayText(replaces.subject),
-            to: replaces.to.map(escapedMailbox),
-          },
-    reply_in_thread:
-      answered === undefined
-        ? null
-        : { subject: escapeDisplayText(answered.subject), from: escapeDisplayText(answered.from) },
-  };
-  return {
-    plain_what: plainWhat,
-    copy: emailCardCopy(email),
-    // A send reaches other people and cannot be unsent, so its safe choice comes first; a draft does not.
-    safe_choice: kind === 'send',
-    destructive: kind === 'send',
-    plain_why: plainWhy(input.agent_intent),
-    cannot_be_undone: kind === 'send' ? "Once this is sent, it can't be unsent." : null,
-    why_asked_again: null,
-    destination: null,
-    recipient: null,
-    amount: null,
-    parsed_command: null,
-    outbound_text: null,
-    destination_host: null,
-    email,
-    // The draft was checked to send from the connected account, so the card names that account.
-    mail_from: escapeDisplayText(content.fromAddress),
-  };
-}
-
-function demoRefusal(reason_detail: string): TierDecision {
-  return autoDenyDecision({ reason: 'outbound_guard', reason_detail, sensitive_read: false });
 }
 
 /** What a mail card needs to know about the account it goes from. */
@@ -2803,175 +2447,6 @@ function classifyConnectionOfferTool(action: SentinelAction): TierDecision {
 }
 
 /**
- * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
- * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
- */
-async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
-  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
-    return autoDenyDecision({
-      reason: 'offline_mode',
-      reason_detail: 'Gmail needs network access, which is disabled while offline.',
-      sensitive_read: false,
-    });
-  }
-  if (isGmailReadToolName(action.tool_name)) {
-    return tier1Decision({
-      reason: 'gmail_read',
-      reason_detail: 'Read your email.',
-      sensitive_read: true,
-    });
-  }
-  if (!isGmailWriteToolName(action.tool_name)) {
-    return failClosedDecision({ reason_detail: 'Unknown Gmail tool.' });
-  }
-  if (ctx.services.unattended) {
-    return autoDenyDecision({
-      reason: 'unattended_run',
-      reason_detail: 'Scheduled runs can read your email but never draft or send it.',
-      sensitive_read: false,
-    });
-  }
-  const draft = action.mail_draft;
-  if (
-    action.tool_name === SEND_DRAFT_TOOL_NAME &&
-    ctx.services.demoSendAllowlist !== null &&
-    (draft === undefined ||
-      !recipientsAllowed({
-        allowlist: ctx.services.demoSendAllowlist,
-        recipients: [...draft.to, ...draft.cc, ...draft.bcc].map(mailbox => mailbox.address),
-      }))
-  ) {
-    return demoRefusal(DEMO_SEND_REFUSAL);
-  }
-  const card = gmailWriteCard({ action, agent_intent: ctx.agent_intent });
-  if (card === null) {
-    return autoDenyDecision({
-      reason: 'destination_unverifiable',
-      reason_detail: 'The message could not be loaded to show you, so it was not offered.',
-      sensitive_read: false,
-    });
-  }
-  const isSend = action.tool_name === SEND_DRAFT_TOOL_NAME;
-  return tier3Decision({
-    card,
-    reason: isSend ? 'gmail_send' : 'gmail_draft',
-    reason_detail: isSend ? 'Sending email always asks.' : 'Saving a draft always asks.',
-    sensitive_read: false,
-    standing_grant_barred: true,
-    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
-  });
-}
-
-/**
- * The approval card for a Calendar write, built from the request the host will send, never from model prose.
- * Every guest is listed, and whether Google emails them is said in words.
- */
-function calendarWriteCard(input: {
-  review: CalendarWriteReview;
-  agent_intent: string | null;
-  assistant: string;
-}): Tier3Card {
-  const { review, assistant } = input;
-  const show = (text: string) => escapeDisplayText(text);
-  const title = cardSubject(review.title);
-  const guests = displayList(review.attendees);
-  const guestLine =
-    review.attendees.length === 0
-      ? ''
-      : review.guests_emailed
-        ? ` Google emails ${guests} about it.`
-        : ` Guests: ${guests}. Google does not email them.`;
-  // An event that runs over more than one day is often a broken end date, so the card asks.
-  const spanWarning =
-    review.span_days > 1 ? ` This event runs over ${String(review.span_days)} days. Is that right?` : '';
-  // The same event was already created in this chat in the last few minutes: the card says so.
-  const duplicateLead = review.action === 'create' && review.already_created ? 'You already have this event.' : '';
-  const headline =
-    review.action === 'create'
-      ? `Add ${title} to your Google Calendar on ${show(review.short_when)} (${show(review.time_zone)})?`
-      : `Change ${review.before === null ? 'an event' : cardSubject(review.before.title)}${review.one_of_repeating ? ' (this one event of a repeating series)' : ''} in your Google Calendar to ${title} on ${show(review.short_when)} (${show(review.time_zone)})?`;
-  // The facts that follow from approving, in order: a duplicate warning, who gets emailed, a span warning.
-  const emailed =
-    [duplicateLead.trim(), guestLine.trim(), spanWarning.trim()].filter(part => part !== '').join(' ') || null;
-  // Says why a guest change asks every time: neither a standing nor a chat-wide answer covers it.
-  const alwaysAsks =
-    review.attendees.length === 0
-      ? null
-      : review.action === 'create'
-        ? `This change sends an invitation to other people, so ${assistant} always asks.`
-        : `This change reaches the other people invited to this event, so ${assistant} always asks.`;
-  const undo = review.guests_emailed ? "Google emails the guests right away. That email can't be unsent." : null;
-  return {
-    plain_what: emailed === null ? headline : `${headline} ${emailed}`,
-    copy: calendarCardCopy({ headline, emailed, undo, reason: alwaysAsks }),
-    // A change that reaches guests puts the safe choice first; one on the person's own calendar does not.
-    safe_choice: review.attendees.length > 0,
-    destructive: false,
-    plain_why: plainWhy(input.agent_intent),
-    cannot_be_undone: undo,
-    why_asked_again: null,
-    destination: null,
-    recipient: null,
-    amount: null,
-    parsed_command: null,
-    outbound_text: null,
-    destination_host: null,
-    calendar_event: {
-      action: review.action,
-      calendar: show(review.calendar),
-      title: show(review.title),
-      when: show(review.short_when),
-      time_zone: show(review.time_zone),
-      duration: show(review.duration),
-      location: show(review.location),
-      description: escapeDisplayText(review.description, { keepNewlines: true }),
-      attendees: review.attendees.map(show),
-      guests_line: show(review.guests_line),
-      one_of_repeating: review.one_of_repeating,
-      already_created: review.action === 'create' && review.already_created,
-      span_days: review.span_days,
-      before:
-        review.before === null
-          ? null
-          : {
-              title: show(review.before.title),
-              when: show(review.before.short_when),
-              duration: show(review.before.duration),
-              location: show(review.before.location),
-            },
-    },
-  };
-}
-
-/** Whether an "Always allow" grant covers this call's tool, looked up as a connector call's grant is. */
-function hasStandingToolGrant(ctx: ClassifyContext, action: SentinelAction): Promise<boolean> {
-  if (action.mcp_server_name === undefined) {
-    return Promise.resolve(false);
-  }
-  return ctx.services.tool_grants.hasToolGrant({
-    tenant_id: ctx.tenant_id,
-    created_by: ctx.created_by,
-    mcp_server_name: action.mcp_server_name,
-    tool_name: action.tool_name,
-    connector_binding: action.mcp_grant_binding ?? null,
-  });
-}
-
-/** Whether a standing grant is stored under a scope key instead of the tool's own name (a Home Assistant domain). */
-function hasStandingScopeGrant(ctx: ClassifyContext, action: SentinelAction, scope_key: string): Promise<boolean> {
-  if (action.mcp_server_name === undefined) {
-    return Promise.resolve(false);
-  }
-  return ctx.services.tool_grants.hasToolGrant({
-    tenant_id: ctx.tenant_id,
-    created_by: ctx.created_by,
-    mcp_server_name: action.mcp_server_name,
-    tool_name: scope_key,
-    connector_binding: action.mcp_grant_binding ?? null,
-  });
-}
-
-/**
  * Whether read content chose a Home Assistant change's target: the entity it names, or any address
  * or link among its arguments, appears only in what the assistant read. Judged with the same
  * provenance record that guards sends.
@@ -3004,195 +2479,6 @@ function homeAssistantSteered(input: { action: SentinelAction; ctx: ClassifyCont
   return (
     steeredDestinations({ provenance: ctx.web_search.provenance, addresses: [], values, reply_sender: null }).length > 0
   );
-}
-
-/**
- * Calendar tools are the host's own, named by server. A read is silent but flagged as sensitive (so a session that
- * read the calendar can no longer search silently). A write always asks with the event in full; in a scheduled run
- * that ask is held for the owner's OK instead of running. Any other name fails closed.
- */
-async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
-  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
-    return autoDenyDecision({
-      reason: 'offline_mode',
-      reason_detail: 'Google Calendar needs network access, which is disabled while offline.',
-      sensitive_read: false,
-    });
-  }
-  if (isCalendarWriteToolName(action.tool_name)) {
-    if (action.calendar_write === undefined) {
-      return autoDenyDecision({
-        reason: 'destination_unverifiable',
-        reason_detail: 'The event could not be loaded to show you, so it was not offered.',
-        sensitive_read: false,
-      });
-    }
-    const review = action.calendar_write;
-    // A guest is reached even without an email (Google adds invites to their calendar), so on a demo every guest
-    // must be on the send list. An event with no guests reaches no one.
-    if (
-      review.attendees.length > 0 &&
-      !recipientsAllowed({ allowlist: ctx.services.demoSendAllowlist, recipients: review.attendees })
-    ) {
-      return demoRefusal(DEMO_SEND_REFUSAL);
-    }
-    if (review.incomplete_reason !== null) {
-      return autoDenyDecision({
-        reason: 'incomplete_send_card',
-        reason_detail: review.incomplete_reason,
-        owner_message: 'Nothing was saved: the guests would get something the card could not show you.',
-        sensitive_read: false,
-      });
-    }
-    // Guests who are emailed get the event text, so it is a send and passes the same secret guard.
-    if (review.guests_emailed) {
-      const verdict = checkOutboundStrings({
-        strings: { values: [review.title, review.description, review.location], scalars: [], keys: [], plumbing: [] },
-        secrets: await ctx.services.outboundSecrets({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }),
-      });
-      if (!verdict.ok) {
-        return autoDenyDecision({
-          reason: 'outbound_guard',
-          reason_detail: `The event would be emailed to its guests, and ${describeOutboundRule(verdict.rule)}.`,
-          sensitive_read: false,
-        });
-      }
-    }
-    const reachesGuests = review.attendees.length > 0;
-    return tier3Decision({
-      card: calendarWriteCard({ review, agent_intent: ctx.agent_intent, assistant: ctx.web_search.assistantName }),
-      reason: reachesGuests ? 'calendar_write_guests' : 'calendar_write',
-      reason_detail: reachesGuests
-        ? 'A calendar change that reaches guests always asks.'
-        : 'Adding or changing an event on your own calendar asks.',
-      sensitive_read: false,
-      standing_grant_barred: reachesGuests,
-      own_calendar_change: !reachesGuests,
-      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
-    });
-  }
-  if (!isCalendarReadToolName(action.tool_name)) {
-    return failClosedDecision({ reason_detail: 'Unknown calendar tool.' });
-  }
-  return tier1Decision({
-    reason: 'calendar_read',
-    reason_detail: 'Read your calendar.',
-    sensitive_read: true,
-  });
-}
-
-/**
- * The approval card for a Drive write, built from the write the host will really make, never from model
- * prose: a create shows its whole text, an append shows every row.
- */
-function driveWriteCard(input: { review: DriveWriteReview; agent_intent: string | null }): Tier3Card {
-  const { review } = input;
-  const base = {
-    plain_why: plainWhy(input.agent_intent),
-    cannot_be_undone: null,
-    why_asked_again: null,
-    destination: null,
-    recipient: null,
-    amount: null,
-    parsed_command: null,
-    destination_host: null,
-  };
-  if (review.action === 'create_doc') {
-    const headline = `Create a Google Doc named ${cardSubject(review.file_name)} in your Google Drive?`;
-    return {
-      ...base,
-      plain_what: `${headline}${review.text === '' ? ' It starts empty.' : ''}`,
-      copy: simpleCardCopy({ headline, undo: null, reason: null }),
-      outbound_text: review.text === '' ? null : escapeDisplayText(review.text, { keepNewlines: true }),
-    };
-  }
-  const rows = review.rows.map(row => row.map(cell => escapeDisplayText(cell)).join(', ')).join('\n');
-  const sharing =
-    review.shared_with === null
-      ? ' This file is shared with other people.'
-      : review.shared_with > 0
-        ? ` This file is shared with ${String(review.shared_with)} ${review.shared_with === 1 ? 'person' : 'people'}.`
-        : '';
-  const headline = `Add ${String(review.rows.length)} ${review.rows.length === 1 ? 'row' : 'rows'} to the tab "${escapeDisplayText(review.sheet_name ?? '')}" of the Google Sheet ${cardSubject(review.file_name)}?`;
-  return {
-    ...base,
-    plain_what: `${headline}${sharing}`,
-    copy: simpleCardCopy({ headline, undo: null, reason: null }),
-    outbound_text: rows,
-  };
-}
-
-/**
- * Drive tools are the host's own, named by server so a connector's tool of the same name never takes this
- * path. Reads are silent but flagged as sensitive, as Gmail's are. A write asks with the whole write on the
- * card, unless a standing grant covers the tool; any other name fails closed. Once the chat has read content
- * that is not the person's own words, a write may have been asked for by that content rather than by the
- * person, so it asks first with the steering line on the card, no grant covers it, and a run with nobody
- * to answer skips it, the same way a steered notes write does.
- */
-async function classifyDriveTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
-  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
-    return autoDenyDecision({
-      reason: 'offline_mode',
-      reason_detail: 'Google Drive needs network access, which is disabled while offline.',
-      sensitive_read: false,
-    });
-  }
-  if (isDriveReadToolName(action.tool_name)) {
-    return tier1Decision({
-      reason: 'google_drive_read',
-      reason_detail: 'Read your Google Drive files.',
-      sensitive_read: true,
-    });
-  }
-  if (!isDriveWriteToolName(action.tool_name)) {
-    return failClosedDecision({ reason_detail: 'Unknown Drive tool.' });
-  }
-  const review = action.drive_write;
-  if (review === undefined) {
-    return autoDenyDecision({
-      reason: 'destination_unverifiable',
-      reason_detail: 'The change could not be loaded to show you, so it was not offered.',
-      sensitive_read: false,
-    });
-  }
-  if (hasReadContent(ctx.web_search.provenance)) {
-    if (ctx.services.unattended) {
-      return steeredSkipped(ctx);
-    }
-    const assistant = ctx.web_search.assistantName;
-    const say =
-      `${assistant} has read things written by other people in this chat, so this write may have been ` +
-      `asked for by something it read, not by you.`;
-    const card = driveWriteCard({ review, agent_intent: ctx.agent_intent });
-    return tier3Decision({
-      card: {
-        ...card,
-        plain_what: withHoldSay(card.plain_what, say),
-        copy: card.copy === null ? null : { ...card.copy, reason: say },
-      },
-      reason: CONTENT_STEERED_REASON,
-      reason_detail: say,
-      sensitive_read: false,
-      standing_grant_barred: true,
-      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
-    });
-  }
-  if (await hasStandingToolGrant(ctx, action)) {
-    return tier1Decision({
-      reason: TOOL_GRANT_REASON,
-      reason_detail: `Always allowed: \`${action.tool_name}\` on your Google Drive.`,
-      sensitive_read: false,
-    });
-  }
-  return tier3Decision({
-    card: driveWriteCard({ review, agent_intent: ctx.agent_intent }),
-    reason: 'google_drive_write',
-    reason_detail: 'Creating a Doc or adding rows to a Sheet always asks.',
-    sensitive_read: false,
-    own_drive_write: true,
-    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
-  });
 }
 
 /** The approval card for creating or deleting a schedule, built from what the host will save or remove. */
@@ -3355,12 +2641,15 @@ function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_
 }
 
 /**
- * Adding a skill always asks, with where it comes from and the exact version. Reading the list runs without
- * asking. Any other skill tool name fails closed.
+ * Adding a skill always asks, with where it comes from and the exact version, and removing one always asks too.
+ * Reading the list runs without asking. Any other skill tool name fails closed.
  */
 async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (action.tool_name === LIST_SKILLS_TOOL_NAME) {
     return tier1Decision({ reason: 'skill_read', reason_detail: 'Read your skills.', sensitive_read: false });
+  }
+  if (isSkillRemoveToolName(action.tool_name)) {
+    return classifySkillRemove(action, ctx);
   }
   if (!isSkillWriteToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown skill tool.' });
@@ -3380,6 +2669,37 @@ async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): 
     }),
     reason: 'skill_install',
     reason_detail: 'Adding a skill always asks.',
+    sensitive_read: false,
+    standing_grant_barred: true,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
+/**
+ * Removing a skill always asks, naming the skill and the websites it loses. A skill the host could not find is
+ * never offered.
+ */
+async function classifySkillRemove(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const review = action.skill_remove;
+  if (review === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The skill could not be found, so removing it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  const websites =
+    review.websites.length === 0
+      ? ''
+      : ` It will no longer reach ${review.websites.map(site => escapeDisplayText(site)).join(', ')}.`;
+  return tier3Decision({
+    card: sentenceCard({
+      plain_what: `Remove the skill ${cardSubject(review.name)}? It is taken out of every chat.${websites}`,
+      cannot_be_undone: 'To use it again, you add it again and approve its websites again.',
+      agent_intent: ctx.agent_intent,
+    }),
+    reason: 'skill_remove',
+    reason_detail: 'Removing a skill always asks.',
     sensitive_read: false,
     standing_grant_barred: true,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
@@ -3749,13 +3069,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // Offline: network-required tools are filtered from the list; a stale call
   // that slips through is auto-denied here.
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  // The tool declares itself read-only and closed-world: it says it does not reach outside its own service.
+  const declaredReadOnlyClosedWorld =
+    action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false;
   const extraction = extractCardFields({
     tool_name: action.tool_name,
     canonical_params: await cardArguments(action, ctx),
     tool_type: action.tool_type,
     server_host: action.mcp_server_host,
     server_name: action.mcp_server_name,
-    read_only_closed_world: action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false,
+    read_only_closed_world: declaredReadOnlyClosedWorld,
     host_mail_draft: isHostMailDraft(action),
   });
   // A card for the host's own Email sidecar never shows the sidecar's endpoint as a destination: the recipient is.
@@ -3777,8 +3100,23 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   ) {
     return incognitoRefusal();
   }
-  // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
-  const namedSend = extraction.external_service && !extraction.connector_read;
+  // Name-ranked Tier 3 classes, judged on the name alone: destructive, install.
+  const isDestructive = DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment));
+  const isInstall = INSTALL_FRAGMENTS.some(fragment => name.includes(fragment));
+  // A read is not a send by what it carries, so it is not carded as an external-service send; its annotations still decide.
+  // A connector calendar change keeps its own card below, so it is never reworded as a send either, and a call a
+  // connector family claims as its own send keeps that family's reason: the external-service class is for the rest.
+  // A tool declared read-only and closed-world whose name ranks it destructive or install keeps that rank: its
+  // declaration says it does not reach out, so what its arguments carry does not promote it into a send.
+  const namedSend =
+    extraction.external_service &&
+    !extraction.connector_read &&
+    !extraction.family_send &&
+    !isCalendarChangeToolName(action.tool_name) &&
+    !(declaredReadOnlyClosedWorld && (isDestructive || isInstall));
+  // The same carried send, for wording only: a hint-escalated family send still gets the send sentence.
+  const carriedSend =
+    extraction.external_service && !extraction.connector_read && !isCalendarChangeToolName(action.tool_name);
   // A connector read is private data, so a search in the same chat asks afterwards.
   const readsPrivateData = extraction.connector_read || containsSecretPath(action.canonical_params);
   // Any argument with a path shape is a private read whatever its name, so it never gets a grant.
@@ -3801,7 +3139,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         sensitive_read: false,
       });
     }
-    if (requiresNetwork({ tool_name: action.tool_name, provenance: provenanceForToolType(action.tool_type) })) {
+    if (requiresNetwork({ declared: action.requires_network })) {
       return autoDenyDecision({
         reason: 'offline_mode',
         reason_detail: 'This tool needs network access, which is disabled while offline.',
@@ -4014,16 +3352,32 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   const destructiveHint = action.mcp_hints.destructive_hint === true;
   const openWorldHint = action.mcp_hints.open_world_hint === true;
   const readOnlyHint = action.mcp_hints.read_only_hint === true;
+  // A call no connector family claims, which carries words or an id and shows no destination the
+  // card can verify, is a send to an unseen place: refused, and an open-world hint never turns that
+  // into a card. A tool declared read-only is not a send, so it keeps its card; what it carries out
+  // is the outbound guard's to check. A destructive hint alone, or a name ranked destructive,
+  // install or calendar change, keeps its own card below, which shows the arguments in full.
+  if (
+    extraction.payload_unverifiable &&
+    !readOnlyHint &&
+    !(destructiveHint && !openWorldHint) &&
+    !isDestructive &&
+    !isInstall &&
+    !isCalendarChangeToolName(action.tool_name)
+  ) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail:
+        'A connector call that carries words or an id and shows no verifiable destination is never carded.',
+      sensitive_read: false,
+    });
+  }
+
   if (destructiveHint || (openWorldHint && !readOnlyHint)) {
     const { fields } = extraction;
     // The external-service sentence wins: it is the more specific warning about where this goes.
-    const plain_what = namedSend
-      ? externalServiceWhat({
-          tool_name: action.tool_name,
-          destination: fields.destination,
-          recipient: fields.recipient,
-          amount: fields.amount,
-        })
+    const plain_what = carriedSend
+      ? namedSendWhat({ tool_name: action.tool_name, extraction })
       : destructiveHint || extraction.connector_what === null
         ? destructiveHint
           ? 'Run this action, even though it might change or delete something for good?'
@@ -4076,18 +3430,11 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // Name-based Tier 3 classes: external-service (non-fallback), destructive, install.
-  const isDestructive = DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment));
-  const isInstall = INSTALL_FRAGMENTS.some(fragment => name.includes(fragment));
+  // Name-based Tier 3 classes: external-service (non-fallback), destructive, install (computed above).
   if (namedSend || isDestructive || isInstall) {
     const { fields } = extraction;
     const what = namedSend
-      ? externalServiceWhat({
-          tool_name: action.tool_name,
-          destination: fields.destination,
-          recipient: fields.recipient,
-          amount: fields.amount,
-        })
+      ? namedSendWhat({ tool_name: action.tool_name, extraction })
       : isInstall
         ? 'Install software or dependencies?'
         : `Delete or remove ${fields.destination ?? fields.recipient ?? 'data'}?`;
@@ -4371,6 +3718,15 @@ function connectorApprovalCard(input: {
   const hostCalendarRead = isHostCalendarRead(action);
   const plain_what =
     spaceToolLine(action) ??
+    // A send the tool's name names gets that sentence even on the family card, as it did on the send card.
+    (extraction.sends
+      ? externalServiceWhatSpecific({
+          tool_name: action.tool_name,
+          destination: fields.destination,
+          recipient: fields.recipient,
+          amount: fields.amount,
+        })
+      : null) ??
     extraction.connector_what ??
     (hostCalendarRead
       ? 'Allow looking at your calendar?'

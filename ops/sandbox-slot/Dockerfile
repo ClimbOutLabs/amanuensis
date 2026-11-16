@@ -42,7 +42,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # apt packages come from the Ubuntu archive at build time, verified by apt's signatures; only the base image is pinned.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      bash coreutils findutils grep sed gawk diffutils patch tar gzip unzip zip \
+      bash coreutils findutils grep sed gawk diffutils patch tar gzip unzip zip curl jq ca-certificates \
       git python3 python3-pip python3-venv gcc g++ make libc6-dev \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/info /usr/share/locale /var/cache/* /var/log/*
@@ -68,10 +68,12 @@ RUN pip install --no-cache-dir --break-system-packages --no-deps --require-hashe
  && npm cache clean --force \
  && rm -rf /tmp/* /root/.npm /root/.cache
 
-# Run every test and check tool once, so a broken install fails this build instead of a later session.
+# Run every test, check and fetch tool once, so a broken install fails this build instead of a later session.
 # These are only the image copies on /usr/local/bin: a project's own pinned tools, in its node_modules/.bin
 # or its Python environment, are what its test commands resolve first, and nothing here changes that.
 RUN pytest --version \
+ && curl --version \
+ && jq --version \
  && python3 -c "import requests, yaml, httpx, bs4" \
  && ruff --version \
  && mypy --version \

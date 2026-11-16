@@ -3,12 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
-import {
-  classifyHostToolCall,
-  classifyTier,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { classifyHostToolCall, classifyTier } from '../../../src/core/permissions/classifier';
 import { FIRST_PARTY_TOOL_REASON, isStandingTrustDecision } from '../../../src/core/permissions/connectorTrust';
 import {
   createSentinelHostContext,
@@ -20,6 +15,7 @@ import {
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { seedShellAllowlist, type ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier2ActionKind } from '../../../src/core/permissions/tier';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { TOOL_GRANT_REASON, type ToolGrantKey, type ToolGrantStore } from '../../../src/core/permissions/toolGrants';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';

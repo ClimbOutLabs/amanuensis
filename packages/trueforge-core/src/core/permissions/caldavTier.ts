@@ -6,7 +6,6 @@ import {
   type CaldavToolName,
 } from '../calendar/caldav/toolContract';
 import { calendarCardCopy } from './cardCopy';
-import type { SentinelAction } from './classifier';
 import { CALDAV_PRIVATE_READ_REASON } from './connectorTrust';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments } from './extractorRegistry';
@@ -18,6 +17,7 @@ import {
   type Tier3Card,
   type TierDecision,
 } from './tier';
+import type { SentinelAction } from './tierTypes';
 
 /**
  * Tier rules for the CalDAV connector. Only the mounted connector, marked first-party, gets them.

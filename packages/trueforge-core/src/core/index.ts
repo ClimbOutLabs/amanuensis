@@ -536,7 +536,6 @@ export {
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './permissions/classifier';
-export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './permissions/classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
@@ -604,6 +603,7 @@ export type {
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';
+export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './permissions/tierTypes';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
 export {
   PAGE_PICTURES_LABEL,
@@ -613,14 +613,9 @@ export {
   pageImageUrls,
 } from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
-export {
-  FETCHED_PAGE_TEXT_MAX_CHARS,
-  FetchedPageStore,
-  fetchedPages,
-  isPageReaderTool,
-  isSearchResultTool,
-  recordFetchedPages,
-} from './search/fetchedPages';
+export { FETCHED_PAGE_TEXT_MAX_CHARS, FetchedPageStore, fetchedPages, recordFetchedPages } from './search/fetchedPages';
 export type { FetchedPageScope } from './search/fetchedPages';
 export { groundPlace, isInCalendar, normalizedWords } from './search/groundPlace';
 export type { GroundedPlace, PlaceClaim } from './search/groundPlace';
+export { declaredSearchProviderTools } from './search/searchProviderTools';
+export type { SearchProviderToolDeclaration } from './search/searchProviderTools';

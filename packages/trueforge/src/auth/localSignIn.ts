@@ -8,7 +8,8 @@ export const LOCAL_PASSWORDS_DO_NOT_MATCH_MESSAGE = 'The two passwords do not ma
 export const LOCAL_EMAIL_SHAPE_MESSAGE = 'That does not look like an email address. Check it and try again.';
 export const LOCAL_PASSWORD_TOO_SHORT_MESSAGE = 'Use at least 8 characters for the password.';
 export const LOCAL_SIGN_IN_EXISTS_MESSAGE = 'Your sign-in is already set up. Sign in instead.';
-export const LOCAL_NO_SIGN_IN_MESSAGE = 'No sign-in is set up yet. Create yours first.';
+export const LOCAL_NO_SIGN_IN_MESSAGE =
+  'No sign-in is set up yet. Create yours first: run npx amanuensis --create-account on this computer.';
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
