@@ -20,7 +20,12 @@ import { SkillNetworkGateway } from '../../../src/sandbox/skillnet/skillNetworkG
 import { skillNetworkTokens } from '../../../src/sandbox/skillnet/skillNetworkTokens';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
-import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import {
+  MODEL_FQN,
+  SCRIPTED_PROVIDER_KEY,
+  startApprovalTestServer,
+  type ApprovalTestServer,
+} from '../../fixtures/approvalTestServer';
 import { HARBOUR_ADDRESS, installRecordedTavily } from '../../fixtures/groundedFinderFixtures';
 import {
   HA_CALL_ACTION_TOOL,
@@ -1197,6 +1202,18 @@ describe('a connector read the person always allows', () => {
       expect(held.map(card => card.tier3_card?.plain_what)).toEqual([
         expect.stringContaining(`Look this up on ${INERT_SERVER_NAME}?`),
       ]);
+      expect(server.mcp.getPageInvocations()).toBe(before);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    "never sends one of this computer's own keys, and no card shows it",
+    async () => {
+      const before = server.mcp.getPageInvocations();
+      // The scripted model's provider key is one of this computer's own secrets, shaped like one short id.
+      const held = (await readPage({ page_id: SCRIPTED_PROVIDER_KEY })).cards;
+      expect(JSON.stringify(held)).not.toContain(SCRIPTED_PROVIDER_KEY);
       expect(server.mcp.getPageInvocations()).toBe(before);
     },
     TURN_TIMEOUT_MS,
