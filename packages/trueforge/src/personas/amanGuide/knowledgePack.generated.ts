@@ -1101,13 +1101,25 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
     id: 'docs-terminal-app-5',
     title: 'The terminal app: Chat from the terminal',
     covers: [],
-    body: "Run `aman-tui` with no command. Your chats are listed newest first, with the persona and when each was last active. Pick one to open it, or start a new chat.\n\nInside a chat, type your message and press Enter. The reply streams in as it is written. If the connection drops in the middle of a reply, the terminal rejoins the same turn the way the web app does, and the reply carries on.\n\nTool calls appear in the flow as plain cards. Each card names the tool in plain words, shows what it is doing, and shows how it ended. A picture or a file in a chat cannot be shown in a terminal, so a line appears in its place offering the chat's web address to open in a browser.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx",
+    body: "Run `aman-tui` with no command. Your chats are listed newest first, with the persona and when each was last active. Pick one to open it, or start a new chat.\n\nInside a chat, type your message and press Enter. The reply streams in as it is written. If the connection drops in the middle of a reply, the terminal says the connection was lost and rejoins the same turn the way the web app does, and the reply carries on. Press R while it rejoins to retry at once.\n\nPress Esc while a reply is streaming to stop it. The part of the reply that already arrived stays on screen, with a line saying the reply was stopped.\n\nTool calls appear in the flow as plain cards. Each card names the tool in plain words, shows what it is doing, and shows how it ended. A picture or a file in a chat cannot be shown in a terminal, so a line appears in its place offering the chat's web address to open in a browser.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx",
   },
   {
     id: 'docs-terminal-app-6',
+    title: 'The terminal app: Approvals in the terminal',
+    covers: [],
+    body: "Some actions wait for your OK before they run. When that happens, the terminal shows the whole action before you can answer it. For an email, that is the account it sends from, who it goes to, the subject, the whole message, and the files sent with it. Nothing is cut to fit the window. Scroll with the up and down arrow keys to read all of it before you answer.\n\nPress A to allow it once. When the action offers it, press Shift+A to always allow it everywhere. Press D to say no. The words on the no choice say what will not happen, such as Don't send. Enter never approves anything. Enter is how you send a chat message, so approving takes its own keys.\n\nAn email is always a draft first, and sending it is a separate approval, exactly as in the web app. The terminal never puts the two together. If the action was already answered somewhere else, or the chat has moved on, or the request has ended, the terminal says so in plain words and nothing more is done. An action a scheduled run held for you is answered in the same way.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx",
+  },
+  {
+    id: 'docs-terminal-app-7',
+    title: 'The terminal app: Ask one question and exit',
+    covers: [],
+    body: 'Run `aman-tui "your question"` to ask one question on the active instance. The answer is printed, and the command exits. The exit code is zero only when an answer printed.\n\nA one-shot question never approves anything. When the turn ends waiting for an approval, the command says the answer is waiting and points you to the terminal app or the web app, and it exits without answering the approval.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx',
+  },
+  {
+    id: 'docs-terminal-app-8',
     title: 'The terminal app: What this version does not do yet',
     covers: [],
-    body: 'Approvals are answered in the web app for now. When a chat reaches something that needs your approval, the terminal says the chat is waiting and gives the web address. The turn waits there, unchanged, until you answer it in the web app.\n\nThis version has no settings, no connectors or skills screens, no schedules, and no way to edit memory. Pictures are not shown inline. Stopping a reply mid-stream and one-shot commands from a script are planned for a later step.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx',
+    body: 'This version has no settings, no connectors or skills screens, no schedules screen, and no way to edit memory. Pictures are not shown inline.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx',
   },
   {
     id: 'docs-voice-input',

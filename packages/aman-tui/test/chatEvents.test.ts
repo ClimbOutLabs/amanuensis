@@ -154,7 +154,7 @@ describe('the chat event fold', () => {
     expect(note?.kind === 'note' && note.text).toContain(WEB);
   });
 
-  it('marks a held tool call as waiting and adds the approval line once', () => {
+  it('marks a held tool call as waiting and collects the approval, with no note', () => {
     const view = new ChatView(WEB);
     const approval = approvalRequired('e3', 'call-1');
     view.apply(turnCreated('e1', [{ type: 'user.message', content: 'Send that email' }]));
@@ -162,10 +162,70 @@ describe('the chat event fold', () => {
     view.apply(approval);
     expect(toolBlock(view).outcome).toBe('waiting_approval');
     view.apply(turnDone('e4', doneState([approval])));
-    const notes = view.blocks.filter(block => block.kind === 'note');
-    expect(notes).toHaveLength(1);
-    expect(notes[0]?.kind === 'note' && notes[0].text).toContain('waiting for an approval');
-    expect(notes[0]?.kind === 'note' && notes[0].text).toContain(WEB);
+    const pending = view.pendingApprovals();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.toolCallId).toBe('call-1');
+    expect(pending[0]?.threadId).toBe('thread-1');
+    expect(pending[0]?.toolName).toBe('Send email');
+    expect(view.blocks.some(block => block.kind === 'note')).toBe(false);
+  });
+
+  it('drops the waiting approval when the call runs', () => {
+    const view = new ChatView(WEB);
+    view.apply(turnCreated('e1', [{ type: 'user.message', content: 'Send that email' }]));
+    view.apply(modelMessage('e2', '', [toolCall('call-1', 'send_email', '{"subject":"Hello"}')]));
+    view.apply(approvalRequired('e3', 'call-1'));
+    expect(view.pendingApprovals()).toHaveLength(1);
+    view.apply(toolResponse('e4', 'call-1', 'executed_ok'));
+    expect(view.pendingApprovals()).toHaveLength(0);
+    expect(toolBlock(view).outcome).toBe('done');
+  });
+
+  it('keeps the partial reply and marks it stopped when a turn is cancelled', () => {
+    const view = new ChatView(WEB);
+    view.apply(turnCreated('e1', [{ type: 'user.message', content: 'Tell me a story' }]));
+    view.apply(delta('e2', 'Once upon a'));
+    view.apply(turnDone('e3', { status: 'cancelled', completedAt: AT, reason: 'client-cancelled' }));
+    const assistant = view.blocks.find(block => block.kind === 'assistant');
+    expect(assistant?.kind === 'assistant' && assistant.text).toBe('Once upon a');
+    expect(assistant?.kind === 'assistant' && assistant.streaming).toBe(false);
+    const note = view.blocks.find(block => block.kind === 'note');
+    expect(note?.kind === 'note' && note.text).toBe('This reply was stopped.');
+  });
+
+  it('fills in the card of a waiting approval learned without one', () => {
+    const view = new ChatView(WEB);
+    view.apply(turnCreated('e1', [{ type: 'user.message', content: 'Send that email' }]));
+    view.apply(modelMessage('e2', '', [toolCall('call-1', 'send_email', '{"subject":"Hello"}')]));
+    view.apply(approvalRequired('e3', 'call-1'));
+    expect(view.pendingApprovals()[0]?.card).toBeNull();
+    view.registerPending({
+      toolCallId: 'call-1',
+      threadId: 'thread-1',
+      card: {
+        amount: null,
+        cannotBeUndone: null,
+        copy: { headline: 'Send this email?', consequence: null, reason: null },
+        destination: null,
+        destinationHost: null,
+        outboundText: null,
+        outboundTruncated: false,
+        parsedCommand: null,
+        plainWhat: 'Send an email.',
+        plainWhy: null,
+        recipient: null,
+        whyAskedAgain: null,
+      },
+      toolName: null,
+      canAlwaysAllow: false,
+      held: false,
+      expiresAt: null,
+    });
+    const pending = view.pendingApprovals();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.card?.copy?.headline).toBe('Send this email?');
+    // The tool name the fold already knew is not wiped by the later read.
+    expect(pending[0]?.toolName).toBe('Send email');
   });
 
   it('shows a plain line when a turn ends in an error', () => {

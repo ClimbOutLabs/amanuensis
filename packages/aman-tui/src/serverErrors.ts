@@ -50,6 +50,22 @@ export function statusCodeOfError(error: unknown): number | undefined {
   return typeof statusCode === 'number' ? statusCode : undefined;
 }
 
+/** The server's machine-readable error code from a parsed error body (body.error.code), when it carries one. */
+export function serverCodeOfBody(body: unknown): string | undefined {
+  if (!isRecord(body) || !isRecord(body.error)) {
+    return undefined;
+  }
+  return readNonEmptyString(body.error.code);
+}
+
+/** The server's error code for a failed call, read from the SDK error's body, when it carries one. */
+export function errorCodeOf(error: unknown): string | undefined {
+  if (!isRecord(error)) {
+    return undefined;
+  }
+  return serverCodeOfBody(error.body);
+}
+
 /** True when the server refused the terminal key itself: it is no longer accepted, or it reached outside its scope. */
 export function keyWasRefused(error: unknown): boolean {
   const status = statusCodeOfError(error);

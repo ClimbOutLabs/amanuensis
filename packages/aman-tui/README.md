@@ -10,7 +10,11 @@ The key lives in the system keychain where the platform offers one this app can 
 
 ## Chatting
 
-Run `aman-tui` with no command. The app lists your chats, newest first, with the persona and when each was last active. Open one, or start a new chat. Inside a chat, type a message and the reply streams in. Tool calls appear as plain cards in the flow, with what the tool is doing and how it ended. A picture or a file in a chat is replaced by a line offering the chat's web address to open in a browser, and a turn that is waiting for an approval says so and points at the web app, where approvals are answered in this version.
+Run `aman-tui` with no command. The app lists your chats, newest first, with the persona and when each was last active. Open one, or start a new chat. Inside a chat, type a message and the reply streams in. Tool calls appear as plain cards in the flow, with what the tool is doing and how it ended. A picture or a file in a chat is replaced by a line offering the chat's web address to open in a browser.
+
+When a turn holds an action for approval, the whole action is shown in the chat before it can be answered, every word of it, with the view scrolling instead of cutting anything. A approves it once, Shift+A always allows it when the server offers that, and D says no. Enter never approves, because Enter is how a message is sent. Esc stops a reply while it streams, keeping the part that arrived.
+
+Run `aman-tui "your question"` to ask one question on the active instance. The answer is printed and the command exits, at zero only when an answer printed. A one-shot question never approves anything. When the answer waits for an approval, it says so and points at the app.
 
 The app talks to the server only through `@truefoundry/trueforge-chat` and the generated SDK, using the same resync the web app uses, so a dropped connection rejoins the turn instead of losing the reply. The two pairing calls are plain fetches, because the generated SDK has no terminal pairing methods yet.
 

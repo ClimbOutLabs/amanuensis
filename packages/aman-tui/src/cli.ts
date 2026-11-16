@@ -6,12 +6,14 @@ import { App } from './components/App.js';
 import { resolveConfigDir } from './configDir.js';
 import { loadInstanceStore, normalizeInstanceAddress, saveInstanceStore } from './instances.js';
 import { runLogin } from './login.js';
+import { runOneShot } from './oneShot.js';
 import { PairingRefusedError } from './pairing.js';
 
 const USAGE = [
   'aman-tui: Aman in the terminal.',
   '',
   '  aman-tui                      Open the app on the active instance.',
+  '  aman-tui "<question>"         Ask one question on the active instance, print the answer, and exit.',
   '  aman-tui login <address>      Pair this terminal with an Aman instance.',
   '  aman-tui login <address> --name <name>',
   '                                Pair under a name of your choosing.',
@@ -117,9 +119,16 @@ async function run(argv: string[]): Promise<number> {
     return 0;
   }
 
-  console.error(`aman-tui does not know the command "${command}".`);
-  console.error(USAGE);
-  return 1;
+  // Anything else is a one-shot question: the words are asked on the active
+  // instance, the answer is printed, and the command exits.
+  return runOneShot({
+    configDir,
+    question: argv.join(' '),
+    deps: {
+      print: (line: string) => console.log(line),
+      printError: (line: string) => console.error(line),
+    },
+  });
 }
 
 process.exitCode = await run(process.argv.slice(2));

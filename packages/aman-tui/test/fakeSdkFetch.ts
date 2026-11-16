@@ -25,9 +25,14 @@ export interface FakeSdkScript {
   sessions?: Record<string, unknown>[];
   personaBySession?: Record<string, string | null>;
   historyBySession?: Record<string, Record<string, unknown>[]>;
+  /** Whole turns by id, for the get-turn route the tip read uses. */
+  turnById?: Record<string, Record<string, unknown>>;
 
   createdSession?: Record<string, unknown>;
-  onCreateTurn?: (sessionId: string) => { frames: SseFrame[]; failAtEnd?: boolean };
+  onCreateTurn?: (
+    sessionId: string,
+    body: unknown,
+  ) => { frames: SseFrame[]; failAtEnd?: boolean; failWith?: { status: number; body: unknown } };
   onSubscribe?: (sessionId: string, turnId: string) => { frames: SseFrame[] };
 }
 
@@ -158,8 +163,30 @@ export function makeFakeSdkFetch(script: FakeSdkScript): { fetcher: typeof fetch
     const createTurnMatch = /^\/api\/v1\/sessions\/([^/]+)\/turns$/.exec(path);
     if (createTurnMatch !== null && method === 'POST') {
       const sessionId = createTurnMatch[1] ?? '';
-      const turn = script.onCreateTurn?.(sessionId) ?? { frames: [] };
+      const turn = script.onCreateTurn?.(sessionId, parseBody(init)) ?? { frames: [] };
+      if (turn.failWith !== undefined) {
+        return new Response(JSON.stringify(turn.failWith.body), {
+          status: turn.failWith.status,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       return sseResponse(turn.frames, turn.failAtEnd ?? false);
+    }
+    const cancelMatch = /^\/api\/v1\/sessions\/([^/]+)\/cancel$/.exec(path);
+    if (cancelMatch !== null && method === 'POST') {
+      return jsonResponse({});
+    }
+    const getTurnMatch = /^\/api\/v1\/sessions\/([^/]+)\/turns\/([^/]+)$/.exec(path);
+    if (getTurnMatch !== null && method === 'GET') {
+      const turnId = getTurnMatch[2] ?? '';
+      const turn = script.turnById?.[turnId];
+      if (turn === undefined) {
+        return new Response(JSON.stringify({ error: { message: 'Not found.' } }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return jsonResponse({ data: turn });
     }
     const subscribeMatch = /^\/api\/v1\/sessions\/([^/]+)\/turns\/([^/]+)\/subscribe$/.exec(path);
     if (subscribeMatch !== null && method === 'GET') {
