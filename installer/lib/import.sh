@@ -1,15 +1,12 @@
 # shellcheck shell=bash
-# Data import: restores a data export into a fresh instance. A kept backup is taken first, the import waits for the
-# search model, then the app is stopped while the CLI runs in a one-off container that has the instance's data volume
-# and no network, and started again whatever the outcome.
+# Data import: restores a data export into a fresh instance. The search model is checked and a kept backup is taken
+# first, then the app is stopped while the CLI runs in a one-off container that has the instance's data volume and no
+# network, and started again whatever the outcome.
 
 OPT_IMPORT_FILE=
 OPT_DISPLAY_NAME=
 # The instance whose app this run stopped and has not started again yet.
 IMPORT_STOPPED_APP=
-# Seconds between two looks at the search model; tests set it to 0.
-IMPORT_POLL_SECONDS=${AMAN_IMPORT_POLL_SECONDS:-5}
-IMPORT_MODEL_WAIT_SECONDS=1200
 
 # The export file is the fourth word of `instance import NAME FILE` and of no other command.
 check_import_options() {
@@ -45,7 +42,7 @@ import_on_exit() {
     warn "The app of instance $name did not start properly. Run: aman doctor instance --fix"
 }
 
-# An instance that never started has no database to back up and no search model yet, so it is started once.
+# An instance that never started has no database to back up, so it is started once.
 import_start_once() {
   local name=$1 image=$2 rc=0
   if docker_volume_exists "aman_${name}_data"; then
@@ -62,7 +59,7 @@ import_start_once() {
   instance_up "$name" || exit 1
 }
 
-# ready or downloading, from the CLI's look at the data volume; empty when it could not be asked.
+# ready or missing, from the CLI's look at the model folder in the image; empty when it could not be asked.
 search_model_state() {
   local name=$1 image=$2
   D run --rm --network none --env-file "$(instance_dir "$name")/.env" -e NODE_ENV=production \
@@ -70,29 +67,14 @@ search_model_state() {
     LC_ALL=C sed -n 's/.*"search_model"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1
 }
 
-# The import indexes persona knowledge with the search model, which the app downloads once when it starts.
-import_wait_for_search_model() {
-  local name=$1 image=$2 looks=0 shown=0 most=3
-  if [ "$IMPORT_POLL_SECONDS" -gt 0 ]; then most=$((IMPORT_MODEL_WAIT_SECONDS / IMPORT_POLL_SECONDS)); fi
-  while :; do
-    case "$(search_model_state "$name" "$image")" in
-      ready) return 0 ;;
-      downloading) ;;
-      *) die "Aman could not tell whether instance $name has its search model yet, so nothing was imported. Run: aman doctor instance --fix" ;;
-    esac
-    if [ "$shown" = 0 ]; then
-      if [ "$(instance_state "$name")" = stopped ]; then
-        instance_up "$name" || exit 1
-      fi
-      say "Waiting for instance $name to finish downloading its search model (about 120 MB, once)."
-      shown=1
-    fi
-    looks=$((looks + 1))
-    if [ "$looks" -gt "$most" ]; then
-      die "Instance $name did not finish downloading its search model in 20 minutes, so nothing was imported. Check this computer's internet connection, then run the import again."
-    fi
-    sleep "$IMPORT_POLL_SECONDS"
-  done
+# The import indexes persona knowledge with the search model, which ships inside the app image.
+import_check_search_model() {
+  local name=$1 image=$2
+  case "$(search_model_state "$name" "$image")" in
+    ready) return 0 ;;
+    missing) die "The installed Aman has no search model for instance $name, so nothing was imported. Run aman upgrade, then run the import again." ;;
+    *) die "Aman could not tell whether instance $name has its search model, so nothing was imported. Run: aman doctor instance --fix" ;;
+  esac
 }
 
 # import_run NAME FILE OWNER DISPLAY IMAGE: the file is streamed in and held on a private tmpfs, because the app user
@@ -172,7 +154,7 @@ cmd_instance_import() {
   lock_acquire
   load_installed_release
   import_start_once "$name" "$REL_APP_TAG"
-  import_wait_for_search_model "$name" "$REL_APP_TAG"
+  import_check_search_model "$name" "$REL_APP_TAG"
   # A kept backup is never pruned, so the instance as it was before the import can always be put back. A dry run writes
   # nothing, so it needs none.
   if [ "$DRY_RUN" != 1 ]; then

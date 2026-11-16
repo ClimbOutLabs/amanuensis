@@ -463,7 +463,7 @@
     {
       "host": "huggingface.co",
       "category": "model_download",
-      "reason": "Pinned speech and memory search model files, fetched when the Aman images are built and checked against fixed hashes. The memory search service fetches them again only if the built-in copy fails its hash check."
+      "reason": "Pinned speech and memory search model files, fetched when the Aman images are built and checked against fixed hashes. Aman never fetches them while it runs; the memory guide shows how to fetch them by hand for installs without Docker."
     },
     {
       "host": "raw.githubusercontent.com",

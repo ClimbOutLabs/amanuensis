@@ -41,7 +41,6 @@ If more than one person has chats in the stack, it lists their ids and stops: ru
 - Docker with Compose v2 on the server, and enough free disk for a copy of each database and of the memory and knowledge folders.
 - A git checkout of this repository. The installer builds the new images from it.
 - The owner's email address for each new instance.
-- Internet access for the first start of each new instance (it downloads the memory search model once).
 
 Set these once per person, in the shell you use for the steps below:
 
@@ -168,7 +167,7 @@ installer/install.sh instance add <person> --email <owner-email>
 
 The installer asks for the instance name, whether to back up every day, `Go ahead?` after its plan, and the owner's password twice. It does not ask for a model address or key: those are set in the app afterwards (step 7). Give each instance the email the person signs in with: the new instance recognises them by it.
 
-The memory search model is built into the app, so nothing is downloaded at the first start. The import waits for it to load by itself (step 5).
+The memory search model is built into the app, so nothing is downloaded at the first start. The import checks that it is there before it changes anything (step 5).
 
 ## 5. Import
 
@@ -178,7 +177,7 @@ aman import "$WORK/out/$PERSON.zip" --instance $PERSON --display-name "<owner na
 
 `aman import FILE` runs `installer/install.sh instance import <name> FILE`; `--instance` can be left out when the computer has one instance. `--display-name` is how imported chats name the owner; without it they use the name Aman calls the owner. An instance with no such name asks, and Enter keeps the part of the email before the `@`.
 
-Before anything is written, the import starts the instance once if it never started, waits for the search model with one line ("Waiting for instance ... to finish downloading its search model"), and takes a backup named `<timestamp>-before-import` under `~/.amanuensis/backups/`, which is never pruned. Then it stops the app of that instance, restores the file in a one-off container with no network, and starts the app again. It prints a summary such as "Imported 5 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off)." and exits 0.
+Before anything is written, the import starts the instance once if it never started, checks that the search model is in the app image, and takes a backup named `<timestamp>-before-import` under `~/.amanuensis/backups/`, which is never pruned. Then it stops the app of that instance, restores the file in a one-off container with no network, and starts the app again. It prints a summary such as "Imported 5 chats, 3 memories, 2 personas, 1 space, 1 agent, 2 schedules (off)." and exits 0.
 
 If it says the instance already has chats or other data, the instance is not fresh. Remove it and add it again, then import:
 

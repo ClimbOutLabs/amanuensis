@@ -34,13 +34,35 @@ When you send an email through Aman, it keeps one note of it in the daily log: w
 
 Aman searches your memories by meaning, not just by matching words. So "where did we stay in Paris" finds the hotel note even if it says "Hotel Lumiere" and never mentions Paris.
 
-To do that, Aman uses a small memory model, about 120 MB, that comes built into the app. Nothing is downloaded when you start Aman. There is nothing to install or click.
+To do that, Aman uses a small memory model, about 120 MB, that comes built into the Aman images. Aman never downloads it while it runs. There is nothing to install or click.
 
-- After that one download, memory search works fully offline, and everything stays on your server.
-- The memory model is kept inside the memory folder, so the two travel together.
-- If the download can't finish, Aman finds memories with keywords instead and keeps retrying in the background.
+- Memory search works fully offline, and everything stays on your server.
+- Aman checks every model file against a fixed fingerprint before it uses it.
+- If the model is missing or a file does not match, Aman finds memories with keywords instead.
 
-**Settings**, **Memory**, **Settings** shows the helper's state: Starting, Downloading, Indexing, Ready or Keywords only.
+**Settings**, **Memory**, **Settings** shows the helper's state: Starting, Indexing, Ready or Keywords only.
+
+### Add the memory model by hand (npx or from source)
+
+The model is only built into the Docker images. If you run Aman with `npx` or from source without Docker, memory search uses keywords until you add the model files yourself. You do this once.
+
+1. Find the model folder. It is the folder set by `MEMORY_EMBEDDINGS_MODEL_DIR`. If you did not set it, it is a folder named `.embedding-model` inside your memory folder (`MEMORY_MARKDOWN_DIR`).
+2. Run these commands, with your model folder in the first line:
+
+   ```sh
+   models="/path/to/your/model/folder"
+   rev=761b726dd34fb83930e26aab4e9ac3899aa1fa78
+   dir="$models/Xenova/multilingual-e5-small"
+   mkdir -p "$dir/$rev/onnx"
+   for file in config.json tokenizer.json tokenizer_config.json onnx/model_quantized.onnx; do
+     curl -fL -o "$dir/$rev/$file" "https://huggingface.co/Xenova/multilingual-e5-small/resolve/$rev/$file"
+   done
+   cp "$dir/$rev/config.json" "$dir/config.json"
+   ```
+
+3. Restart Aman.
+
+The folder must hold only these files. Aman checks each one against its fingerprint when it starts. If one does not match, Aman keeps using keywords and the server log says which folder to fix.
 
 Recall is limited in size, so a large memory can't crowd out the conversation. Each recalled block is recorded in that turn's events as `aman.memory.recall`, so you can check what the model saw.
 

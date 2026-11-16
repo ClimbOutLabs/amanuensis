@@ -1,18 +1,17 @@
 /**
  * Lazy loader for the on-device embedding model behind meaning-based recall.
  * The model is pinned (id + HF revision + SHA-256 of every file) because
- * retrieval quality depends on the exact evaluated model. Downloads fetch the
- * pinned files as raw bytes (never parsed); the file set and hashes are
- * verified next, and only then is the pipeline instantiated offline — so
- * unverified bytes never reach the ONNX parser. A structurally corrupt cache
- * is wiped before downloading, and every failure degrades to keyword-only. A
- * unit-norm canary guards against a corrupt-but-present cache.
+ * retrieval quality depends on the exact evaluated model. Nothing is ever
+ * downloaded: the images ship the pinned files, and other installs copy them
+ * in by hand. The file set and hashes are verified first, and only then is the
+ * pipeline instantiated offline — so unverified bytes never reach the ONNX
+ * parser. Every failure degrades to keyword-only. A unit-norm canary guards
+ * against a corrupt-but-present model folder.
  */
 import { withTimeout } from '@truefoundry/trueforge-core/core';
-import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ensureWritableDataDir } from '../../utils/dataDir';
 
@@ -23,9 +22,6 @@ export const EMBEDDING_DIMENSIONS = 384;
 /** E5 requires these prefixes; the embed methods apply them unconditionally. */
 export const EMBEDDING_QUERY_PREFIX = 'query: ';
 export const EMBEDDING_PASSAGE_PREFIX = 'passage: ';
-
-/** One-time download size, for plain-English status messages. */
-export const EMBEDDING_MODEL_DOWNLOAD_SIZE = 'about 120 MB';
 
 /**
  * Trust anchor: SHA-256 of every file the pinned revision must contain, measured
@@ -39,11 +35,8 @@ export const EMBEDDING_MODEL_FILES: Record<string, string> = {
 };
 
 const CANARY_TEXT = 'the quick brown fox jumps over the lazy dog';
-const DOWNLOAD_RETRY_DELAY_MS = 2000;
-/** Generous: a 120 MB download on a slow link, plus model warmup. */
-const LOAD_TIMEOUT_MS = 15 * 60 * 1000;
-/** Upper bound per downloaded file; the largest pinned file is about 110 MB. */
-const MAX_DOWNLOAD_FILE_BYTES = 256 * 1024 * 1024;
+/** Generous: hashing the files and warming the model on a slow machine. */
+const LOAD_TIMEOUT_MS = 5 * 60 * 1000;
 /**
  * How long an 'unavailable' model stays latched before a later ensureReady()
  * retries the load. Matches the warm retry cooldown in embeddingRetrieval, so
@@ -52,7 +45,7 @@ const MAX_DOWNLOAD_FILE_BYTES = 256 * 1024 * 1024;
  */
 const UNAVAILABLE_RETRY_COOLDOWN_MS = 60_000;
 
-export type EmbeddingModelPhase = 'idle' | 'loading' | 'downloading' | 'ready' | 'unavailable';
+export type EmbeddingModelPhase = 'idle' | 'loading' | 'ready' | 'unavailable';
 
 /**
  * The narrow slice of the transformers feature-extraction pipeline this module
@@ -70,9 +63,8 @@ export interface EmbeddingModelOptions {
   /**
    * Test seam: builds the pipeline instead of the default (transformers.js
    * pipeline + cache/env setup). Production leaves this unset. Always receives
-   * the verified local revision directory: downloads fetch raw files and the
-   * hashes are verified before any pipeline is built, so unverified bytes
-   * never reach the ONNX parser.
+   * the verified local revision directory: the hashes are verified before any
+   * pipeline is built, so unverified bytes never reach the ONNX parser.
    */
   createPipeline?: ((input: { modelRef: string }) => Promise<EmbeddingPipeline>) | undefined;
   /**
@@ -80,12 +72,6 @@ export interface EmbeddingModelOptions {
    * uses the pinned EMBEDDING_MODEL_FILES.
    */
   expectedFiles?: Record<string, string> | undefined;
-  /**
-   * Test seam: fetches the pinned files into the cache as raw bytes, without
-   * parsing them. Production downloads from the Hugging Face resolver URLs
-   * for the pinned revision.
-   */
-  downloadModelFiles?: ((expectedFiles: Record<string, string>) => Promise<void>) | undefined;
 }
 
 /** Validates the pipeline output shape without type assertions. */
@@ -152,10 +138,6 @@ async function listPlainFiles(dir: string): Promise<string[] | undefined> {
   return found;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -165,8 +147,7 @@ const sharedModels = new Map<string, EmbeddingModel>();
 /**
  * Synchronous, cheap check that the pinned model files are present on disk.
  * Existence only — hashes are verified inside `ensureReady()` before anything
- * is parsed. Used to decide whether a nonblocking warm is safe: kicking a
- * load with a warm cache never touches the network.
+ * is parsed. Used to decide whether a nonblocking warm is worth starting.
  */
 export function isEmbeddingModelCached(modelDir: string): boolean {
   const revisionDir = path.join(modelDir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION);
@@ -288,15 +269,12 @@ export class EmbeddingModel {
       envVar: 'MEMORY_EMBEDDINGS_MODEL_DIR',
     });
 
-    // Bring the cache to the pinned, hash-verified state first. The bytes are
-    // only ever fetched and hashed here — never parsed — so a compromised
-    // download cannot exploit the ONNX parser before the trust anchor rejects
-    // it.
-    if (!(await this.ensureVerifiedCache(expectedFiles))) {
+    // The files are hashed before anything parses them, so tampered bytes
+    // never reach the ONNX parser.
+    if (!(await this.ensureVerifiedFiles(expectedFiles))) {
       return false;
     }
 
-    // One offline-load branch for pre-seeded and freshly downloaded caches:
     // allowRemoteModels stays off, so the parser only touches verified bytes.
     try {
       const extractor = await createPipeline({ modelRef: offlineModelRef });
@@ -319,68 +297,21 @@ export class EmbeddingModel {
   }
 
   /**
-   * Makes the cache exactly the pinned file set with matching hashes,
-   * downloading raw files when needed. Resolves false (after marking the
-   * model unavailable) when the cache cannot be brought to a trusted state.
+   * True when the model folder holds exactly the pinned files with matching
+   * hashes. Nothing is downloaded: a missing or changed file leaves memory
+   * search on keywords, with a reason that says where the files go.
    */
-  private async ensureVerifiedCache(expectedFiles: Record<string, string>): Promise<boolean> {
+  private async ensureVerifiedFiles(expectedFiles: Record<string, string>): Promise<boolean> {
     if (await verifyModelFiles(this.options.modelDir, expectedFiles)) {
       return true;
     }
-    const downloadModelFiles =
-      this.options.downloadModelFiles ??
-      (files => downloadPinnedModelFiles({ modelDir: this.options.modelDir, expectedFiles: files }));
-    // A structurally wrong cache (stray files, symlinks, special files) can
-    // never become valid by overwriting pinned paths: wipe it so the download
-    // starts from a clean directory.
-    if (await hasStructuralMismatch(this.options.modelDir, expectedFiles)) {
-      await wipeModelDir(this.options.modelDir);
-    }
-    // The eval saw one transient Hugging Face failure: retry once, then degrade.
-    this.noteDownloading();
-    let lastError: unknown;
-    let downloadCompleted = false;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (attempt > 0) {
-        await sleep(DOWNLOAD_RETRY_DELAY_MS);
-      }
-      try {
-        await downloadModelFiles(expectedFiles);
-        downloadCompleted = true;
-      } catch (error) {
-        lastError = error;
-        continue;
-      }
-      if (await verifyModelFiles(this.options.modelDir, expectedFiles)) {
-        return true;
-      }
-      lastError = new Error('the downloaded model failed its integrity check');
-    }
-    // Fresh bytes still fail verification: the source is hostile or the disk
-    // is failing. Wipe so a later retry starts clean instead of re-hashing
-    // poisoned bytes forever, then degrade to keyword-only. A pure download
-    // failure leaves nothing behind, so there is nothing to wipe.
-    if (downloadCompleted) {
-      await wipeModelDir(this.options.modelDir);
-    }
     this.markUnavailable(
-      downloadCompleted
-        ? `the model download failed its integrity check twice (${describeError(lastError)}); cleared the model cache and staying keyword-only for now`
-        : `the model download failed twice (${describeError(lastError)}); staying keyword-only for now`,
+      `the memory search model is missing from ${this.options.modelDir}, or its files do not match the pinned ones. Copy the model files there as the memory guide describes, then restart Aman`,
     );
     this.options.log?.(
       `Smart search isn't available (${this.unavailableReason}). Memories will be found with keywords.`,
     );
     return false;
-  }
-
-  private noteDownloading(): void {
-    if (this.phase !== 'downloading') {
-      this.phase = 'downloading';
-      this.options.log?.(
-        `Downloading the memory search model once (${EMBEDDING_MODEL_DOWNLOAD_SIZE}). This happens in the background; memory search keeps working with keywords until it finishes.`,
-      );
-    }
   }
 
   /** The model must return 384 finite, unit-norm components for fixed input. */
@@ -457,113 +388,6 @@ export async function verifyModelFiles(modelDir: string, expectedFiles: Record<s
     return false;
   }
   return matched === required.size;
-}
-
-/**
- * True when the cache can never become trusted by overwriting pinned paths:
- * it is unreadable, or holds files outside the trusted set (stray files,
- * symlinks, special files). Hash mismatches on pinned paths are NOT
- * structural — a fresh download can repair them.
- */
-async function hasStructuralMismatch(modelDir: string, expectedFiles: Record<string, string>): Promise<boolean> {
-  const seen = await listPlainFiles(modelDir);
-  if (seen === undefined) {
-    return true;
-  }
-  const { required, redundantConfig } = trustedFileSet(expectedFiles);
-  return seen.some(relative => !required.has(relative) && relative !== redundantConfig);
-}
-
-/**
- * Removes the whole model cache. Guarded against catastrophic paths: only
- * ever wipes below the filesystem root.
- */
-async function wipeModelDir(modelDir: string): Promise<void> {
-  const resolved = path.resolve(modelDir);
-  if (resolved === path.parse(resolved).root) {
-    return;
-  }
-  await rm(modelDir, { recursive: true, force: true });
-}
-
-/** Options for downloadPinnedModelFiles. */
-export interface DownloadPinnedModelFilesOptions {
-  modelDir: string;
-  expectedFiles: Record<string, string>;
-  /** Test seam: defaults to the global fetch. */
-  fetchImpl?: typeof fetch | undefined;
-  /** Test seam: per-file byte cap. Production uses MAX_DOWNLOAD_FILE_BYTES. */
-  maxBytes?: number | undefined;
-}
-
-/**
- * Downloads the pinned files for the pinned revision as raw bytes — fetched
- * and written, never parsed. Each file lands via temp-file + rename so a
- * partial download never looks complete, and bodies are size-bounded so a
- * hostile server cannot blow up process memory. The caller must run
- * verifyModelFiles before the bytes are used.
- */
-export async function downloadPinnedModelFiles(options: DownloadPinnedModelFilesOptions): Promise<void> {
-  const revisionDir = path.join(options.modelDir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION);
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const maxBytes = options.maxBytes ?? MAX_DOWNLOAD_FILE_BYTES;
-  for (const relative of Object.keys(options.expectedFiles)) {
-    const url = `https://huggingface.co/${EMBEDDING_MODEL_ID}/resolve/${EMBEDDING_MODEL_REVISION}/${relative}`;
-    const target = path.join(revisionDir, relative);
-    await mkdir(path.dirname(target), { recursive: true });
-    const response = await fetchImpl(url);
-    if (!response.ok) {
-      throw new Error(`model file download failed: ${url} -> HTTP ${String(response.status)}`);
-    }
-    const bytes = await readBoundedBody(response, maxBytes, url);
-    // Staged under a dotfile so an interrupted write is never mistaken for
-    // the pinned file, then moved into place. rename(2) cannot replace an
-    // existing file on Windows (EPERM), so remove the target first; a crash
-    // between rm and rename fails closed (verifyModelFiles rejects the
-    // missing file and the download is retried).
-    const staging = path.join(path.dirname(target), `.${path.basename(target)}.part`);
-    await writeFile(staging, bytes, { mode: 0o600 });
-    await rm(target, { force: true });
-    await rename(staging, target);
-  }
-}
-
-/** Reads a fetch body with a hard byte cap; a lying content-length can't bypass it. */
-async function readBoundedBody(response: Response, maxBytes: number, url: string): Promise<Buffer> {
-  const declared = response.headers.get('content-length');
-  if (declared !== null) {
-    const declaredBytes = Number(declared);
-    if (!Number.isFinite(declaredBytes) || declaredBytes > maxBytes) {
-      throw new Error(`model file too large: ${url}`);
-    }
-  }
-  const body = response.body;
-  if (body === null) {
-    throw new Error(`model file download returned no body: ${url}`);
-  }
-  const reader: ReadableStreamDefaultReader<Uint8Array> = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const result: unknown = await reader.read();
-    if (typeof result !== 'object' || result === null || !('done' in result)) {
-      throw new Error(`model file download returned invalid chunk: ${url}`);
-    }
-    if (result.done) {
-      break;
-    }
-    if (!('value' in result) || !(result.value instanceof Uint8Array)) {
-      throw new Error(`model file download returned invalid chunk: ${url}`);
-    }
-    const value = result.value;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new Error(`model file too large: ${url}`);
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks);
 }
 
 /** Production pipeline builder: offline only, from the verified revision directory. */

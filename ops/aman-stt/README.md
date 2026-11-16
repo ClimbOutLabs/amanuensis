@@ -50,19 +50,20 @@ without it, because the Docker health check carries no secret.
    `aman_stt.py` (exact Hugging Face repo plus commit hash, never a branch).
    It was fetched at build time into `/opt/aman-stt-models`, and the build
    fails unless every file matches its SHA-256. At run time the sidecar loads
-   from that folder and makes no network calls; the offline flags stop the
-   Hugging Face libraries from downloading anything.
+   from that folder and never downloads a model: if the files are not
+   there, the model is refused. The offline flags also stop the Hugging
+   Face libraries from reaching the network.
 2. Every required file's SHA-256 is verified against the pinned hashes
    before the model loads. On any missing file, hash mismatch, or revision
    mismatch the model is refused, the error is logged, and `/healthz`
-   reports it via `model_error`. A model size with no pin entry is refused
-   rather than downloaded unpinned. The fallback model goes through the
-   same verify-before-load path.
+   reports it via `model_error`. A model size with no pin entry is refused.
+   The fallback model goes through the same verify-before-load path, and it
+   is not in the image, so it loads only from a folder someone filled.
 3. A warmup transcription of 1 s of silence runs at startup to heat the
    kernels before the first real request.
 4. The model stays warm in RAM for the container's lifetime.
 
-Cold load is ~2-5 s; first-run download adds network time, which is why the
+Cold load is ~2-5 s, plus the time to hash the 464 MB of model files; the
 Docker health check allows a 180 s start period.
 
 ## Bumping pinned model revisions
@@ -79,14 +80,14 @@ newer model revision:
    The loader (faster-whisper) also reads `preprocessor_config.json` when
    present; the pinned revisions do not ship it, and any snapshot
    containing an unpinned copy is refused (fail closed).
-3. Update the `repo`, `revision`, and `files` entries in `PINNED_MODELS`.
-   Keep both the primary and the fallback entries current; never leave a
-   size pointing at a stale revision.
+3. Update the `repo`, `revision`, and `files` entries in `PINNED_MODELS`,
+   and the matching `ADD --checksum` lines in the `Dockerfile`. Keep both the
+   primary and the fallback entries current; never leave a size pointing at
+   a stale revision.
 4. Run the sidecar tests (`python -m unittest discover -s tests`) and
-   confirm the new `PinnedModelTest` cases pass.
-5. Deleting the old revision's snapshot directory from the cache volume
-   forces a fresh verified download on next start; otherwise the old
-   verified files keep serving until the cache is cleared.
+   confirm the new `PinnedModelTest` and Dockerfile pin cases pass.
+5. Rebuild the image. The build fetches the new files and fails unless
+   each one matches its SHA-256.
 
 ## Configuration (env)
 
@@ -153,7 +154,7 @@ python -m unittest discover -s tests
 
 Tests inject a fake transcriber, so they cover healthz, the WAV and raw-PCM
 decode paths, 400/413/503 handling, and the no-transcript-logging guarantee
-without downloading the model. The `PinnedModelTest` cases use small
-synthetic files and a fake downloader to cover hash verification: good
-cache loads, tampered/missing/wrong-revision files refused, offline start
-from a verified cache, and the fallback model following the same rules.
+without the model. The `PinnedModelTest` cases use small synthetic files to
+cover hash verification: good files load, tampered/missing/other-revision
+files are refused, a missing model is never downloaded, and the fallback
+model follows the same rules.

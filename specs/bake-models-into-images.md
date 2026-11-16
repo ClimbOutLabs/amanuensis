@@ -1,6 +1,6 @@
 # Spec: Bake the Speech and Memory Search Models into the Images
 
-**Status:** draft
+**Status:** approved
 
 ## Problem
 
@@ -13,7 +13,9 @@ Fetch both models when the images are built, not when Aman runs.
 - The speech image fetches the four files of the pinned Whisper small revision. The build checks each file against its SHA-256 and fails on any mismatch. The service loads the files from a read-only folder in the image and runs with the Hugging Face offline and telemetry flags set.
 - The app image fetches the five files of the pinned memory search revision, with the same SHA-256 checks. The server loads them from a folder in the image. Both app Dockerfiles do this: `Dockerfile.dev`, which the installer, compose and the published images build, and `Dockerfile`, the image built from the npm package. In `Dockerfile.dev` the files are fetched in a build stage of their own, so Docker's layer cache keeps them across code changes and fetches them again only when a pin changes.
 - The install-time downloads for these two models are removed from the installer's plan and from its download list. Their Docker volumes (`stt-cache`, `stt-model-cache`) are no longer mounted. An existing `aman_stt_cache` volume is still removed by uninstall, so nothing is left behind.
-- The memory search service still contains its existing download path. It runs only if the built-in copy fails its hash check, and that is the only case where it reaches Hugging Face.
+- Aman never downloads a model while it runs. The memory search service and the speech service lose their download code. A missing or changed file leaves memory search on keywords, or stops the speech model from loading, and the error names the folder to fix.
+- Installs without Docker (`npx` or running from source) have no built-in memory model. Memory search uses keywords until the files are added by hand. The memory guide gives the commands.
+- The installer's data import no longer waits for a model download. It checks once that the model is in the image, and stops before changing anything if it is not.
 
 ## Licences
 
