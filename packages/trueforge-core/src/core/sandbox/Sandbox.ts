@@ -3511,6 +3511,10 @@ export class Sandbox extends LocalToolMCP {
   }
 
   private buildFileOutputSection(builder: InstructionBuilder): void {
+    // The example names a file in this sandbox's own workspace: the model copies the folder it is shown.
+    const exampleRoot = this.boundRepository?.workspace_cwd ?? this.provider.getWorkspaceDir();
+    const examplePath =
+      exampleRoot === undefined ? '/absolute/path/to/tribute.mp4' : posix.join(exampleRoot, 'tribute.mp4');
     builder.addSection(
       SANDBOX_FILE_OUTPUT_TAG,
       dedent`
@@ -3521,7 +3525,7 @@ export class Sandbox extends LocalToolMCP {
         2. Then emit a fenced sandbox_artifacts block referencing the file, using exactly this line format: [display name](/absolute/path), one file per line. Example:
 
         \`\`\`sandbox_artifacts
-        [Lily James tribute video](/opt/tf/workspace/tribute.mp4)
+        [Lily James tribute video](${examplePath})
         \`\`\`
 
         For large outputs or content that can be generated through code, prefer writing to a file and emitting the sandbox_artifacts block.
