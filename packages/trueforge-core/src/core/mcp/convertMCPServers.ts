@@ -91,17 +91,6 @@ export function plainBooleanSchema(schema: Record<string, unknown>): Record<stri
 }
 
 /**
- * Whether a listTools failure means the server itself could not be reached (a connection or
- * transport failure, status 502 or above), as opposed to a problem with the request. Mirrors
- * the unavailable-connector test AgentThread applies to tool metadata failures: a host policy
- * pre-dispatch failure is not unavailability, and neither is a client error. A redirect the
- * connection refused to follow is not unavailability either: the server was reached and
- * answered, and the refusal is deliberate, so it stays loud. The refusal rides as the cause
- * under wrappers that add their own context (the connect error names the server around it),
- * so the whole chain is walked before answering: a refusal anywhere in it settles the
- * question, even under an outer error that on its own would read as unavailability.
- */
-/**
  * Whether a schema meets the strict tool rules: every object lists all of its properties as required.
  * Providers that enforce strict mode refuse the whole request when a strict tool breaks this, so a tool
  * with an optional field is sent without strict instead.
@@ -110,12 +99,18 @@ export function meetsStrictSchemaRules(schema: Record<string, unknown>): boolean
   if (isRecord(schema['properties'])) {
     const required = Array.isArray(schema['required']) ? schema['required'] : [];
     const properties = schema['properties'];
-    if (!Object.keys(properties).every(key => required.includes(key))) {return false;}
-    if (!Object.values(properties).every(value => !isRecord(value) || meetsStrictSchemaRules(value))) {return false;}
+    if (!Object.keys(properties).every(key => required.includes(key))) {
+      return false;
+    }
+    if (!Object.values(properties).every(value => !isRecord(value) || meetsStrictSchemaRules(value))) {
+      return false;
+    }
   }
   for (const key of ['items', 'additionalProperties'] as const) {
     const child = schema[key];
-    if (isRecord(child) && !meetsStrictSchemaRules(child)) {return false;}
+    if (isRecord(child) && !meetsStrictSchemaRules(child)) {
+      return false;
+    }
   }
   for (const key of ['anyOf', 'oneOf', 'allOf'] as const) {
     const members = schema[key];
@@ -132,6 +127,17 @@ export function meetsStrictSchemaRules(schema: Record<string, unknown>): boolean
   return true;
 }
 
+/**
+ * Whether a listTools failure means the server itself could not be reached (a connection or
+ * transport failure, status 502 or above), as opposed to a problem with the request. Mirrors
+ * the unavailable-connector test AgentThread applies to tool metadata failures: a host policy
+ * pre-dispatch failure is not unavailability, and neither is a client error. A redirect the
+ * connection refused to follow is not unavailability either: the server was reached and
+ * answered, and the refusal is deliberate, so it stays loud. The refusal rides as the cause
+ * under wrappers that add their own context (the connect error names the server around it),
+ * so the whole chain is walked before answering: a refusal anywhere in it settles the
+ * question, even under an outer error that on its own would read as unavailability.
+ */
 function isServerUnavailableError(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
@@ -154,7 +160,8 @@ function isServerUnavailableError(error: unknown): boolean {
 }
 
 type ListToolsOutcome =
-  { serverName: string; response: ListToolsResponse } | { serverName: string; unavailable: MCPServerUnavailableInfo };
+  | { serverName: string; response: ListToolsResponse }
+  | { serverName: string; unavailable: MCPServerUnavailableInfo };
 
 export async function convertMCPServersToTools(params: {
   tfyManagedServers: IToolSet[];
