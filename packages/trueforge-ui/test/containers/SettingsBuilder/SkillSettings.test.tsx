@@ -597,9 +597,12 @@ describe('SkillSettings website check', () => {
       </host.wrapper>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Enable Code Review' }));
-    await screen.findByText('It sends requests to these websites:');
+    // The window opens in an effect after the check answers, so its text can render a moment before its buttons
+    // can be reached. Wait for the button itself.
+    const cancel = await screen.findByRole('button', { name: 'Cancel' });
+    expect(screen.getByText('It sends requests to these websites:')).toBeInTheDocument();
     expect(screen.getByText(/A skill can never send email/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(cancel);
     expect(host.added).toEqual([]);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Enable Code Review' }));

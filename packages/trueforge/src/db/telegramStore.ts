@@ -61,6 +61,8 @@ export interface TelegramPendingReplyTable {
   turn_id: string;
   /** The Telegram chat the answer goes to, as text. */
   chat_id: string;
+  /** Where the turn started: 'telegram', or 'app' for a message typed in the app's Telegram chat. */
+  origin: string;
   created_at: string | Date;
 }
 
@@ -121,6 +123,9 @@ export interface TelegramConnection {
   updated_at: string;
 }
 
+/** Where a turn Telegram is owed an answer for started. */
+export type TelegramReplyOrigin = 'telegram' | 'app';
+
 export interface TelegramPendingReply {
   id: string;
   tenant_id: string;
@@ -129,6 +134,7 @@ export interface TelegramPendingReply {
   session_id: string;
   turn_id: string;
   chat_id: string;
+  origin: TelegramReplyOrigin;
   created_at: string;
 }
 
@@ -175,6 +181,7 @@ export interface AddTelegramPendingReplyInput extends TelegramOwner {
   session_id: string;
   turn_id: string;
   chat_id: string;
+  origin: TelegramReplyOrigin;
   /** Defaults to now. */
   now?: Date;
 }
@@ -295,6 +302,7 @@ function toPendingReply(row: TelegramPendingReplyTable): TelegramPendingReply {
     session_id: row.session_id,
     turn_id: row.turn_id,
     chat_id: row.chat_id,
+    origin: row.origin === 'app' ? 'app' : 'telegram',
     created_at: toIso(row.created_at),
   };
 }
@@ -523,6 +531,7 @@ export class TelegramStore implements ITelegramStore {
         session_id: input.session_id,
         turn_id: input.turn_id,
         chat_id: input.chat_id,
+        origin: input.origin,
         created_at: (input.now ?? new Date()).toISOString(),
       })
       .execute();

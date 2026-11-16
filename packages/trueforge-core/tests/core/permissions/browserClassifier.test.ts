@@ -5,7 +5,7 @@ import {
   BROWSER_SCREENSHOT_TOOL_NAME,
   BROWSER_SCROLL_TOOL_NAME,
 } from '../../../src/core/permissions/browserToolNames';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import {
   carriedPrivateDetails,
@@ -13,6 +13,7 @@ import {
   recordReplyText,
   recordUntrustedText,
 } from '../../../src/core/permissions/provenance';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import {
   countsAsSilentLookup,
   createWebSearchTurnState,

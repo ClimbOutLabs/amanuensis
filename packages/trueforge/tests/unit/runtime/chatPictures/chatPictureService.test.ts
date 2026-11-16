@@ -16,7 +16,7 @@ const CREATED = '2026-10-21T00:00:00.000Z';
 function modelMessage(input: {
   id: string;
   content: string;
-  calls?: { id: string; name: string }[];
+  calls?: { id: string; name: string; role?: 'search' | 'page_read' }[];
 }): PersistedTurnEvent {
   return {
     type: 'model.message',
@@ -36,6 +36,10 @@ function modelMessage(input: {
               server_id: 'srv',
               server_name: 'srv',
               name: call.name,
+              // The host stamps a designated provider's calls by the tools its record declares.
+              ...(call.role === undefined ? {} : { search_provider_call: true as const }),
+              ...(call.role === 'search' ? { search_result_call: true as const } : {}),
+              ...(call.role === 'page_read' ? { page_read_call: true as const } : {}),
             },
           })),
         }),
@@ -74,7 +78,7 @@ function service(events: PersistedTurnEvent[]) {
 describe('chat picture service', () => {
   it('serves a picture from a search result in this chat, and keeps it briefly in memory', async () => {
     const { seen, get } = service([
-      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_search' }] }),
+      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_search', role: 'search' }] }),
       toolResponse({ id: 't1', tool_call_id: 'c1', result: { results: [{ title: 'Red Fox', url: FOX }] } }),
     ]);
     await expect(get(FOX)).resolves.toEqual({ status: 'shown', bytes: PNG, mime: 'image/png' });
@@ -84,7 +88,7 @@ describe('chat picture service', () => {
 
   it('serves a picture a search result listed, though no result link named the file', async () => {
     const { seen, get } = service([
-      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_search' }] }),
+      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_search', role: 'search' }] }),
       toolResponse({
         id: 't1',
         tool_call_id: 'c1',
@@ -97,7 +101,7 @@ describe('chat picture service', () => {
 
   it('serves a picture from a page the chat opened, though no result named the file', async () => {
     const { seen, get } = service([
-      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_fetch' }] }),
+      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_fetch', role: 'page_read' }] }),
       toolResponse({ id: 't1', tool_call_id: 'c1', result: `# File:Red Fox.jpg\n<img src="${FOX}" alt="Red fox">` }),
     ]);
     await expect(get(FOX)).resolves.toEqual({ status: 'shown', bytes: PNG, mime: 'image/png' });
@@ -111,7 +115,7 @@ describe('chat picture service', () => {
 
   it('refuses a picture no stored turn shows, without fetching it', async () => {
     const { seen, get } = service([
-      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_search' }] }),
+      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_search', role: 'search' }] }),
       toolResponse({ id: 't1', tool_call_id: 'c1', result: { results: [{ title: 'Red Fox', url: FOX }] } }),
     ]);
     await expect(get(OTHER)).resolves.toEqual({ status: 'not_in_chat' });
@@ -122,6 +126,15 @@ describe('chat picture service', () => {
     const { seen, get } = service([
       modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'read_email' }] }),
       toolResponse({ id: 't1', tool_call_id: 'c1', result: { bodyHtml: `<img src="${FOX}">` } }),
+    ]);
+    await expect(get(FOX)).resolves.toEqual({ status: 'not_in_chat' });
+    expect(seen).toEqual([]);
+  });
+
+  it('does not count a search-named call the host did not stamp as the provider search', async () => {
+    const { seen, get } = service([
+      modelMessage({ id: 'm1', content: '', calls: [{ id: 'c1', name: 'web_search' }] }),
+      toolResponse({ id: 't1', tool_call_id: 'c1', result: { results: [{ title: 'Red Fox', url: FOX }] } }),
     ]);
     await expect(get(FOX)).resolves.toEqual({ status: 'not_in_chat' });
     expect(seen).toEqual([]);

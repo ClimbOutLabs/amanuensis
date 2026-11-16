@@ -3,11 +3,7 @@ import type { Logger } from 'winston';
 import { caldavEventReviewFrom, type CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import { caldavResultForModel } from '../calendar/caldav/toolResults';
-import {
-  MAIL_DRAFT_FIRST_DETAIL,
-  mailDraftKey,
-  type ApprovedMailDraft,
-} from '../email/mailConnector/approvedDrafts';
+import { MAIL_DRAFT_FIRST_DETAIL, mailDraftKey, type ApprovedMailDraft } from '../email/mailConnector/approvedDrafts';
 import {
   mailForwardReadArguments,
   mailForwardReviewFrom,
@@ -49,14 +45,11 @@ import {
 } from '../permissions/webSearch';
 import type { ToolBundleName } from '../runtime/toolBundleCatalog';
 import {
-  isPageReaderTool,
-  isSearchResultTool,
   recordFetchedPages,
   recordSearchResults,
   type FetchedPageScope,
   type FetchedPageStore,
 } from '../search/fetchedPages';
-import { TAVILY_SEARCH_TOOL_NAME } from '../search/TavilyClient';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -255,7 +248,9 @@ export class ToolSet implements IToolSet {
   private readonly firstParty: boolean;
   private readonly searchProvider: boolean;
   private readonly searchTools: ReadonlySet<string>;
+  private readonly pageReadTools: ReadonlySet<string>;
   private readonly searchPlumbingFields: readonly string[];
+  private readonly declaredChangeTools: readonly string[];
   private readonly pages: FetchedPageStore | undefined;
   private readonly pagesScope: FetchedPageScope | undefined;
   private readonly bundle: ToolBundleName | undefined;
@@ -287,6 +282,12 @@ export class ToolSet implements IToolSet {
      * declares it read-only or this list names it. Has no effect without `sentinel`.
      */
     searchProvider?: SearchProviderGrant | undefined;
+    /**
+     * Bare names of the tools this server itself declared as changing things, captured by the
+     * host from the server's own tool list and stored on the connector record.
+     * Set by the host only, never from a connector URL, client input, or this call's metadata.
+     */
+    declaredChangeTools?: readonly string[] | undefined;
     /**
      * The shared memory of pages read this session, written after every successful call so a
      * place found on a page can be checked against it whatever tool read the page. Set by the
@@ -320,7 +321,9 @@ export class ToolSet implements IToolSet {
     this.firstParty = params.firstParty === true;
     this.searchProvider = params.searchProvider !== undefined;
     this.searchTools = new Set(params.searchProvider?.tools);
+    this.pageReadTools = new Set(params.searchProvider?.page_read_tools);
     this.searchPlumbingFields = params.searchProvider?.plumbing_fields ?? [];
+    this.declaredChangeTools = params.declaredChangeTools ?? [];
     this.pages = params.pages;
     this.pagesScope = params.pagesScope;
     this.bundle = params.bundle;
@@ -328,9 +331,9 @@ export class ToolSet implements IToolSet {
     this.logger = params.logger;
   }
 
-  /** Only the designated search provider's listed search and page-read tools; the server's own hints never count. */
+  /** Only the designated search provider's declared search and page-read tools; the server's own hints never count. */
   isHostVouchedReadTool(name: string): boolean {
-    return this.searchProvider && this.searchTools.has(name);
+    return this.searchProvider && (this.searchTools.has(name) || this.pageReadTools.has(name));
   }
 
   bundleOf(_toolName: string): ToolBundleName | undefined {
@@ -478,13 +481,12 @@ export class ToolSet implements IToolSet {
     if (
       this.pages !== undefined &&
       this.pagesScope !== undefined &&
-      (this.firstParty || this.searchProvider) &&
-      isPageReaderTool(params.name) &&
+      this.pageReadTools.has(params.name) &&
       isCallToolResponseResult(response) &&
       response.result.isError !== true
     ) {
-      // Only Aman's own page readers record: a tool from any other server may echo its input, so its
-      // text is never a page the model read.
+      // Only the page readers the designated provider's record declares record: a tool from any
+      // other server may echo its input, so its text is never a page the model read.
       recordFetchedPages({
         pages: this.pages,
         scope: this.pagesScope,
@@ -497,12 +499,10 @@ export class ToolSet implements IToolSet {
       this.pagesScope !== undefined &&
       isCallToolResponseResult(response) &&
       response.result.isError !== true &&
-      isSearchResultTool(params.name) &&
-      ((this.firstParty && params.name === TAVILY_SEARCH_TOOL_NAME) ||
-        (this.searchProvider && this.searchTools.has(params.name)))
+      this.searchTools.has(params.name)
     ) {
       // A search's results are sources, one link at a time; its query and any answer it wrote are not.
-      // A provider's search_tools list also holds its page readers, so only named search tools count.
+      // Only the search tools the designated provider's record declares count, never its page readers.
       recordSearchResults({
         pages: this.pages,
         scope: this.pagesScope,
@@ -573,12 +573,9 @@ export class ToolSet implements IToolSet {
       return deniedToolCallResponse(decision.reason);
     }
 
-    if (
-      this.sentinel !== undefined &&
-      (this.searchProvider || (decision !== undefined && isMapsToolName(params.name)))
-    ) {
+    if (this.sentinel !== undefined && decision !== undefined && (this.searchProvider || isMapsToolName(params.name))) {
       // The text an approved search or map sends joins the turn's trace, so a later silent call is checked
-      // against it. A silent map was recorded when it was classified, so only approved maps are added here.
+      // against it. A silent call was recorded when it was classified, so only approved ones are added here.
       const turn = this.sentinel.web_search;
       const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
       if (sent !== undefined) {
@@ -831,8 +828,10 @@ export class ToolSet implements IToolSet {
         mcp_grant_binding: this.source.grantBinding,
         mcp_first_party: this.firstParty,
         mcp_search_provider: this.searchProvider,
-        mcp_search_tool: this.searchTools.has(params.name),
+        mcp_search_tool: this.searchTools.has(params.name) || this.pageReadTools.has(params.name),
         mcp_search_plumbing_fields: this.searchPlumbingFields,
+        mcp_declared_change_tools: this.declaredChangeTools,
+        requires_network: info.requires_network,
         caldav_event: caldavEvent,
         mail_forward: mailForward,
         mcp_hints: {
@@ -850,6 +849,8 @@ export class ToolSet implements IToolSet {
         ...info,
         ...stamp,
         ...(this.searchProvider ? { search_provider_call: true as const } : {}),
+        ...(this.searchTools.has(params.name) ? { search_result_call: true as const } : {}),
+        ...(this.pageReadTools.has(params.name) ? { page_read_call: true as const } : {}),
         // An explicit require-approval selector adds a gate on top of any tier, including a
         // standing grant, but never to a call that is auto-denied without a card.
         is_approval_required:
@@ -895,7 +896,7 @@ export class ToolSet implements IToolSet {
   }): Promise<CallToolResponse> {
     const call = this.source.callTool(input.params, input.decision, input.context);
     const timeoutMs = this.searchCallTimeoutMs;
-    if (timeoutMs === undefined || !(this.searchProvider || isPageReaderTool(input.params.name))) {
+    if (timeoutMs === undefined || !(this.searchProvider || this.pageReadTools.has(input.params.name))) {
       return call;
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -958,13 +959,16 @@ function isReadOnlyLocalTool(annotations: ToolAnnotations | undefined): boolean 
  * tools) and LocalToolMCP (built-in host tools) so both read the same
  * server-declared metadata.
  */
-export function toolEffectHints(tool: ToolSchema | undefined): ToolEffectHints {
+export function toolEffectHints(
+  tool: (ToolSchema & { requires_network?: boolean | undefined }) | undefined,
+): ToolEffectHints {
   const annotations: ToolAnnotations | undefined = tool?.annotations;
   return {
     ...(tool?.description !== undefined && { description: tool.description }),
     ...(annotations?.readOnlyHint !== undefined && { read_only_hint: annotations.readOnlyHint }),
     ...(annotations?.destructiveHint !== undefined && { destructive_hint: annotations.destructiveHint }),
     ...(annotations?.openWorldHint !== undefined && { open_world_hint: annotations.openWorldHint }),
+    ...(tool?.requires_network !== undefined && { requires_network: tool.requires_network }),
     ...(isReadOnlyLocalTool(annotations) && { effect: 'inspect' as const }),
   };
 }

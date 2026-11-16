@@ -7,9 +7,9 @@ import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolic
 import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { SentinelServices } from '../../../src/core/permissions/context';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
   const actual = jest.requireActual<typeof import('../../../src/core/mcp/remoteMcpClient')>(
@@ -103,11 +103,7 @@ describe('approval card for connector calls', () => {
   });
 
   it.each([
-    [
-      'web_fetch',
-      { urls: ['https://www.usps.com/'], objective: 'o' },
-      'Fetch a web page from www.usps.com?',
-    ],
+    ['web_fetch', { urls: ['https://www.usps.com/'], objective: 'o' }, 'Fetch a web page from www.usps.com?'],
     ['web_search', { objective: 'o', search_queries: ['q'] }, 'Search the web on parallel-web?'],
   ])('shows %s on the Parallel connector the same way directly and through call_tool', async (name, input, what) => {
     const tool: ToolSchema = { name, description: 'Parallel tool.', inputSchema: schema };
@@ -148,6 +144,26 @@ describe('approval card for connector calls', () => {
 
   it('keeps an unknown connector tool on the fail-closed card, through call_tool too', async () => {
     const toolSet = makeToolSet({ name: 'misc', url: 'https://misc.example.com/mcp', tools: [mystery] });
+    // The only argument names the destination inside the connector, so the card can show where
+    // the call goes. An unknown tool that carries an id and names no destination is refused
+    // instead: the next test covers that half.
+    const direct = await toolSet.toolCallInfo({ name: 'frobnicate', arguments: { target: 'depot-7' } });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const wrapped = await deferred.toolCallInfo({
+      name: 'call_tool',
+      arguments: { mcp_server: 'misc', tool_name: 'frobnicate', input: { target: 'depot-7' } },
+    });
+    for (const info of [direct, wrapped]) {
+      expect(info.tier).toBe(3);
+      expect(info.tier3_card?.plain_what).toBe('Allow this new tool from misc?');
+      expect(info.tier3_card?.copy?.headline).toBe('Allow this new tool from misc?');
+      expect(info.tier3_card?.destination_host).toBe('misc.example.com');
+      expect(info.tier3_card?.outbound_text).toBe('target: depot-7');
+    }
+  });
+
+  it('refuses an unknown connector tool that carries an id and no destination, through call_tool too', async () => {
+    const toolSet = makeToolSet({ name: 'misc', url: 'https://misc.example.com/mcp', tools: [mystery] });
     const direct = await toolSet.toolCallInfo({ name: 'frobnicate', arguments: { id: '7' } });
     const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
     const wrapped = await deferred.toolCallInfo({
@@ -156,10 +172,12 @@ describe('approval card for connector calls', () => {
     });
     for (const info of [direct, wrapped]) {
       expect(info.tier).toBe(3);
-      expect(info.tier3_card?.plain_what).toBe('Allow this new tool from misc?');
-      expect(info.tier3_card?.copy?.headline).toBe('Allow this new tool from misc?');
-      expect(info.tier3_card?.destination_host).toBe('misc.example.com');
-      expect(info.tier3_card?.outbound_text).toBe('id: 7');
+      expect(info.tier3_card ?? null).toBeNull();
+      expect(info.is_approval_required).toBe(false);
+      expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
+      expect(info.pre_dispatch_failure?.message).toBe(
+        'Auto-denied: the destination of this external action could not be verified.',
+      );
     }
   });
 });

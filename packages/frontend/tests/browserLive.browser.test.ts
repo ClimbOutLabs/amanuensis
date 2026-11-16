@@ -163,7 +163,14 @@ test('the live browser page shows the tab and sends clicks, typing and files to 
     const calls = await answerLiveRoutes(page, { frame, tabs: [] });
     await page.goto(fixtureUrl, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
     await page.getByText('Aman has no page open right now', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-    await page.screenshot({ path: await featureShotPath({ surface: 'screen:browser-live', step: 'no-page-open' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: 'screen:browser-live',
+        step: 'no-page-open',
+        did: 'Opened the live browser page while Aman has no web page open.',
+        expect: 'It says "Aman has no page open right now" and asks for no picture of a page.',
+      }),
+    });
     assert.ok(
       calls.every(call => call.path === '/api/browser/live/tabs'),
       'no tabs: only the tab list is asked for',
@@ -361,7 +368,13 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
     assert.ok(height > 0 && height <= 48, `${label}: a sign-in box is one line tall (${String(height)}px)`);
   }
   await page.locator('details.browser-live-panel').screenshot({
-    path: await featureShotPath({ surface: 'screen:browser-live', step: `sign-in-${shotName(label)}` }),
+    path: await featureShotPath({
+      surface: 'screen:browser-live',
+      step: `sign-in-${shotName(label)}`,
+      did: `Opened the live browser page (${label}) and opened "Sign in with your password manager".`,
+      expect:
+        "Two one-line boxes show, for a name or email and for a password. The password is hidden and the browser is told not to fill in Aman's own sign-in.",
+    }),
   });
   await password.fill('hunter2');
   await page.getByRole('button', { name: 'Put password in page' }).click();
@@ -445,7 +458,12 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
   await waitForCall(calls, call => call.path === '/api/browser/live/close' && hasTab(call, 'chat-2'));
   await page.getByText('Session ended.', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
   await page.screenshot({
-    path: await featureShotPath({ surface: 'screen:browser-live', step: `session-ended-${shotName(label)}` }),
+    path: await featureShotPath({
+      surface: 'screen:browser-live',
+      step: `session-ended-${shotName(label)}`,
+      did: `On the live browser page (${label}), pressed End session and then "Press again to end".`,
+      expect: 'The page says "Session ended." and the tab Aman had open is closed.',
+    }),
   });
   assert.equal(
     await tabs.getByRole('button', { name: 'https://example.test/upload' }).count(),

@@ -1528,9 +1528,16 @@ export interface SharedServerConfiguration {
   ACCESS_LOGS: boolean;
   /**
    * Token eval instance: Gmail and Calendar answer from the eval fixtures, and only approvals for the
-   * fixture-backed tools and maps and search are allowed through. Env: `AMAN_EVAL_MODE`. Default false.
+   * fixture-backed tools, maps, search and making a schedule are allowed through. Env: `AMAN_EVAL_MODE`.
+   * Default false.
    */
   AMAN_EVAL_MODE: boolean;
+  /**
+   * With eval mode on, also approves adding, running and removing a skill: the skill cards and the
+   * sandbox's command and file tools. Only for an eval instance with its own sandbox. Env: `AMAN_EVAL_SKILLS`.
+   * Default false.
+   */
+  AMAN_EVAL_SKILLS: boolean;
   /** Folder holding the eval fixtures (inbox, calendar). Set by the package layout, not by an env var. */
   EVAL_FIXTURE_DIR: string;
   /** Node environment. Env: `NODE_ENV`. */
@@ -1910,6 +1917,11 @@ export interface SharedServerConfiguration {
    * refresh). Read only; the app never runs host commands. Derived: `{app data dir}/host-report.json`.
    */
   HOST_REPORT_PATH: string;
+  /**
+   * The names and addresses a browser recently opened this instance at that it was not set up for, newest last, so
+   * `aman doctor` can list them. Derived: `{app data dir}/refused-addresses.txt`.
+   */
+  REFUSED_ADDRESSES_PATH: string;
   /**
    * Proxy and certificate settings the server's own git (for sandbox slots) may use, copied from the process
    * environment: HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, SSL_CERT_DIR, GIT_SSL_CAINFO, GIT_SSL_CAPATH and
@@ -2686,6 +2698,11 @@ const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
   AMAN_EVAL_MODE: parseBoolean({ envKey: 'AMAN_EVAL_MODE', raw: getEnv('AMAN_EVAL_MODE'), defaultValue: false }),
+  AMAN_EVAL_SKILLS: parseBoolean({
+    envKey: 'AMAN_EVAL_SKILLS',
+    raw: getEnv('AMAN_EVAL_SKILLS'),
+    defaultValue: false,
+  }),
   EVAL_FIXTURE_DIR: path.join(PACKAGE_ROOT, 'evals', 'fixtures'),
   NODE_ENV: getEnv('NODE_ENV'),
   BUILD_REF: parseBuildRef(getEnv('BUILD_REF')),
@@ -2885,6 +2902,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
   SANDBOX_GIT_BRIDGE_DIR: path.join(appDataDir, 'git-bridge'),
   HOST_REPORT_PATH: path.join(appDataDir, 'host-report.json'),
+  REFUSED_ADDRESSES_PATH: path.join(appDataDir, 'refused-addresses.txt'),
   SANDBOX_GIT_NETWORK_ENV: pickGitNetworkEnv(
     Object.fromEntries(GIT_NETWORK_ENV_NAMES.map(name => [name, getEnv(name)])),
   ),
@@ -3383,12 +3401,12 @@ export function isOidcConfigured(value: ServerConfiguration): value is ServerCon
 
 /** The refusal shown when local sign-in would be offered over a plain-http address beyond this computer. */
 export const LOCAL_SIGN_IN_ORIGIN_REFUSAL =
-  'Local sign-in works on this computer or behind https. Set PUBLIC_BASE_URL to an https address, or use the Docker install.';
+  'Local sign-in works on this computer or behind https. Change every plain http address in PUBLIC_BASE_URL and ALLOWED_ORIGINS to https, or use the Docker install.';
 
 /**
- * Local sign-in is allowed only when every address the app is opened at is on this computer, or the
- * person has set an https public address. A plain-http address beyond this computer refuses to start:
- * the password would travel unprotected. Runs at load, before the server starts.
+ * Local sign-in is allowed only when every address the app is opened at is on this computer or https.
+ * A plain-http address beyond this computer refuses to start, whatever the public address is: the
+ * password and the session would travel unprotected there. Runs at load, before the server starts.
  */
 export function assertLocalSignInOrigins(
   config: Pick<
@@ -3397,9 +3415,6 @@ export function assertLocalSignInOrigins(
   >,
 ): void {
   if (config.TRUEFORGE_AUTH_MODE !== 'local') {
-    return;
-  }
-  if (config.PUBLIC_BASE_URL.startsWith('https://')) {
     return;
   }
   const origins = [effectivePublicBaseUrl(config), ...config.ALLOWED_ORIGINS].filter(origin => origin !== '');

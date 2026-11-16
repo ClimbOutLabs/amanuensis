@@ -135,7 +135,7 @@ const Tier3CalendarEventBeforeSchema = z
 export const Tier3CalendarEventSchema = z
   .object({
     action: z.enum(['create', 'change']).describe('Whether a new event is added or an existing one changed.'),
-    calendar: z.string().describe('The Google account whose main calendar is written.'),
+    calendar: z.string().describe('The account whose main calendar is written, as its own service names it.'),
     title: z.string().describe('Event title.'),
     when: z.string().describe('Local date and time in plain words.'),
     time_zone: z.string().describe('IANA time zone the times are in.'),
@@ -143,7 +143,13 @@ export const Tier3CalendarEventSchema = z
     location: z.string().describe('Place; empty when none.'),
     description: z.string().describe('Description the write sets; empty when none.'),
     attendees: z.array(z.string()).describe('Every guest on the event.'),
-    guests_emailed: z.boolean().describe('True when Google emails the guests about this.'),
+    // Cards stored before this line was carried read as no line: they held only a flag for it.
+    guests_line: z
+      .string()
+      .default('')
+      .describe(
+        'What the card tells the person about the guests being emailed, in the finished words of the review that built the card. Empty when the event has no guests.',
+      ),
     one_of_repeating: z.boolean().describe('True when this changes one date of a repeating event.'),
     before: Tier3CalendarEventBeforeSchema.nullable(),
     // Absent on cards stored before these fields existed: a reader must treat absent as not known.
@@ -352,7 +358,7 @@ export const Tier3CardSchema = z
       .string()
       .nullable()
       .optional()
-      .describe('For a card on the Email connector: the account the message goes from. Otherwise null.'),
+      .describe('For a mail card: the account the message goes from. Otherwise null.'),
     mail_from_choices: z
       .array(z.string())
       .nullable()

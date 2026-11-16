@@ -34,7 +34,6 @@ import {
   HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
-  isHostWrappedText,
   McpConnectionError,
   newEventId,
   PromiseTimeoutError,
@@ -77,10 +76,12 @@ import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
+import type { ITelegramStore } from '../db/telegramStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { gateEvalApprovals } from '../eval/approvalGate';
 import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { storeHomeAssistantDeclaredChangeTools } from '../mcp/homeAssistant';
 import { setUpConnectorNamesOf } from '../mcp/hostConnectors';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import { personalizationFactLines, type PersonalizationProfile } from '../personalization/profile';
@@ -175,6 +176,7 @@ import {
 import { chatSkillSwitch, type SkillTurnContext } from '../runtime/skillCapability';
 import { readSkillFilesFromGit } from '../runtime/skillWebsites';
 import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
+import { queueAppTurnForTelegram } from '../runtime/telegram/telegramMirror';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
@@ -189,6 +191,7 @@ import {
 } from '../runtime/turnStartBound';
 import type { TurnTimezone } from '../runtime/turnTimezone';
 import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
+import { extractUserMessageText } from '../runtime/userMessageText';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import { drainSkillNetworkCards, resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
@@ -313,6 +316,8 @@ export interface TurnsRouterDeps {
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** Copies messages typed in the app's Telegram chat to Telegram; absent where Telegram is not wired. */
+  telegramStore?: Pick<ITelegramStore, 'getConnection' | 'addPendingReply'> | undefined;
   repositoryStore: IRepositoryStore;
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
@@ -681,12 +686,15 @@ function createTurnResolver(deps: {
           }),
           first_party: connection.first_party,
           grant_binding: connection.grant_binding,
+          declared_change_tools: connection.declared_change_tools,
           search_provider:
             connection.search_provider === undefined
               ? undefined
-              : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
+              : mcpCatalog.searchProviderGrant({ manifest: connection.search_provider }),
         };
       },
+      storeDeclaredChangeTools: ({ name, url, declared_change_tools }) =>
+        storeHomeAssistantDeclaredChangeTools({ store: mcpServerStore, tenant_id, name, url, declared_change_tools }),
       setUpConnectorNames: async () =>
         setUpConnectorNamesOf(await mcpServerStore.listServers({ tenant_id, names: undefined })),
       mailAccounts: mailAccountDirectory,
@@ -1145,27 +1153,6 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
     return undefined;
   }
   return title;
-}
-
-/**
- * Full (uncapped) text of every user message in a create-turn input, concatenated in order and
- * joined with a blank line, or `''` when there is none. A turn's input can carry several user
- * messages (e.g. queued follow-ups sent before the previous turn finished); retention must not
- * silently drop any but the first.
- */
-export function extractUserMessageText(input: TurnInputItem[] | undefined): string {
-  const userMessages = input?.filter(isAgentInputUserMessage) ?? [];
-  return userMessages
-    .map(message =>
-      typeof message.content === 'string'
-        ? message.content
-        : message.content
-            .filter(part => !isFileContentPart(part))
-            .map(part => part.text)
-            .filter(text => !isHostWrappedText(text))
-            .join(' '),
-    )
-    .join('\n\n');
 }
 
 /**
@@ -2733,6 +2720,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             session,
             previous_turn_id: previousTurnId,
             input: submitted.input,
+            allowSkills: configuration.AMAN_EVAL_SKILLS,
           }),
         }
       : submitted;
@@ -3049,7 +3037,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               sandboxReady: serverSandboxAvailable,
               lookup: { fetchImpl: undefined, resolveAddresses: undefined },
               readFiles: readSkillFilesFromGit,
-              turnOnForChat: chatSkillSwitch({
+              chatSkills: chatSkillSwitch({
                 sessionStore: deps.sessionStore,
                 tenant_id: requestContext.tenant_id,
                 session_id: session.session_id,
@@ -3361,6 +3349,17 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           409,
         );
       }
+    }
+
+    // A message typed in the app's Telegram chat is copied to Telegram with its answer.
+    if (deps.telegramStore !== undefined) {
+      await queueAppTurnForTelegram({
+        store: deps.telegramStore,
+        session: session.record,
+        subjectId: requestContext.subject.id,
+        turnId: turn.id,
+        logger: deps.logger,
+      });
     }
 
     const createdTurn = turn;

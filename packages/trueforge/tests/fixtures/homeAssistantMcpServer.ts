@@ -115,7 +115,13 @@ export async function startHomeAssistantStub(
         return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
       },
     );
-    const change = (tool_name: string, apply: (entity: StubEntity, args: Record<string, unknown>) => string) =>
+    // A tool the server lists as a change carries readOnlyHint false; `declared: false` leaves it
+    // unmarked, as a server does for a tool it does not describe.
+    const change = (
+      tool_name: string,
+      apply: (entity: StubEntity, args: Record<string, unknown>) => string,
+      { declared }: { declared: boolean } = { declared: true },
+    ) =>
       server.registerTool(
         tool_name,
         {
@@ -126,7 +132,7 @@ export async function startHomeAssistantStub(
             position: z.number().optional(),
             brightness: z.number().optional(),
           },
-          annotations: { readOnlyHint: false, openWorldHint: false },
+          ...(declared ? { annotations: { readOnlyHint: false, openWorldHint: false } } : {}),
         },
         // eslint-disable-next-line @typescript-eslint/require-await -- the tool handler shape is async; the stub answers from memory
         async args => {
@@ -154,7 +160,7 @@ export async function startHomeAssistantStub(
     change('HassSetPosition', entity => `Set the position of ${entity.name}.`);
     if (options.newerTools === true) {
       change(HA_CALL_ACTION_TOOL, entity => `Ran an action on ${entity.name}.`);
-      change(HA_UNFAMILIAR_TOOL, entity => `Started ${entity.name}.`);
+      change(HA_UNFAMILIAR_TOOL, entity => `Started ${entity.name}.`, { declared: false });
     }
     return server;
   };

@@ -1086,7 +1086,7 @@ await client.mcpServers.deleteAuthorization("name");
 <dl>
 <dd>
 
-Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.
+Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. The check changes nothing on the server. It does store, on the connector record, which of the listed tools the server itself declares as changes, because standing grants read that. A failed check is a 200 carrying the reason.
 </dd>
 </dl>
 </dd>

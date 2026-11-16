@@ -329,8 +329,13 @@ describe('getMcpConnection', () => {
         first_party: false,
       });
 
-      expect((await connectionFor('finder-mcp')).search_provider).toEqual({ tools: ['find_pages'] });
-      expect((await connectionFor('finder-oauth-mcp')).search_provider).toEqual({ tools: [] });
+      expect((await connectionFor('finder-mcp')).search_provider).toEqual({
+        url: 'https://finder.example/mcp',
+        search_tools: ['find_pages'],
+      });
+      expect((await connectionFor('finder-oauth-mcp')).search_provider).toEqual({
+        url: 'https://finder-oauth.example/mcp',
+      });
       expect((await connectionFor('other-search-mcp')).search_provider).toBeUndefined();
     });
 
@@ -361,11 +366,11 @@ describe('getMcpConnection', () => {
         if (connection.search_provider === undefined) {
           throw new Error(`expected ${name} to be the search provider`);
         }
-        expect(
-          catalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
-        ).toEqual({
-          tools: ['web_search', 'web_fetch'],
+        expect(catalog.searchProviderGrant({ manifest: connection.search_provider })).toEqual({
+          tools: ['web_search'],
+          page_read_tools: ['web_fetch'],
           plumbing_fields: ['session_id', 'model_name'],
+          served_in_process: false,
         });
       }
     });

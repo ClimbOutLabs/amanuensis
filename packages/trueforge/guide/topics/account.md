@@ -10,7 +10,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Acco
 
 ## How sign-in works
 
-The first time you open Aman, the sign-in page asks you to choose your email and password. After that, it just asks for them.
+If you installed Aman with the installer, you chose the password during the install. If you started Aman with `npx amanuensis`, the first start asks for your email and password in the terminal. After that, the sign-in page just asks for them.
 
 Aman keeps the password scrambled, never as plain text. Signing in only works when the page is on this computer, or on an `https://` address.
 

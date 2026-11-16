@@ -1,8 +1,9 @@
 name: Model evals
 
-# Runs real models against a throwaway eval-mode Aman: everyday tasks, safety traps and memory
-# questions, graded by rule checks and a judge model. Each run adds to a score history kept as a
-# run artifact, and the run fails when a model scores clearly worse than its last run.
+# Runs real models against a throwaway eval-mode Aman: everyday tasks, safety traps, memory questions,
+# and adding, running and removing skills in a real sandbox, graded by rule checks and a judge model.
+# Each run adds to a score history kept as a run artifact, and the run fails when a model scores
+# clearly worse than its last run.
 #
 # Two more jobs check coding work in the real sandbox and co-browse in a real browser, both built from
 # this checkout, with no model. They run beside the model eval and get no environment, so they can
@@ -91,6 +92,27 @@ jobs:
             fi
           done
 
+      # The skill cases add, run and remove skills in a real sandbox built from this checkout. It is built
+      # before any step that holds a key.
+      - name: Build the sandbox from this checkout and start it
+        run: pnpm sandbox:slots --fix --yes --no-hard-disk-limit --instance eval
+
+      # The eval instance runs on the runner itself, not in a container, so it reaches each slot through
+      # links to the slot's volumes. The runner is thrown away after the job, so opening the volumes to
+      # its user changes nothing that lasts.
+      - name: Let the eval instance reach the sandbox
+        run: |
+          sudo chmod o+x /var/lib/docker /var/lib/docker/volumes
+          for n in 1 2; do
+            control=$(docker volume inspect --format '{{ .Mountpoint }}' "eval_slot_ctl_$n")
+            mirror=$(docker volume inspect --format '{{ .Mountpoint }}' "eval_slot_mirror_$n")
+            sudo chmod o+x "$(dirname "$control")" "$control" "$(dirname "$mirror")"
+            sudo chmod 0777 "$mirror"
+            mkdir -p "$RUNNER_TEMP/slots/$n"
+            ln -s "$control/agent.sock" "$RUNNER_TEMP/slots/$n/agent.sock"
+            ln -s "$mirror" "$RUNNER_TEMP/slots/$n/mirror"
+          done
+
       - name: Run the model eval
         env:
           META_API_KEY: ${{ secrets.MODEL_EVAL_META_API_KEY }}
@@ -99,6 +121,9 @@ jobs:
           MODELS: ${{ inputs.models || env.WEEKLY_MODELS }}
           RUNS: ${{ inputs.runs || '1' }}
           LABEL: ${{ github.event_name == 'schedule' && 'weekly' || 'on-demand' }}
+          SANDBOX_BACKEND: slots
+          SANDBOX_SLOTS_DIR: ${{ runner.temp }}/slots
+          SANDBOX_SLOTS: '2'
         run: |
           for name in META_API_KEY NEBIUS_API_KEY TOKEN_FACTORY_MODEL; do
             if [ -z "${!name}" ]; then unset "$name"; fi
@@ -108,6 +133,7 @@ jobs:
             --judge "$JUDGE_MODEL" \
             --runs "$RUNS" \
             --label "$LABEL" \
+            --skills \
             --history "$RUNNER_TEMP/history/history.json" \
             --out "$RUNNER_TEMP/results"
 
@@ -158,6 +184,10 @@ jobs:
           path: ${{ runner.temp }}/history/history.json
           if-no-files-found: ignore
           retention-days: 90
+
+      - name: Stop the sandbox
+        if: always()
+        run: pnpm sandbox:slots --down --purge --instance eval
 
   sandbox-coding:
     name: Coding in the sandbox

@@ -94,6 +94,10 @@
       "set": "calendar",
       "tests": []
     },
+    "command:address": {
+      "set": "install",
+      "tests": ["installer/tests/lib/address.test.sh"]
+    },
     "command:adopt": {
       "set": "install",
       "tests": []

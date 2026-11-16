@@ -35,12 +35,14 @@ class SyntheticTools extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: 'synthetic_write',
+      requiresNetwork: false,
       description: 'Synthetic write op with no effect hints.',
       schema: z.object({}).strict(),
       handler: () => Promise.resolve(toolResultResponse({ text: '{}' })),
     }),
     defineTool({
       name: 'synthetic_read',
+      requiresNetwork: false,
       description: 'Synthetic read op declaring itself read-only.',
       schema: z.object({}).strict(),
       annotations: { readOnlyHint: true },
@@ -223,9 +225,12 @@ describe('classifyUnstampedToolCall on a connector call', () => {
 
   async function dispatchAgainst(moved: boolean): Promise<string | undefined> {
     const sentinel = makeSentinel();
+    // The call carries nothing: an unknown tool carrying an id and no destination is refused
+    // under the unverifiable-destination rule, so the connector binding is exercised with a
+    // call that still gets the fail-closed card.
     const stamped = await classifyUnstampedToolCall({
       sentinel,
-      canonical_params: { id: '1' },
+      canonical_params: {},
       info,
       connector,
     });
@@ -234,7 +239,7 @@ describe('classifyUnstampedToolCall on a connector call', () => {
       call: {
         tool_name: 'frobnicate',
         tool_type: 'mcp',
-        canonical_params: { id: '1' },
+        canonical_params: {},
         tier: 3,
         approval_token_id: stamped.approval_token_id ?? null,
         approval_binding: null,

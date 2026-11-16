@@ -25,7 +25,10 @@ test('an approved call_tool call with a made-up inner argument runs with only th
               name: 'send_note',
               description: 'Send a note',
               preload: false,
-              inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+              inputSchema: {
+                type: 'object',
+                properties: { to: { type: 'string' }, text: { type: 'string' } },
+              },
             },
           ],
         },
@@ -50,10 +53,17 @@ test('an approved call_tool call with a made-up inner argument runs with only th
     sentinel,
   });
   const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: makeSilentLogger() });
-  const wire = { mcp_server: 'notes', tool_name: 'send_note', input: { text: 'hi', session_id: 'made-up' } };
+  // The note names its recipient, so the call can be carded. A note carrying only text shows
+  // no destination the card can verify and is refused instead (see
+  // unverifiableDestination.test.ts), which would leave nothing to approve here.
+  const wire = {
+    mcp_server: 'notes',
+    tool_name: 'send_note',
+    input: { to: 'team@example.com', text: 'hi', session_id: 'made-up' },
+  };
   const info = await deferred.toolCallInfo({ name: 'call_tool', arguments: wire });
   expect(info.approval_token_id).toBeTruthy();
-  expect(info.tier3_card?.outbound_text).toBe('text: hi');
+  expect(info.tier3_card?.outbound_text).toBe('to: team@example.com\ntext: hi');
   const message: InternalEnrichedAssistantMessage = {
     role: 'assistant',
     content: null,
@@ -81,5 +91,5 @@ test('an approved call_tool call with a made-up inner argument runs with only th
     },
   });
   expect(result.toolCallResults[0]?.failure).toBe(false);
-  expect(sent.map(call => call.arguments)).toEqual([{ text: 'hi' }]);
+  expect(sent.map(call => call.arguments)).toEqual([{ to: 'team@example.com', text: 'hi' }]);
 });

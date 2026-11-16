@@ -97,6 +97,25 @@ test_a_full_upgrade_moves_a_plain_http_instance_to_https() {
   sandbox_drop
 }
 
+test_an_upgrade_reads_the_addresses_again_and_keeps_no_vpn_address() {
+  t_begin "an upgrade reads the addresses again, so a VPN address an older version listed by itself is dropped"
+  sandbox_new
+  fixture_network 192.168.1.20 tailscale0:100.101.102.103
+  fixture_hostname host
+  install_machine
+  local old="$HTTPS_ORIGINS,https://100.101.102.103:8443,https://host.example.ts.net:8443"
+  sed -i "s|^origins=.*|origins=$old|" "$AMAN_HOME/state/instances/main.conf"
+  sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$old|" "$AMAN_HOME/instances/main/.env"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_eq "$(reg_value main origins)" "$HTTPS_ORIGINS"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_not_contains "$(compose)" "100.101.102.103"
+  assert_eq "$(reg_value main listen_addresses)" "192.168.1.20"
+  sandbox_drop
+}
+
 test_upgrade_building_missing_parts_moves_a_plain_http_instance_to_https() {
   t_begin "an upgrade that builds missing parts also moves an older plain http instance to https"
   sandbox_new
@@ -1027,6 +1046,7 @@ test_noop_when_current
 test_upgrade_check_names_the_move_to_https_and_changes_nothing
 test_upgrade_moves_a_plain_http_instance_to_https
 test_a_full_upgrade_moves_a_plain_http_instance_to_https
+test_an_upgrade_reads_the_addresses_again_and_keeps_no_vpn_address
 test_upgrade_building_missing_parts_moves_a_plain_http_instance_to_https
 test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
 test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
