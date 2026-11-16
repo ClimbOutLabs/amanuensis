@@ -1030,8 +1030,8 @@ export const WINDOW_CLOSE_QUESTION =
 export const WINDOW_WELCOME_TITLE = 'Welcome to Amanuensis';
 
 export const WINDOW_WELCOME_LINES: readonly string[] = [
-  'This sets up Aman on this computer. Aman is your own assistant, and everything it keeps stays on this computer.',
-  'Setup installs Amanuensis on this computer. The first install may take a while, depending on your internet connection.',
+  'Setup will install Amanuensis, your personal assistant, on this computer.',
+  'The first install may take a while, depending on your internet connection.',
 ];
 
 export const WINDOW_CHECK_TITLE = 'Checking this computer';

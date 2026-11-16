@@ -223,8 +223,8 @@ Close
 Show details
 Amanuensis is still installing. If you close this window, the setup screens close, but the install keeps going. Close it?
 Welcome to Amanuensis
-This sets up Aman on this computer. Aman is your own assistant, and everything it keeps stays on this computer.
-Setup installs Amanuensis on this computer. The first install may take a while, depending on your internet connection.
+Setup will install Amanuensis, your personal assistant, on this computer.
+The first install may take a while, depending on your internet connection.
 Checking this computer
 Setup installs Docker Desktop if it is missing. Windows may ask for permission first.
 This computer is ready for Amanuensis.
