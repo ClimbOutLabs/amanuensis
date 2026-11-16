@@ -1,3 +1,4 @@
+--extra-index-url https://pypi.aikido.io/2ae1ca0edf01fef9cf6e2/simple
 pypdf
 pdfplumber
 reportlab
@@ -5,7 +6,7 @@ python-docx
 openpyxl
 pandas
 matplotlib
-Pillow
+pillow==12.3.0+aikido.4
 pytest
 ruff
 mypy
