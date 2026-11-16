@@ -162,24 +162,28 @@ describe('exec preflight with a skill network grant', () => {
     expect(execCalls.some(params => params.command === 'curl https://github.com')).toBe(false);
   });
 
-  it('still refuses other offline-only behaviour a grant does not cover: interpreter network calls stay refused by the interpreter guard', async () => {
+  it('asks before a skill-style loop under a grant, and runs that exact text with the grant', async () => {
     const execCalls: SandboxExecParams[] = [];
     const sandbox = makeSandbox({ execCalls, granted: () => true });
     await sandbox.listTools();
+    const command = `for path in $(curl -s https://api.github.com/repos | jq -r '.[].name'); do curl -s "https://github.com/$path"; done`;
     const call = {
       name: SANDBOX_EXEC_TOOL_NAME,
-      arguments: {
-        intent: 'Fetch a page',
-        purpose: 'execute',
-        command: `python3 -c "import urllib.request; print(urllib.request.urlopen('https://github.com').read())"`,
-      },
+      arguments: { intent: 'Fetch the repositories', purpose: 'execute', command },
     };
-    const response = await sandbox.callTool(call);
+
+    const info = await sandbox.toolCallInfo(call);
+    expect(info.pre_dispatch_failure).toBeUndefined();
+    expect(info.is_approval_required).toBe(true);
+
+    const response = await sandbox.callTool(call, { status: 'allow' });
     if (!isCallToolResponseResult(response)) {
       throw new Error('Expected a tool result');
     }
-    expect(response.result.isError).toBe(true);
-    expect(execCalls).toHaveLength(0);
+    expect(response.result.isError).toBe(false);
+    const loopExec = execCalls.find(params => params.command === command);
+    expect(loopExec?.skillNetworkToken).toBe(GRANT.token);
+    expect(loopExec?.skillNetworkHosts).toEqual(['api.github.com', 'github.com']);
   });
 });
 

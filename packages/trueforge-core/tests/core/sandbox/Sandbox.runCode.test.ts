@@ -290,7 +290,7 @@ describe('Sandbox run_code tool', () => {
   });
 });
 
-describe('Sandbox exec interpreter guard', () => {
+describe('Sandbox exec inline code', () => {
   const execArguments = (command: string, purpose = 'execute') => ({
     command,
     purpose,
@@ -298,46 +298,25 @@ describe('Sandbox exec interpreter guard', () => {
     cwd: '/',
   });
 
-  it('classifies an interpreter invocation as invalid preflight: no approval prompt', async () => {
-    const sandbox = makeSandbox(makeProvider());
-    const info = await sandbox.toolCallInfo({
-      name: SANDBOX_EXEC_TOOL_NAME,
-      arguments: execArguments('python3 -c "print(1)"'),
-    });
-    expect(info.is_approval_required).toBe(false);
-  });
+  it.each(['python3 -c "print(1)"', 'node -e "console.log(1)"'])(
+    'asks before running inline code, then runs exactly that command: %s',
+    async command => {
+      const exec = jest.fn(async (_params: SandboxExecParams) => readyExec());
+      const sandbox = makeSandbox(makeProvider({ exec }));
+      const info = await sandbox.toolCallInfo({ name: SANDBOX_EXEC_TOOL_NAME, arguments: execArguments(command) });
+      expect(info.pre_dispatch_failure).toBeUndefined();
+      expect(info.is_approval_required).toBe(true);
 
-  it('rejects the interpreter invocation before the provider is touched', async () => {
-    const exec = jest.fn(async (_params: SandboxExecParams) => readyExec());
-    const sandbox = makeSandbox(makeProvider({ exec }));
-
-    const result = await executeSingleTool({
-      sandbox,
-      toolName: SANDBOX_EXEC_TOOL_NAME,
-      mappedName: SANDBOX_EXEC_TOOL_NAME,
-      id: 'call-1',
-      arguments: execArguments('python3 -c "print(1)"'),
-    });
-
-    expect(exec).not.toHaveBeenCalled();
-    expect(result.rawContent).toContain('run_code tool instead');
-  });
-
-  it('rejects node invocations the same way', async () => {
-    const exec = jest.fn(async (_params: SandboxExecParams) => readyExec());
-    const sandbox = makeSandbox(makeProvider({ exec }));
-
-    const result = await executeSingleTool({
-      sandbox,
-      toolName: SANDBOX_EXEC_TOOL_NAME,
-      mappedName: SANDBOX_EXEC_TOOL_NAME,
-      id: 'call-1',
-      arguments: execArguments('node -e "console.log(1)"'),
-    });
-
-    expect(exec).not.toHaveBeenCalled();
-    expect(result.rawContent).toContain('run_code tool instead');
-  });
+      await executeSingleTool({
+        sandbox,
+        toolName: SANDBOX_EXEC_TOOL_NAME,
+        mappedName: SANDBOX_EXEC_TOOL_NAME,
+        id: 'call-1',
+        arguments: execArguments(command),
+      });
+      expect(exec.mock.calls.some(call => call[0].command === command)).toBe(true);
+    },
+  );
 
   it('still allows ordinary repo/build commands through exec', async () => {
     const exec = jest.fn(async (_params: SandboxExecParams) => readyExec());

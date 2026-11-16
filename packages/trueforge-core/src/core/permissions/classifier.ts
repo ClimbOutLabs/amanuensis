@@ -1583,6 +1583,9 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     reason: 'shell_not_allowlisted',
     reason_detail: 'The command is not on the server-side safe list.',
     sensitive_read: containsSecretPath(action.canonical_params),
+    // A command the parser could not read as one simple command is approved run by run: an "Always allow"
+    // would cover text whose effect the host never worked out.
+    standing_grant_barred: form.kind === 'compound',
     shell_binding: binding,
     approval_token_id: token_id,
   });
