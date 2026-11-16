@@ -73,7 +73,7 @@ Then Aman Setup asks three things:
 
 1. **Your email.** This is only your sign-in name. Nothing is sent to it.
 2. **A password.** It needs at least 8 characters, a number and a symbol, like `@ # $ %`. Each part of the rule gets a tick as you type, and so does typing the same password a second time. Keep the password somewhere safe: Aman does not show it again.
-3. **Use Aman on your phone?** Choose yes or no. You can change this later.
+3. **Use Amanuensis on your phone?** Choose yes or no. You can change this later.
 
 The **Review** screen lists what will happen, and names the steps where Windows will ask you to allow something. Choose **Install**.
 
