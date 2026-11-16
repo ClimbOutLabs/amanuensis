@@ -9,7 +9,12 @@ import { steeredDestinationSay } from '../../../src/core/permissions/searchHoldT
 describe('text read earlier and saved to memory', () => {
   it('keeps the persons details, as the host notes on their chat do', () => {
     const provenance = emptyChatProvenance();
-    recordUntrustedText({ provenance, text: 'Call me on maya.k@example.com or +1 415 555 0132.', source: 'memory' });
+    recordUntrustedText({
+      provenance,
+      text: 'Call me on maya.k@example.com or +1 415 555 0132.',
+      source: 'memory',
+      page_site: null,
+    });
 
     expect(provenance.read_content).toBe(true);
     expect(
@@ -23,6 +28,7 @@ describe('text read earlier and saved to memory', () => {
       provenance,
       text: 'Offer at https://shop.example/deal from deals@shop.example',
       source: 'memory',
+      page_site: null,
     });
     const [address, link] = steeredDestinations({
       provenance,

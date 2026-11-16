@@ -20,7 +20,12 @@ import { SkillNetworkGateway } from '../../../src/sandbox/skillnet/skillNetworkG
 import { skillNetworkTokens } from '../../../src/sandbox/skillnet/skillNetworkTokens';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
-import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import {
+  MODEL_FQN,
+  SCRIPTED_PROVIDER_KEY,
+  startApprovalTestServer,
+  type ApprovalTestServer,
+} from '../../fixtures/approvalTestServer';
 import { HARBOUR_ADDRESS, installRecordedTavily } from '../../fixtures/groundedFinderFixtures';
 import {
   HA_CALL_ACTION_TOOL,
@@ -630,6 +635,72 @@ describe('a page Aman opens in its browser', () => {
     TURN_TIMEOUT_MS,
   );
 
+  /** A chat where Aman has read the open page, so a page it opens next was not given by the person. */
+  async function chatThatReadAPage(): Promise<string> {
+    const chatId = await createChat(server);
+    server.model.next({ toolArguments: {} });
+    expect(cards(await runTurn({ server, chatId, input: ask('browser_read') }))).toEqual([]);
+    return chatId;
+  }
+
+  it(
+    'a "no" to opening a page refuses that site for the rest of the chat, even after Aman restarts, and a new chat asks again',
+    async () => {
+      const chatId = await chatThatReadAPage();
+      const [card, ...others] = await open({ chatId, url: 'https://news.example/first-story' });
+      expect(others).toEqual([]);
+      if (card === undefined) {
+        throw new Error('the first open asked nothing');
+      }
+      await runTurn({
+        server,
+        chatId,
+        input: [
+          {
+            type: 'user.tool_approval',
+            thread_id: card.thread_id,
+            tool_call_id: card.id,
+            approval: { status: 'deny', reason: 'Not now' },
+          },
+        ],
+      });
+      expect(opened).toEqual([]);
+
+      await server.restart();
+      expect(await open({ chatId, url: 'https://news.example/second-story' })).toEqual([]);
+      expect(opened).toEqual([]);
+
+      const fresh = await chatThatReadAPage();
+      expect(await open({ chatId: fresh, url: 'https://news.example/first-story' })).toHaveLength(1);
+      expect(opened).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    '"Always allow this site" opens other pages on that site in this chat with no card, and another site or another chat still asks',
+    async () => {
+      const chatId = await chatThatReadAPage();
+      const [card, ...others] = await open({ chatId, url: 'https://shop.example/opening-hours' });
+      expect(others).toEqual([]);
+      expect(card?.chat_grant_scope).toBe('site');
+      if (card === undefined) {
+        throw new Error('the first open asked nothing');
+      }
+      expect(cards(await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) }))).toEqual([]);
+      expect(opened).toEqual(['https://shop.example/opening-hours']);
+
+      expect(await open({ chatId, url: 'https://shop.example/delivery' })).toEqual([]);
+      expect(opened).toEqual(['https://shop.example/opening-hours', 'https://shop.example/delivery']);
+
+      expect(await open({ chatId, url: 'https://market.example/stalls' })).toHaveLength(1);
+      const other = await chatThatReadAPage();
+      expect(await open({ chatId: other, url: 'https://shop.example/delivery' })).toHaveLength(1);
+      expect(opened).toHaveLength(2);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
   describe('the note Aman keeps of its own reply', () => {
     const summarize = configuration.MEMORY_SUMMARIZE;
 
@@ -1203,6 +1274,18 @@ describe('a connector read the person always allows', () => {
   );
 
   it(
+    "never sends one of this computer's own keys, and no card shows it",
+    async () => {
+      const before = server.mcp.getPageInvocations();
+      // The scripted model's provider key is one of this computer's own secrets, shaped like one short id.
+      const held = (await readPage({ page_id: SCRIPTED_PROVIDER_KEY })).cards;
+      expect(JSON.stringify(held)).not.toContain(SCRIPTED_PROVIDER_KEY);
+      expect(server.mcp.getPageInvocations()).toBe(before);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
     'asks again once the connector points at another address',
     async () => {
       expect((await readPage({ page_id: PAGE_ID })).cards).toEqual([]);
@@ -1751,6 +1834,34 @@ describe('a skill that reaches a site on the internet', () => {
   }): Promise<void> {
     await (await sendTurn({ server, chatId, input: answer({ card, scope }) })).text();
   }
+
+  it(
+    'a loop a skill writes asks every time with its exact text, and runs exactly that once allowed',
+    async () => {
+      const chatId = await startChat();
+      const loop = `for day in mon tue; do ${SKILL_FETCH_COMMAND} ${SKILL_SITE}; done > notes.txt`;
+      const askToRun = () => {
+        server.model.next({ toolArguments: { command: loop, purpose: 'inspect', intent: 'Fetch the notes.' } });
+        return runTurn({ server, chatId, input: ask('exec') });
+      };
+      const runsBefore = sandbox.commands.filter(command => command === loop).length;
+
+      const card = onlyCard(await askToRun());
+      expect(card.tier3_card?.parsed_command).toBe(loop);
+      expect(card.can_always_allow).toBe(false);
+      expect(card.can_chat_allow).toBe(false);
+      const refused = await sendTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
+      expect(refused.status).toBe(422);
+      expect(sandbox.commands.filter(command => command === loop).length).toBe(runsBefore);
+
+      await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
+      expect(sandbox.commands.filter(command => command === loop).length).toBe(runsBefore + 1);
+
+      // Allowing it once is not a standing grant: the same loop asks again.
+      expect(onlyCard(await askToRun()).can_always_allow).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
   it(
     'asks before the skill reaches its site for the first time, and reaches nothing until then',

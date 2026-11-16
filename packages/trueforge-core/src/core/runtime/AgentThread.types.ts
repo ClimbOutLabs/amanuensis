@@ -264,6 +264,8 @@ export interface AgentThreadConstructorInput {
   isRequestContinuation: boolean | undefined;
   /** Mutable session-owned exact-tool grants shared by root and subagent threads. */
   chatApprovalGrants?: Set<string> | undefined;
+  /** Mutable session-owned browser refusals shared by root and subagent threads: a "no" kept for the rest of the chat. */
+  chatApprovalRefusals?: Set<string> | undefined;
   /** Owner-scoped durable plan grants, refreshed at every tool-batch admission boundary. */
   loadImplementationPlanGrants?: (() => Promise<ReadonlySet<string>>) | undefined;
   /**

@@ -102,6 +102,8 @@ import {
   allowsToolGrant,
   approvalGrantKey,
   awaitsApproval,
+  chatGrantScope,
+  chatRefusalKey,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
   mapsCardTakesLastingAnswer,
@@ -1980,6 +1982,7 @@ export class AgentThread {
   private currentState: AgentThreadState | null = null;
   private readonly preComputedCompletion?: SubAgentCompletionMarker | undefined;
   private readonly chatApprovalGrants: Set<string>;
+  private readonly chatApprovalRefusals: Set<string>;
   private readonly loadImplementationPlanGrants?: (() => Promise<ReadonlySet<string>>) | undefined;
   private readonly toolDispatchMaxConcurrency?: number | undefined;
   private readonly toolCallTimeoutMs?: number | undefined;
@@ -2036,6 +2039,7 @@ export class AgentThread {
     this.sandbox = this.definition.readOnly ? undefined : input.sandbox;
     this.serverSandboxAvailable = input.serverSandboxAvailable ?? false;
     this.chatApprovalGrants = input.chatApprovalGrants ?? new Set<string>();
+    this.chatApprovalRefusals = input.chatApprovalRefusals ?? new Set<string>();
     this.loadImplementationPlanGrants = input.loadImplementationPlanGrants;
     this.toolDispatchMaxConcurrency = input.toolDispatchMaxConcurrency;
     this.toolCallTimeoutMs = input.toolCallTimeoutMs;
@@ -2058,6 +2062,7 @@ export class AgentThread {
     this.stopAfterToolResponse = input.stopAfterToolResponse === true;
     this.withheldTools = input.withheldTools ?? [];
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
+    this.seedChatRefusals(this.toolCallMemo);
     // A sub-agent counts into the ledger of the turn that started it, not a fresh one.
     if (input.turnToolCallLedger !== undefined) {
       this.toolCallMemo.turn = input.turnToolCallLedger;
@@ -2348,6 +2353,17 @@ export class AgentThread {
     return builder.build();
   }
 
+  /**
+   * A "no" to a browser open or click lasts the rest of the chat: the session keeps those
+   * refusal keys, and every fresh memo starts with them in its denied set, so a later turn
+   * refuses the same identity with no new card. Other refusals stay per turn and never seed.
+   */
+  private seedChatRefusals(memo: ToolCallMemoState): void {
+    for (const key of this.chatApprovalRefusals) {
+      memo.deniedApprovalIdentities.add(key);
+    }
+  }
+
   public async *send(
     messages: AgentThreadRuntimeSendBatch,
     signal?: AbortSignal,
@@ -2390,6 +2406,7 @@ export class AgentThread {
       });
       if (messages.some(isInputUserMessage)) {
         this.toolCallMemo = createToolCallMemoState();
+        this.seedChatRefusals(this.toolCallMemo);
         this.callSignatureCountsThisTurn = new Map<string, number>();
       }
 
@@ -2476,6 +2493,24 @@ export class AgentThread {
                 connector_binding: pending.tool_info.grant_binding ?? null,
               });
             }
+          }
+        }
+        for (const approval of approvals) {
+          if (approval.approval.status !== 'deny') {
+            continue;
+          }
+          // An expired card was never turned down, and a "Change it" answer asks for a revised
+          // call: neither is a "no" that lasts. Same rule as the per-turn record in stepToolResponse.
+          if (isExpiredApproval(approval.approval) || isChangeRequestReason(approval.approval.reason)) {
+            continue;
+          }
+          const pending = pendingById.get(approval.tool_call_id) ?? heldById.get(approval.tool_call_id);
+          if (pending === undefined) {
+            continue;
+          }
+          const refusalKey = chatRefusalKey(pending.tool_info);
+          if (refusalKey !== null) {
+            this.chatApprovalRefusals.add(refusalKey);
           }
         }
         const pendingClientCalls = new Map(getPendingClientSideToolCalls(this.context).map(call => [call.id, call]));
@@ -6285,6 +6320,7 @@ export class AgentThread {
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
           can_chat_allow: allowsChatApproval(toolCall.tool_info),
+          chat_grant_scope: chatGrantScope(toolCall.tool_info),
           ...alwaysAllowFields(toolCall.tool_info),
         })),
       };

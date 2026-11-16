@@ -436,6 +436,12 @@ export interface TierDecision {
   standing_grant_barred: boolean;
   /** True when this consequential call may take a chat grant for the target its card names. */
   chat_grantable_consequence: boolean;
+  /**
+   * True when this browser open may take a chat grant for its whole site rather than the one address: the person
+   * never gave the address after the chat read other people's content, so the person is the one vouching. A later
+   * open on that site still passes every other check on its own, and each of those asks without a grant.
+   */
+  site_grantable_open: boolean;
   /** True when this call changes only the person's own calendar, with no guest reached. */
   own_calendar_change: boolean;
   /** True when this call writes only the person's own Drive files and sends nothing to anyone. */
@@ -481,6 +487,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     mail_send: false,
     standing_grant_barred: false,
     chat_grantable_consequence: false,
+    site_grantable_open: false,
     own_calendar_change: false,
     own_drive_write: false,
   };
@@ -506,6 +513,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     mail_send: false,
     standing_grant_barred: false,
     chat_grantable_consequence: false,
+    site_grantable_open: false,
     own_calendar_change: false,
     own_drive_write: false,
   };
@@ -572,6 +580,7 @@ export function tier3Decision(input: {
   mail_send?: boolean | undefined;
   standing_grant_barred?: boolean | undefined;
   chat_grantable_consequence?: boolean | undefined;
+  site_grantable_open?: boolean | undefined;
   own_calendar_change?: boolean | undefined;
   own_drive_write?: boolean | undefined;
 }): TierDecision {
@@ -594,6 +603,7 @@ export function tier3Decision(input: {
     mail_send: input.mail_send === true,
     standing_grant_barred: input.standing_grant_barred === true,
     chat_grantable_consequence: input.chat_grantable_consequence === true,
+    site_grantable_open: input.site_grantable_open === true,
     own_calendar_change: input.own_calendar_change === true,
     own_drive_write: input.own_drive_write === true,
   };

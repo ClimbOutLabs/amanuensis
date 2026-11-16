@@ -139,6 +139,7 @@ export interface CreateTurnInput {
   session_id: string;
   turn: CreateTurnTurnFields;
   approval_grants: string[];
+  approval_refusals: string[];
   require_previous_turn_is_tip: boolean;
   retained_previous_thread_ids: string[];
   new_threads: NewThreadRegistration[];
@@ -476,7 +477,7 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
       // step1: lock session tip, bump. Two statements on purpose — see PROVEN-UNSAFE-CTE note above.
       const locked = await trx
         .selectFrom('session')
-        .select(['last_turn_id', 'approval_grants'])
+        .select(['last_turn_id', 'approval_grants', 'approval_refusals'])
         .where('session_id', '=', input.session_id)
         .forUpdate()
         .executeTakeFirst();
@@ -510,6 +511,8 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
         ),
       ].sort();
 
+      const approvalRefusals = [...new Set([...locked.approval_refusals, ...input.approval_refusals])].sort();
+
       await trx
         .updateTable('session')
         .set({
@@ -517,6 +520,7 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
           // json(): a bare string[] is encoded by node-pg as a Postgres array
           // literal, which casts to jsonb wrong (see sessions.ts createSession).
           approval_grants: json(approvalGrants),
+          approval_refusals: json(approvalRefusals),
           updated_at: sql`now()`,
           last_activity_timestamp_ms: input.last_activity_timestamp_ms,
           // total_turns rides the same tip UPDATE so a later failure in this tx rolls it back.

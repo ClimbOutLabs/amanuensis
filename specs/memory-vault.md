@@ -32,6 +32,8 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 
 **Views.** The shared vault is not a global view of all facts. Any "all vaults" view in the UI is a union for the signed-in user only and never widens what a persona recalls.
 
+**A page line in a chat is handled like a memory.** The chat's memory panel gives a line from a page the same × and **Delete** as a saved memory. The × records the line's words for that chat, and the page shows that chat every other line. **Delete** takes every line with those words off its page, in any of the person's vaults, through the page's own history. As with a memory, words that fit more than one different text delete nothing.
+
 **A summary that failed is said, with its reason.** A turn's facts and its notes are asked for one after the other, never together, so a model server that shares its speed between requests does not slow both past the time limit. A summary that runs out of time is asked for once more after a wait of 90 seconds, with no place held in the queue of summaries meanwhile. When a chat's summary still cannot be made, nothing from that turn is saved and the vault it would have gone to keeps one mark: when it failed, why, and which chat it was. The Memories tab shows a note for that vault with the time, the reason in plain words and the one thing to do about it, **Open the chat** to go to that chat, and **Dismiss**. The mark holds no words from the chat. It clears on the next summary that succeeds for that vault. The server log line for the failure names the chat, the reason and the seconds the model took. A kept summary logs its chat, its fact count and its seconds, and never its words.
 
 ## Scope
