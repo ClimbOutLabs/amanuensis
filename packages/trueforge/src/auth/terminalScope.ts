@@ -14,7 +14,7 @@
 const TERMINAL_KEY_PATH_PREFIXES = ['/api/v1/sessions', '/api/v1/user/chat-search'] as const;
 
 /** Exact paths a terminal key may reach outside the prefixes: revoking its own key at logout. */
-const TERMINAL_KEY_EXACT_PATHS = ['/api/v1/terminal-pairings/revoke-current'] as const;
+const TERMINAL_KEY_EXACT_PATHS: readonly string[] = ['/api/v1/terminal-pairings/revoke-current'];
 
 /** Said to a terminal key that reaches outside its scope; it names the one thing to do instead. */
 export const TERMINAL_KEY_SCOPE_MESSAGE =
@@ -39,7 +39,7 @@ function sessionPathIsCarvedOut(path: string, prefix: string): boolean {
 
 /** True when a request path is inside the chat scope of a paired terminal key. */
 export function terminalKeyMayReachPath(path: string): boolean {
-  if ((TERMINAL_KEY_EXACT_PATHS as readonly string[]).includes(path)) {
+  if (TERMINAL_KEY_EXACT_PATHS.includes(path)) {
     return true;
   }
   const prefix = TERMINAL_KEY_PATH_PREFIXES.find(candidate => path === candidate || path.startsWith(`${candidate}/`));
