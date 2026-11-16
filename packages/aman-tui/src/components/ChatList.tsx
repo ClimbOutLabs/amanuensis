@@ -57,12 +57,14 @@ export function ChatList({
   }, [client, reloadTick]);
 
   useInput((input, key) => {
-    if (input === 'q') {
+    // The screen names these keys with capitals, and a terminal sends the
+    // capital when Shift is held or Caps Lock is on, so both cases answer.
+    if (input === 'q' || input === 'Q') {
       onExit();
       return;
     }
     if (state.status !== 'ready') {
-      if (input === 'r') {
+      if (input === 'r' || input === 'R') {
         setReloadTick(tick => tick + 1);
       }
       return;
@@ -77,7 +79,7 @@ export function ChatList({
       if (chat !== undefined) {
         onOpen(chat);
       }
-    } else if (input === 'n') {
+    } else if (input === 'n' || input === 'N') {
       client
         .createChat()
         .then(chat => onOpen(chat))
@@ -85,9 +87,9 @@ export function ChatList({
           const line = chatErrorLine(error, 'A new chat could not be started.');
           setState({ status: 'error', message: line.message, keyRefused: line.keyRefused });
         });
-    } else if (input === 's' && instanceCount > 1) {
+    } else if ((input === 's' || input === 'S') && instanceCount > 1) {
       onSwitchInstance();
-    } else if (input === 'r') {
+    } else if (input === 'r' || input === 'R') {
       setReloadTick(tick => tick + 1);
     }
   });
