@@ -1,12 +1,13 @@
 import { MEMORY_PAGES_SERVER_ID } from '../../../src/core/memory/pagesToolContract';
 import { NOTES_FOLDER_SERVER_ID } from '../../../src/core/notes/toolContract';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import {
   defaultSentinelServices,
   forIncognitoChat,
   forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { PERSONA_SERVER_ID } from '../../../src/core/personas/toolContract';
 import { SCHEDULE_SERVER_ID } from '../../../src/core/schedules/toolContract';

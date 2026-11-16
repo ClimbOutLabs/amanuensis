@@ -2,9 +2,10 @@ import { z } from 'zod';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../../src/core/mcp/LocalToolMCP';
 import { convertMCPServersToTools } from '../../../src/core/mcp/convertMCPServers';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import { requiresNetwork } from '../../../src/core/permissions/networkRequirements';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 

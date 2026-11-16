@@ -1,7 +1,8 @@
 import { HOME_ASSISTANT_REFUSAL } from '../../../src/core/homeassistant/toolContract';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import { recordEmailText } from '../../../src/core/permissions/provenance';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { TOOL_GRANT_REASON } from '../../../src/core/permissions/toolGrants';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 

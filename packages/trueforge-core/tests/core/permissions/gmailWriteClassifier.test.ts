@@ -1,12 +1,13 @@
 import type { ReviewableDraft } from '../../../src/core/email/gmail/draftReview';
 import { mailboxOf } from '../../../src/core/email/gmail/mailbox';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import {
   defaultSentinelServices,
   forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(services?: SentinelServices): ClassifyContext {
