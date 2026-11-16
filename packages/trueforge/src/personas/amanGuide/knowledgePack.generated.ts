@@ -1074,6 +1074,42 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
     body: '- Keep the `description` sharp. It is the only thing the model sees before it loads the skill.\n- Write `SKILL.md` like instructions to a capable teammate.\n- Put long reference material in supporting files that the skill links to.\n- Prefer several focused skills to one sprawling one.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/skills.mdx',
   },
   {
+    id: 'docs-terminal-app',
+    title: 'The terminal app',
+    covers: [],
+    body: 'The terminal app puts Aman in the terminal on your computer. You pair it once with a one-time code, and after that you can read and write your chats from the command line. Replies stream in as they are written, the way they do in the web app.\n\nThe terminal app is a separate program from the web app. It talks to the same Aman, on the same computer or on your own network, and it sees the same chats.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx',
+  },
+  {
+    id: 'docs-terminal-app-2',
+    title: 'The terminal app: How pairing works',
+    covers: [],
+    body: 'Pairing gives one terminal its own key to one Aman. The key stands in for you only on the chat side of Aman. It cannot open settings or anything else that belongs to the owner alone.\n\nA pairing starts from the terminal, and you confirm it in the web app, signed in as yourself. That way a key is only ever handed out after you have seen the code on both sides.\n\nThe code is eight characters. It works once, and it lasts five minutes. A wrong, expired, or already used code is refused with one plain line, and you start pairing again.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx',
+  },
+  {
+    id: 'docs-terminal-app-3',
+    title: 'The terminal app: Pair a terminal',
+    covers: [],
+    body: "1. In the terminal, run `aman-tui login <address>`, with the address Aman is opened at. For example, `aman-tui login https://my-computer.example:8443`.\n2. The terminal shows the code in large clear text, and a link.\n3. Open the link in the web app. Check that the code on the page matches the code in the terminal, then confirm.\n4. The terminal receives its key and saves it. Run `aman-tui` to start chatting.\n\nIf the address is not one Aman is set up for, the terminal shows Aman's own answer, word for word, including the one thing to run to fix it.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx",
+  },
+  {
+    id: 'docs-terminal-app-4',
+    title: 'The terminal app: Where the key is kept',
+    covers: [],
+    body: "On a Mac, the key is kept in your keychain. On Linux, it is kept in the desktop secret service when one is running. Everywhere else, it is kept in a file that only your account can read, in the terminal app's own config folder. The key is never printed and never shown.\n\nYou can pair the same terminal with more than one Aman. Run `aman-tui login` again with the other address. Each one keeps its own key and its own name. Run `aman-tui instances` to list them, `aman-tui use <address>` to choose which one opens, or switch inside the app.\n\nTo take a terminal's key away, open Settings in the web app and revoke it under Paired terminals. The terminal is refused from its next request on. Changing your password on an Aman that uses its own sign-in also takes away every terminal key at once.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx",
+  },
+  {
+    id: 'docs-terminal-app-5',
+    title: 'The terminal app: Chat from the terminal',
+    covers: [],
+    body: "Run `aman-tui` with no command. Your chats are listed newest first, with the persona and when each was last active. Pick one to open it, or start a new chat.\n\nInside a chat, type your message and press Enter. The reply streams in as it is written. If the connection drops in the middle of a reply, the terminal rejoins the same turn the way the web app does, and the reply carries on.\n\nTool calls appear in the flow as plain cards. Each card names the tool in plain words, shows what it is doing, and shows how it ended. A picture or a file in a chat cannot be shown in a terminal, so a line appears in its place offering the chat's web address to open in a browser.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx",
+  },
+  {
+    id: 'docs-terminal-app-6',
+    title: 'The terminal app: What this version does not do yet',
+    covers: [],
+    body: 'Approvals are answered in the web app for now. When a chat reaches something that needs your approval, the terminal says the chat is waiting and gives the web address. The turn waits there, unchanged, until you answer it in the web app.\n\nThis version has no settings, no connectors or skills screens, no schedules, and no way to edit memory. Pictures are not shown inline. Stopping a reply mid-stream and one-shot commands from a script are planned for a later step.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/terminal-app.mdx',
+  },
+  {
     id: 'docs-voice-input',
     title: 'Voice setup',
     covers: [],

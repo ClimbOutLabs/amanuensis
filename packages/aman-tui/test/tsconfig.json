@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "customConditions": ["trueforge-dev"],
+    "declaration": false,
+    "declarationMap": false,
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "rootDir": "..",
+    "types": ["node", "vitest/globals"]
+  },
+  "extends": "../tsconfig.json",
+  "include": ["../src", ".", "../vitest.config.ts"]
+}

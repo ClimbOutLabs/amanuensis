@@ -1,0 +1,48 @@
+---
+title: 'The terminal app'
+sidebarTitle: 'Terminal app'
+description: 'Aman in the terminal: how pairing works, how to chat from the command line, and what this version does and does not do yet.'
+---
+
+The terminal app puts Aman in the terminal on your computer. You pair it once with a one-time code, and after that you can read and write your chats from the command line. Replies stream in as they are written, the way they do in the web app.
+
+The terminal app is a separate program from the web app. It talks to the same Aman, on the same computer or on your own network, and it sees the same chats.
+
+## How pairing works
+
+Pairing gives one terminal its own key to one Aman. The key stands in for you only on the chat side of Aman. It cannot open settings or anything else that belongs to the owner alone.
+
+A pairing starts from the terminal, and you confirm it in the web app, signed in as yourself. That way a key is only ever handed out after you have seen the code on both sides.
+
+The code is eight characters. It works once, and it lasts five minutes. A wrong, expired, or already used code is refused with one plain line, and you start pairing again.
+
+## Pair a terminal
+
+1. In the terminal, run `aman-tui login <address>`, with the address Aman is opened at. For example, `aman-tui login https://my-computer.example:8443`.
+2. The terminal shows the code in large clear text, and a link.
+3. Open the link in the web app. Check that the code on the page matches the code in the terminal, then confirm.
+4. The terminal receives its key and saves it. Run `aman-tui` to start chatting.
+
+If the address is not one Aman is set up for, the terminal shows Aman's own answer, word for word, including the one thing to run to fix it.
+
+## Where the key is kept
+
+On a Mac, the key is kept in your keychain. On Linux, it is kept in the desktop secret service when one is running. Everywhere else, it is kept in a file that only your account can read, in the terminal app's own config folder. The key is never printed and never shown.
+
+You can pair the same terminal with more than one Aman. Run `aman-tui login` again with the other address. Each one keeps its own key and its own name. Run `aman-tui instances` to list them, `aman-tui use <address>` to choose which one opens, or switch inside the app.
+
+To take a terminal's key away, open Settings in the web app and revoke it under Paired terminals. The terminal is refused from its next request on. Changing your password on an Aman that uses its own sign-in also takes away every terminal key at once.
+
+## Chat from the terminal
+
+Run `aman-tui` with no command. Your chats are listed newest first, with the persona and when each was last active. Pick one to open it, or start a new chat.
+
+Inside a chat, type your message and press Enter. The reply streams in as it is written. If the connection drops in the middle of a reply, the terminal rejoins the same turn the way the web app does, and the reply carries on.
+
+Tool calls appear in the flow as plain cards. Each card names the tool in plain words, shows what it is doing, and shows how it ended. A picture or a file in a chat cannot be shown in a terminal, so a line appears in its place offering the chat's web address to open in a browser.
+
+## What this version does not do yet
+
+Approvals are answered in the web app for now. When a chat reaches something that needs your approval, the terminal says the chat is waiting and gives the web address. The turn waits there, unchanged, until you answer it in the web app.
+
+This version has no settings, no connectors or skills screens, no schedules, and no way to edit memory. Pictures are not shown inline. Stopping a reply mid-stream and one-shot commands from a script are planned for a later step.
