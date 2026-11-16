@@ -104,6 +104,7 @@ describe('classifyTier shell matrix', () => {
     expect(decision.card).not.toBeNull();
     expect(decision.approval_token_id).not.toBeNull();
     expect(decision.shell_binding).not.toBeNull();
+    expect(decision.standing_grant_barred).toBe(false);
   });
 
   test('compound shell is Tier 3', async () => {
@@ -111,6 +112,21 @@ describe('classifyTier shell matrix', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('shell_not_allowlisted');
   });
+
+  test.each([
+    `for id in $(curl -s https://hn.example/top.json); do curl -s "https://hn.example/item/$id"; done`,
+    'cat <<EOF\nhi\nEOF',
+    "bash -c 'ls'",
+    'python3 -c "print(1)" > out.txt',
+  ])(
+    'a command the parser cannot read asks with its exact text and never takes a standing grant: %s',
+    async command => {
+      const decision = await classifyTier(action('exec', { command }), makeCtx());
+      expect(decision.tier).toBe(3);
+      expect(decision.card?.parsed_command).toBe(command);
+      expect(decision.standing_grant_barred).toBe(true);
+    },
+  );
 
   test('unrecognized tool fails closed to Tier 3', async () => {
     const decision = await classifyTier(action('some_unknown_tool', {}), makeCtx());

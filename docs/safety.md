@@ -108,6 +108,8 @@ In the sandbox, a command that only reads inside the workspace runs without aski
 
 Every other command asks first, unless the **Sandbox** switch covers it. Answering **Always allow in this chat** on a command covers running that same command again in this chat, and nothing else.
 
+Aman doesn't refuse a command because of how it's written. A loop, `$(...)`, a redirect, a heredoc or inline code such as `python3 -c` all run once you approve them. When Aman can't read a command as one plain command, the card shows its exact text, and it offers no **Always allow**, so each run asks. The sandbox walls keep such a command contained, not the way it's written: it can reach only the websites you approved and the package sites you allowed, and nothing outside the workspace.
+
 Installing a package asks first on every sandbox. The **Sandbox** switch never covers it.
 
 A script that ships with a skill you installed runs without asking, with or without the switch, while the sandbox has no internet. It asks where the sandbox can reach the internet, including a chat that uses a skill you let reach its own sites. It also asks when Aman edited a file in that skill's folder with its file tools earlier in the chat. A script that is a link to a file outside the skill's folder doesn't run. Code Aman writes for `run_code` that names a skill's folder is refused before any card, because `run_code` can't see that folder; Aman runs the skill's own script instead.

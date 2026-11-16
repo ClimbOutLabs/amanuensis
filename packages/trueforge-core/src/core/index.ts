@@ -324,8 +324,6 @@ export { SANDBOX_ALLOWED_EGRESS_DOMAINS, sandboxEgressDomainAllowList } from './
 export { DockerDriver } from './sandbox/driver/DockerDriver';
 export type { DockerDriverOptions } from './sandbox/driver/DockerDriver';
 export { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './sandbox/driver/errors';
-export { classifyExecCommand, interpreterInvocationRefusal } from './sandbox/driver/ExecGuard';
-export type { ExecGuardHost, ExecGuardVerdict } from './sandbox/driver/ExecGuard';
 export { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX, runCodeProgramPath } from './sandbox/driver/IsolationDriver';
 export type {
   DriverReadiness,
