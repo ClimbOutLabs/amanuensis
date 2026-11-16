@@ -1,0 +1,53 @@
+name: UI look-over
+
+# Opens every screen of the app with made-up data at computer, phone, small phone and dark phone
+# size, once a week, and stores the pictures with a list of what looked wrong. It is a look, not a
+# test: it passes whatever it finds. The Docs site workflow puts the pictures on the website.
+on:
+  schedule:
+    # Saturday 07:17 UTC, late Friday night in the Americas; off the hour, when scheduled runs start late.
+    - cron: '17 7 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  look-over:
+    name: Look over every screen
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Name the picture folder
+        id: stamp
+        run: echo "folder=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Look over every screen
+        env:
+          SWEEP_FOLDER: ${{ runner.temp }}/ui-sweep/${{ steps.stamp.outputs.folder }}
+        run: pnpm ui:sweep "--out=$SWEEP_FOLDER"
+
+      - name: Keep the pictures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-sweep
+          path: ${{ runner.temp }}/ui-sweep
+          if-no-files-found: ignore
+          retention-days: 35

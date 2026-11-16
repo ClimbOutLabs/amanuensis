@@ -148,7 +148,14 @@ test(
       const result = await states.jsonValue();
       assert.ok(result !== null, 'both frame pictures should finish loading');
       assert.ok(result.proxyWidth > 0, 'the proxied picture in the space frame should load');
-      await page.screenshot({ path: await featureShotPath({ surface: 'screen:space-pictures', step: 'loaded' }) });
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: 'screen:space-pictures',
+          step: 'loaded',
+          did: 'Opened a space that holds two copies of a picture from this chat: one fetched through Aman and one linked straight to an outside site.',
+          expect: 'The copy fetched through Aman shows. The straight outside link stays blank.',
+        }),
+      });
       assert.equal(result.directWidth, 0, 'the direct outside link in the same frame should stay blank');
       assert.equal(seen.length, 1, 'the frame should ask the proxy once');
       assert.ok(
