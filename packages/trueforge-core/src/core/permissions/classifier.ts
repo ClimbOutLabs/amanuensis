@@ -76,6 +76,7 @@ import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
   normalizeCwd,
+  REVIEW_HASH_ARGUMENT,
   toJsonSafeParams,
   type ConnectorBinding,
   type ShellApprovalBinding,
@@ -3083,6 +3084,24 @@ async function cardArguments(action: SentinelAction, ctx: ClassifyContext): Prom
   return masked ?? { details: HIDDEN_QUERY };
 }
 
+/** The tool declares itself read-only and closed-world: it says it does not reach outside its own service. */
+function declaresReadOnlyClosedWorld(action: SentinelAction): boolean {
+  return action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false;
+}
+
+/** What a connector call's card says about it, read from its arguments with any held key masked. */
+async function connectorExtraction(action: SentinelAction, ctx: ClassifyContext): Promise<ExtractionResult> {
+  return extractCardFields({
+    tool_name: action.tool_name,
+    canonical_params: await cardArguments(action, ctx),
+    tool_type: action.tool_type,
+    server_host: action.mcp_server_host,
+    server_name: action.mcp_server_name,
+    read_only_closed_world: declaresReadOnlyClosedWorld(action),
+    host_mail_draft: isHostMailDraft(action),
+  });
+}
+
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const name = action.tool_name.toLowerCase();
@@ -3090,18 +3109,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // Offline: network-required tools are filtered from the list; a stale call
   // that slips through is auto-denied here.
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
-  // The tool declares itself read-only and closed-world: it says it does not reach outside its own service.
-  const declaredReadOnlyClosedWorld =
-    action.mcp_hints.read_only_hint === true && action.mcp_hints.open_world_hint === false;
-  const extraction = extractCardFields({
-    tool_name: action.tool_name,
-    canonical_params: await cardArguments(action, ctx),
-    tool_type: action.tool_type,
-    server_host: action.mcp_server_host,
-    server_name: action.mcp_server_name,
-    read_only_closed_world: declaredReadOnlyClosedWorld,
-    host_mail_draft: isHostMailDraft(action),
-  });
+  const extraction = await connectorExtraction(action, ctx);
   // A card for the host's own Email sidecar never shows the sidecar's endpoint as a destination: the recipient is.
   const hostMailCall = isHostMailCall(action);
   // In an incognito chat a connector may only read. A read is one the extractor knows by its name, or a
@@ -3134,7 +3142,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     !extraction.connector_read &&
     !extraction.family_send &&
     !isCalendarChangeToolName(action.tool_name) &&
-    !(declaredReadOnlyClosedWorld && (isDestructive || isInstall));
+    !(declaresReadOnlyClosedWorld(action) && (isDestructive || isInstall));
   // The same carried send, for wording only: a hint-escalated family send still gets the send sentence.
   const carriedSend =
     extraction.external_service && !extraction.connector_read && !isCalendarChangeToolName(action.tool_name);
@@ -3561,12 +3569,6 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       }))
         ? action.mcp_server_name
         : undefined;
-    if (firstParty || grantedOn !== undefined) {
-      const stopped = await guardUnaskedConnectorRead({ action, ctx, extraction, sensitive_read: readsPrivateData });
-      if (stopped !== undefined) {
-        return stopped;
-      }
-    }
     if (firstParty) {
       return tier1Decision({
         reason: FIRST_PARTY_TOOL_REASON,
@@ -3638,31 +3640,64 @@ function recordIdField(params: Record<string, unknown>): string[] {
   return longest === undefined ? [] : [longest.key];
 }
 
+/** Aman's own Google tools, which send their arguments to Google, with the name a card gives each. */
+const GOOGLE_CONNECTOR_NAMES: ReadonlyMap<string, string> = new Map([
+  [GMAIL_SERVER_ID, 'Gmail'],
+  [CALENDAR_SERVER_ID, 'Google Calendar'],
+  [DRIVE_SERVER_ID, 'Google Drive'],
+]);
+
+/** Where a call's arguments go when it is a connector call: any MCP connector, or one of Aman's Google tools. */
+function connectorDestination(action: SentinelAction): string | undefined {
+  if (action.tool_type === 'mcp') {
+    return action.mcp_server_name ?? 'a connector you added';
+  }
+  return action.mcp_server_name === undefined ? undefined : GOOGLE_CONNECTOR_NAMES.get(action.mcp_server_name);
+}
+
 /**
- * The outbound secret guard over a connector read that would run without a card: one on the host's own connector,
- * or one the person always allows. What it sends goes to that connector's server, so it stops on the same things
- * a silent search does. A record id is expected to look random, so one read may carry one short id that skips only
- * the coded-text rule. The agent names the arguments, so every other id field is read as ordinary text. Returns the
- * decision that stops the read, or undefined when it may run.
+ * The arguments a connector call sends. Aman's own Google tools add their review hash to the approved arguments;
+ * it stays on this computer, so it is not read as sent text. A connector's own argument of that name is.
  */
-async function guardUnaskedConnectorRead(input: {
+function connectorSentArguments(action: SentinelAction): Record<string, unknown> {
+  if (action.tool_type === 'mcp') {
+    return action.canonical_params;
+  }
+  return Object.fromEntries(Object.entries(action.canonical_params).filter(([key]) => key !== REVIEW_HASH_ARGUMENT));
+}
+
+/**
+ * The one outbound guard for connector calls. Any decision that lets a connector call run without a card, from
+ * whichever branch, passes here: what the call sends goes to that connector's server, so it stops on the same
+ * things a silent search does. The text that passes joins the turn's trace, so a secret sent in pieces across
+ * silent calls is still seen. A record id is expected to look random, so one call may carry one short id that
+ * skips only the coded-text rule; a search provider's own plumbing fields are read the same way. The agent names
+ * the arguments, so every other field is read as ordinary text.
+ */
+async function throughConnectorDoor(input: {
+  decision: TierDecision;
   action: SentinelAction;
   ctx: ClassifyContext;
-  extraction: ExtractionResult;
-  sensitive_read: boolean;
-}): Promise<TierDecision | undefined> {
-  const { action, ctx } = input;
-  const strings = collectOutboundStrings(action.canonical_params, recordIdField(action.canonical_params));
+}): Promise<TierDecision> {
+  const { decision, action, ctx } = input;
+  const destination = connectorDestination(action);
+  if (destination === undefined || decision.auto_deny !== null || decision.approval_token_id !== null) {
+    return decision;
+  }
+  const sent = connectorSentArguments(action);
+  const strings = collectOutboundStrings(
+    sent,
+    action.mcp_search_provider === true ? action.mcp_search_plumbing_fields : recordIdField(sent),
+  );
   const { verdict } = await outboundGuard({ ctx, strings });
   if (verdict.ok) {
-    // The text leaves with this call, so a later silent read, search or map sees a secret split across them.
     if (strings !== undefined) {
       ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
     }
-    return undefined;
+    return decision;
   }
-  const server = escapeDisplayText(action.mcp_server_name ?? 'a connector you added');
-  // A key this computer holds is never put on a card, so the read stops without one.
+  const server = escapeDisplayText(destination);
+  // A key this computer holds is never put on a card, so the call stops without one.
   if (verdict.rule === 'server_secret') {
     return autoDenyDecision({
       reason: 'outbound_guard',
@@ -3673,16 +3708,24 @@ async function guardUnaskedConnectorRead(input: {
   const assistant = ctx.web_search.assistantName;
   const say =
     verdict.rule === 'too_long' ? holdSay(assistant).long_read : guardRuleSay({ rule: verdict.rule, assistant });
-  const card = connectorApprovalCard({ action, extraction: input.extraction, agent_intent: ctx.agent_intent });
+  const card = connectorApprovalCard({
+    action,
+    extraction: await connectorExtraction(action, ctx),
+    agent_intent: ctx.agent_intent,
+  });
   return tier3Decision({
     card: {
       ...card,
-      plain_what: withHoldSay(`Look this up on ${server}?`, say),
+      // A change the person let run, such as an always-allowed Drive write, is named as a send, not a lookup.
+      plain_what: withHoldSay(
+        action.mcp_hints.read_only_hint === false ? `Send this to ${server}?` : `Look this up on ${server}?`,
+        say,
+      ),
       cannot_be_undone: "Once this is sent, it can't be unsent.",
     },
     reason: CONNECTOR_READ_GUARD_REASON,
     reason_detail: say,
-    sensitive_read: input.sensitive_read,
+    sensitive_read: decision.sensitive_read,
     standing_grant_barred: true,
     approval_token_id: await mintPlainToken({
       ctx,
@@ -3894,7 +3937,15 @@ function changesOwnLastingThing(action: SentinelAction): boolean {
   }
 }
 
+/**
+ * Classifies one call. Whatever branch decides, a call that sends its arguments to a connector and would run
+ * without a card passes the one outbound guard here, so no branch can skip it.
+ */
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  return throughConnectorDoor({ decision: await classifyBranch(action, ctx), action, ctx });
+}
+
+async function classifyBranch(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;
 
   // Decided here from the tool the host itself named, before anything the tool says about itself is read.

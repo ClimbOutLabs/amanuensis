@@ -290,6 +290,13 @@ describe('outbound guard: a secret sent in pieces over several calls', () => {
     expect(rules).toEqual([undefined, undefined, 'server_secret']);
   });
 
+  test('sees the rest of a key in any argument of the later call, not only the first', () => {
+    const earlier = traceOf({ title: 'Trip plan', text: serverSecret.slice(0, 12) });
+    expect(ruleFor({ title: 'Trip plan', text: serverSecret.slice(12) }, [serverSecret], earlier)).toBe(
+      'server_secret',
+    );
+  });
+
   test('ordinary consecutive searches do not trip each other', () => {
     let earlier = '';
     for (const query of [
