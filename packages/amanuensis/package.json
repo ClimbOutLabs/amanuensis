@@ -77,7 +77,7 @@
     "openai": "^7.5.0",
     "openid-client": "^6.8.7",
     "parse5": "^7.3.0",
-    "pdfjs-dist": "^4.10.38",
+    "pdfjs-dist": "^6.5.438",
     "pg": "^8.23.0",
     "redis": "^5.12.1",
     "remark-gfm": "^4.0.1",

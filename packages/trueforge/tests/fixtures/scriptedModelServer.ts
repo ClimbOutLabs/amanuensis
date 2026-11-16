@@ -129,7 +129,8 @@ export interface ChatMessage {
 }
 
 export interface AdvertisedTool {
-  function?: { name?: unknown };
+  /** `strict` and `parameters` are kept as sent, so a test can check what each tool promised the provider. */
+  function?: { name?: unknown; strict?: unknown; parameters?: unknown };
 }
 
 export interface ChatCompletionRequest {
@@ -166,7 +167,8 @@ export function toAdvertisedTools(value: unknown): AdvertisedTool[] {
   const tools: AdvertisedTool[] = [];
   for (const entry of value) {
     if (isRecord(entry) && isRecord(entry['function'])) {
-      tools.push({ function: { name: entry['function']['name'] } });
+      const { name, strict, parameters } = entry['function'];
+      tools.push({ function: { name, strict, parameters } });
     }
   }
   return tools;
