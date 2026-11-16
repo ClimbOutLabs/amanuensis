@@ -216,6 +216,8 @@ test(
                 path: await featureShotPath({
                   surface: current,
                   step: topic === null ? `no-pill-${shotStep}` : shotStep,
+                  did: `Opened home ${home.google ? 'with Google connected' : 'with no Google account'} and ${topic === null ? 'chose no pill' : `chose the "${HOME_TOPICS[topic].label}" pill`}.`,
+                  expect: 'Home shows the cards that belong to that choice, by their titles.',
                 }),
               });
 
@@ -243,7 +245,13 @@ test(
                 await sent;
                 await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
                 await page.screenshot({
-                  path: await featureShotPath({ surface: current, step: 'sent-as-first-message' }),
+                  path: await featureShotPath({
+                    surface: current,
+                    step: 'sent-as-first-message',
+                    did: `Pressed the home card "${card.title}".`,
+                    expect:
+                      "A chat opens, the card's own words were sent as its first message, and the scripted reply shows.",
+                  }),
                 });
                 pressedCards.add(key);
               }

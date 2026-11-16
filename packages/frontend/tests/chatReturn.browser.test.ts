@@ -267,7 +267,13 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       }
       await expectLiveReply({ page, message });
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:chat-return', step: 'reply-live-after-return' }),
+        path: await featureShotPath({
+          surface: 'screen:chat-return',
+          step: 'reply-live-after-return',
+          did: 'Opened a chat from its folder, sent a message, went to another chat while the reply was still on its way, and came back by the folder row.',
+          expect:
+            'The reply is running live in the chat again, and the message shows once, the same as after a reload.',
+        }),
       });
       assert.deepEqual(await userMessages(page), await reloadedUserMessages({ page, message }));
       await cancelStopsReply({ page, api, sessionId: charlie });

@@ -25,6 +25,7 @@ import {
 import { HTTPException } from 'hono/http-exception';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
+import type { StoredSearchDeclaration } from '../catalog/McpCatalog';
 import configuration, { type TokenFactoryMode } from '../config';
 import type { IMcpServerStore, IMcpServerWithAuthStore, McpServerRecord } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
@@ -79,8 +80,10 @@ export interface McpConnection {
   headers: RemoteMcpHeaders;
   /** True only for the host's own Email or Calendar connector, at the address the host was set up with. */
   first_party: boolean;
-  /** Set when the user designated this connector as their search provider: the tools stored on its record, which the shipped catalog completes per turn. */
-  search_provider: { tools: readonly string[] } | undefined;
+  /** Set when the user designated this connector as their search provider: the declaration stored on its record, from which the turn builds the provider's grant. */
+  search_provider: StoredSearchDeclaration | undefined;
+  /** Bare names of the tools this server itself declared as changing things, stored on its record. Undefined until a tool list has been captured for it. */
+  declared_change_tools: readonly string[] | undefined;
   /** What an "Always allow" grant on this connector binds to: its setup digest from `connectorGrantBinding`. */
   grant_binding: string;
 }
@@ -569,10 +572,17 @@ export async function getMcpConnection({
       throw new RemoteAddressRefusedError({ name: record.name, problem });
     }
   }
-  const searchProvider =
+  const searchProvider: StoredSearchDeclaration | undefined =
     record.manifest.type === 'remote' && record.manifest.search_provider === true
-      ? { tools: record.manifest.search_tools ?? [] }
+      ? {
+          url: record.manifest.url,
+          search_tools: record.manifest.search_tools,
+          page_read_tools: record.manifest.page_read_tools,
+          search_plumbing_fields: record.manifest.search_plumbing_fields,
+          search_in_process: record.manifest.search_in_process,
+        }
       : undefined;
+  const declaredChangeTools = record.manifest.type === 'remote' ? record.manifest.declared_change_tools : undefined;
   const grantBinding = connectorGrantBinding(record);
   const needsLiveAuth = record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client';
   // Only the live-auth case delegates: a with-auth store's `resolveInvokeHeaders` may be
@@ -586,6 +596,7 @@ export async function getMcpConnection({
       headers: store.resolveInvokeHeaders({ record, userRef }),
       first_party: firstParty,
       search_provider: searchProvider,
+      declared_change_tools: declaredChangeTools,
       grant_binding: grantBinding,
     };
   }
@@ -601,6 +612,7 @@ export async function getMcpConnection({
       }),
       first_party: firstParty,
       search_provider: searchProvider,
+      declared_change_tools: declaredChangeTools,
       grant_binding: grantBinding,
     };
   }
@@ -609,6 +621,7 @@ export async function getMcpConnection({
     headers: resolveManifestRequestHeaders(record.manifest),
     first_party: firstParty,
     search_provider: searchProvider,
+    declared_change_tools: declaredChangeTools,
     grant_binding: grantBinding,
   };
 }
@@ -616,8 +629,8 @@ export async function getMcpConnection({
 /**
  * Expand agent_spec skill names into git mounts from the skill store.
  * Wire url/path/ref/description on the request are ignored — the store row wins.
- * Throws HTTPException(422) if any name is not registered or is not a git skill
- * (a registry catalog row must go through the SFY resolve path instead).
+ * Throws HTTPException(422) if a name is not a git skill (a registry catalog row must go through the SFY
+ * resolve path instead). A name that is no longer added is skipped.
  */
 export async function resolveGitSkills({
   tenant_id,
@@ -637,10 +650,10 @@ export async function resolveGitSkills({
   const resolved: GitSkill[] = [];
   for (const skill of skills) {
     const record = byName.get(skill.name);
+    // A skill removed after a chat turned it on is left out, so removing a skill never stops the chats
+    // and schedules that used it. Saving a chat's setup still refuses a name that is not added.
     if (record === undefined) {
-      throw new HTTPException(422, {
-        message: `Unknown skill "${skill.name}" — not configured`,
-      });
+      continue;
     }
     const git = parseGitSkill(record.manifest);
     if (git === undefined) {

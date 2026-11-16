@@ -284,6 +284,8 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     inReplyTo: rawHeaderOf({ part: payload, name: 'in-reply-to' }),
     references: rawHeaderOf({ part: payload, name: 'references' }),
     fromName,
+    // The From address was checked above to be the account itself, so it is the address sent from.
+    fromAddress: from,
     // A saved draft's headers are delivered as Gmail holds them, names included, so none is left off.
     nameLeftOff: false,
     replyTo,

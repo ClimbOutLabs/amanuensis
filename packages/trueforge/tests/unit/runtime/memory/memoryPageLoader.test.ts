@@ -17,6 +17,7 @@ import {
   sanitizeMemoryLine,
 } from '../../../../src/runtime/memory/memoryPageLoader';
 import { parseMemoryPage, type PageFrontMatter } from '../../../../src/runtime/memory/memoryPages';
+import { pageLineExcluded } from '../../../../src/runtime/memory/recallExclusions';
 import { pageText, writePageFile, writingInstructionsOf, type FixtureFact } from './pageFixtures';
 
 const NORA = `---
@@ -182,6 +183,25 @@ describe('memoryPageLoader', () => {
     expect(pages.map(page => [page.kind, page.page.frontMatter.kind])).toEqual([['matter', 'matter']]);
     expect(pages[0]?.drafting).toEqual([]);
     expect(pages[0]?.text).toContain('[page: Lisbon — matter, active]');
+  });
+
+  it('leaves out the lines a chat pulled out, matched on the words the panel showed, and keeps the rest', async () => {
+    const vaultDir = await makeVault();
+    await writePageFile({ vaultDir, kind: 'person', slug: 'nora', content: NORA });
+    const exclusions = new Set(['Hand-written line with no marker yet', 'Worked at Acme.']);
+    const { pages } = await loadPagesForMessage({
+      vaultDirs: [vaultDir],
+      writeVaultDir: vaultDir,
+      message: 'What is Nora up to?',
+      maxPages: 6,
+      maxTokens: 5_000,
+      skipLine: line => pageLineExcluded({ exclusions, line }),
+    });
+    const text = pages[0]?.text ?? '';
+    expect(text).toContain('- Booked the movie for Saturday 7 PM.');
+    expect(text).not.toContain('Hand-written line');
+    expect(text).not.toContain('Worked at Acme.');
+    expect(pages[0]?.ownLines.join('\n')).not.toContain('Worked at Acme.');
   });
 
   it('loads a page whose file name is a non-Latin name', async () => {

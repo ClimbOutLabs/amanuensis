@@ -1,6 +1,7 @@
 import winston from 'winston';
 import { createAuthRouter } from '../../../src/apis/auth';
 import { LocalAuthenticator } from '../../../src/auth/localAuthenticator';
+import { createLocalUser } from '../../../src/auth/localSignIn';
 import { createAuthMiddleware } from '../../../src/auth/middleware';
 import type { GlobalSettingRecord, IGlobalSettingsStore } from '../../../src/db/globalSettingsStore';
 import {
@@ -96,18 +97,15 @@ describe('local sign-in session cookie behind an https public address', () => {
       localSignIn: { localUserStore, globalSettingsStore },
     });
 
-    const created = await router.request('/create-account', {
+    await createLocalUser({ store: localUserStore, email: 'owner@example.com', password: 'a long enough password' });
+    const signedIn = await router.request('/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        email: 'owner@example.com',
-        password: 'a long enough password',
-        password_confirm: 'a long enough password',
-      }).toString(),
+      body: new URLSearchParams({ email: 'owner@example.com', password: 'a long enough password' }).toString(),
     });
 
-    expect(created.status).toBe(302);
-    const setCookie = created.headers.getSetCookie().join('\n');
+    expect(signedIn.status).toBe(302);
+    const setCookie = signedIn.headers.getSetCookie().join('\n');
     expect(setCookie).toContain('id_token=');
     expect(setCookie).toContain('HttpOnly');
     expect(setCookie).toContain('SameSite=Lax');

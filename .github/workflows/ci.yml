@@ -585,6 +585,12 @@ jobs:
         if: runner.os == 'Windows'
         run: packages/aman-installer/dist/aman.exe --version
 
+      # Start it the way a person does, as Aman-Setup with no command, and check that it ends
+      # on a sentence it means to say instead of crashing or closing with nothing printed.
+      - name: Start it as Aman Setup
+        timeout-minutes: 12
+        run: pnpm check:aman-installer-launch
+
   # The shell installer and the aman command: shellcheck, the doctor's tests, and the stubbed installer suite split
   # over six machines, because it runs each test file against a fresh copy of the installer.
   installer-shell:

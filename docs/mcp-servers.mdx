@@ -165,7 +165,7 @@ Placing the pins is its own step and always asks, because the addresses are sent
 
 ??? note "Advanced: how search providers work"
 
-    **Which tools run without asking.** Only a tool the connector declares read-only runs this way, or one that the shipped preset for a known provider (Parallel, Tavily, Exa) lists as a search tool. Every other tool on the connector, and the same tool on any other connector, still asks. So picking a connector that can write doesn't let its write tools run silently.
+    **Which tools run without asking.** Only a tool the connector declares both read-only and reaching the open web runs this way, or one that the shipped preset for a known provider (Parallel, Tavily, Exa) lists as a search tool. Aman reads the connector's own tool list when you turn on **Web search provider**. A tool that takes the address of a page counts as reading pages, and the others count as searches. Every other tool on the connector, and the same tool on any other connector, still asks. So picking a connector that can write doesn't let its write tools run silently.
 
     **Parallel by default.** An existing install that has no search provider gets Parallel once, the first time it starts after an update. It's added only once: if you remove the connector, it stays removed, and a provider you chose, or one you turned off, is never replaced. If you added Parallel before you could pick a search provider, it's now your search provider, unless you already picked one or turned it off.
 

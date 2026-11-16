@@ -118,6 +118,7 @@ export function createTodayRouter(deps: TodayRouterDeps) {
     const data: Today = {
       calendar: calendar.calendar,
       free_after: calendar.free_after,
+      calendar_unread: calendar.calendar_unread,
       due,
       needs_ok: needsOk.items,
       needs_ok_more: needsOk.more,

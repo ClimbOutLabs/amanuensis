@@ -1,6 +1,6 @@
 # Install on a Mac
 
-This guide installs the latest release of Aman on your Mac. It takes about 45 minutes. Most of that is waiting while things download and build. You answer a few questions and choose a password at the start, and then it runs on its own.
+This guide installs the latest release of Aman on your Mac. It may take a while, depending on your internet connection. Most of that is waiting while things download and build. You answer a few questions and choose a password at the start, and then it runs on its own.
 
 Using another computer? Follow [Install on Linux](install-linux.md) or [Install on Windows](install-windows.md) instead.
 

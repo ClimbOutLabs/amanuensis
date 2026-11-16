@@ -1,10 +1,11 @@
 import type { CalendarWriteReview } from '../../../src/core/calendar/eventWrite';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import {
   defaultSentinelServices,
   forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(
@@ -94,6 +95,7 @@ const REVIEW: CalendarWriteReview = {
   description: '',
   attendees: [],
   guests_emailed: false,
+  guests_line: '',
   one_of_repeating: false,
   before: null,
   incomplete_reason: null,

@@ -12,7 +12,9 @@
 #   aman upgrade [--check] [--force]
 #   aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
 #   aman local-model PORT [--instance NAME] [--remove]
+#   aman address list | add ADDRESS | remove ADDRESS [--instance NAME]
 #   aman migrate --from-compose FOLDER [--user ID]
+#   aman help [COMMAND]
 #
 # --json never loads the terminal style and is the same document as before.
 #
@@ -84,33 +86,21 @@ DOCKER_VERSION=""
 DOCKER_MEM=""
 APP_CONTAINER=""
 
-usage() {
-  cat >&2 <<'USAGE'
-Usage: aman status
-         shows each instance's addresses, settings and how to set up a new phone or computer
-       aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
-       aman doctor instance|network [--fix [--yes]] [--instance NAME]
-       aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
-         [--add go,rust,java] [--remove go,rust,java] [--add-python PACKAGES] [--remove-python PACKAGES]
-         --add and --add-python put toolchains or your own Python packages in the sandbox and rebuild it
-       aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
-       aman backup [NAME]
-       aman restore [NAME] [TIME | --latest]
-       aman upgrade [--check] [--force]
-       aman password [--instance NAME] [--password-stdin]
-         sets a new owner password; run it on the computer where Aman is installed
-       aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
-         --dry-run checks the file and imports nothing; an instance that has never started is started once first
-       aman migrate --from-compose FOLDER [--user ID]
-       aman local-model PORT [--instance NAME] [--remove]
-         lets Aman reach a model server on this computer at that port; --remove takes the port away
-USAGE
+die_usage() {
+  printf '%s\nRun aman help to see what each command does.\n' "$1" >&2
+  exit 2
 }
 
-die_usage() {
-  printf '%s\n' "$1" >&2
-  usage
-  exit 2
+# aman help [COMMAND]: the overview, or the page of one command, on the standard output.
+run_help() {
+  load_ui
+  require_lib help
+  if [ -z "${1:-}" ]; then
+    help_overview
+  elif ! help_command "$1"; then
+    printf 'There is no command called %s.\nRun aman help to see the commands.\n' "$1" >&2
+    exit 2
+  fi
 }
 
 # Helper files sit in ../lib beside this file's folder, installed and in a checkout alike.
@@ -148,6 +138,11 @@ checkout_dir() {
 checkout_installer() {
   local repo
   repo=$(checkout_dir) || return 1
+  # A pull under Ubuntu's umask leaves new installer files writable by the person's own group; that alone is put right
+  # here, as the installer itself would, instead of refusing.
+  if checkout_only_own_group_writes "$repo" && tighten_checkout "$repo"; then
+    printf 'Made %s private to you again, so only you can change what the installer runs.\n' "$repo" >&2
+  fi
   if checkout_problem "$repo" >/dev/null; then return 1; fi
   printf '%s' "${repo}/installer/install.sh"
 }
@@ -1065,13 +1060,20 @@ check_instance() {
   check_instance_network "$1"
 }
 
-# An instance opened on the network lists the addresses it answers at; a new address of this computer (another
-# network, a changed DHCP lease, Tailscale coming up) is not on the list until the instance is refreshed, and sign-in
-# is refused there. Nothing is recorded for an instance that is open on this computer only.
+# An instance opened on the network listens on the private addresses this computer had when it was last set up. An
+# address the computer no longer has (a new address from the router, a network it left) stops other devices reaching
+# it there; a new address is not on the list until the instance is refreshed, and sign-in is refused there. Nothing is
+# recorded for an instance that is open on this computer only.
 check_instance_network() {
-  local name=$1 origins port host missing='' count expected tls_port=''
+  local name=$1 origins port host missing='' stale='' count expected tls_port='' gone refused
   origins=$(registry_value "$name" origins)
   [ -n "$origins" ] || return 0
+  gone=$(network_gone_addresses "$(registry_value "$name" listen_addresses)" | tr '\n' ' ')
+  if [ -n "$gone" ]; then
+    record "$name" network fail "This computer's network address changed, so other devices cannot reach Aman. It no longer has: ${gone% }." \
+      "Run aman doctor network --fix"
+    return
+  fi
   port=$(registry_value "$name" app_port)
   case "$origins" in *https://*) tls_port=$(registry_value "$name" tls_port) ;; esac
   # shellcheck disable=SC2046,SC2086 # the extra hosts are checked names without spaces
@@ -1087,8 +1089,43 @@ check_instance_network() {
       "Run aman doctor network --fix"
     return
   fi
+  # An address an older version found by itself that this one leaves out, such as a VPN address, is read away again.
+  while IFS= read -r host; do
+    case ",${expected}," in
+      *",${host},"*) ;;
+      *) stale="${stale} $(origin_host "$host")" ;;
+    esac
+  done < <(printf '%s\n' "$origins" | tr ',' '\n')
+  if [ -n "$stale" ]; then
+    record "$name" network warn "Aman is still set up for addresses it would not use today:${stale}. Use aman address add for any you want to keep." \
+      "Run aman doctor network --fix"
+    return
+  fi
   count=$(printf '%s\n' "$origins" | tr ',' '\n' | wc -l | tr -d ' ')
+  refused=$(refused_addresses "$name")
+  if [ -n "$refused" ]; then
+    # Not a fault of the instance, so --fix has nothing to do for it; the line says how to allow one.
+    record "$name" network ok "Aman opens at ${count} addresses of this computer, and sign-in works at each. In the last week it refused:${refused}. To allow one you opened yourself, run: aman address add ADDRESS" ""
+    return
+  fi
   record "$name" network ok "Aman opens at ${count} addresses of this computer, and sign-in works at each." ""
+}
+
+# The hosts the app refused in the last week, space-separated with a leading space, read from its running container.
+# The app writes them; nothing is listed when the app is not running or keeps no list.
+refused_addresses() { # name
+  local id since line at host out=''
+  id=$(bounded "$PROBE_SECONDS" docker ps -q --filter "label=com.docker.compose.project=aman-$1" --filter "label=com.docker.compose.service=$APP_SERVICE" 2>/dev/null | head -n 1)
+  [ -n "$id" ] || return 0
+  since=$(($(now_epoch) - 7 * 24 * 3600))
+  while IFS= read -r line; do
+    at=${line%% *}
+    host=${line#* }
+    case "$at" in '' | *[!0-9]*) continue ;; esac
+    [[ $host =~ ^[a-z0-9.:-]+$ ]] || continue
+    if [ "$at" -ge "$since" ]; then out="$out $host"; fi
+  done < <(bounded "$PROBE_SECONDS" docker exec "$id" cat /data/refused-addresses.txt 2>/dev/null || true)
+  printf '%s' "$out"
 }
 
 check_instance_core() {
@@ -1454,7 +1491,7 @@ doctor_sandbox() {
         shift
         ;;
       -h | --help)
-        usage
+        run_help doctor
         exit 0
         ;;
       *) die_usage "Unknown argument: $1" ;;
@@ -1619,7 +1656,7 @@ doctor_repair() { # kind
         shift
         ;;
       -h | --help)
-        usage
+        run_help doctor
         exit 0
         ;;
       *) die_usage "Unknown argument: $1" ;;
@@ -1737,7 +1774,7 @@ doctor_machine_repair() { # kind
       --yes) yes=1 ;;
       --verbose) UI_VERBOSE=1 ;;
       -h | --help)
-        usage
+        run_help doctor
         exit 0
         ;;
       *) die_usage "Unknown argument: $1" ;;
@@ -1844,6 +1881,57 @@ run_import() {
     fi
   fi
   run_installer instance import "$instance" "$file" ${rest[@]+"${rest[@]}"}
+}
+
+# aman address list|add|remove [ADDRESS]: the addresses the one instance on this computer, or the one --instance names,
+# answers at besides the ones it finds by itself.
+run_address() {
+  local action="" value="" instance="" name count=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        instance=$2
+        shift
+        ;;
+      -*) die_usage "Unknown argument: $1" ;;
+      *)
+        if [ -z "$action" ]; then
+          action=$1
+        elif [ -z "$value" ]; then
+          value=$1
+        else
+          die_usage "Unexpected argument: $1"
+        fi
+        ;;
+    esac
+    shift
+  done
+  case "$action" in
+    list) [ -z "$value" ] || die_usage "aman address list takes no address." ;;
+    add | remove) [ -n "$value" ] || die_usage "aman address $action needs an address, for example: aman address $action https://aman.example.com" ;;
+    *) die_usage "Run aman address list, aman address add ADDRESS or aman address remove ADDRESS." ;;
+  esac
+  if [ -z "$instance" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      count=$((count + 1))
+      instance=$name
+    done < <(list_instances)
+    if [ "$count" = 0 ]; then
+      printf 'This computer has no Aman instance yet. Run install.sh first.\n' >&2
+      exit 1
+    fi
+    if [ "$count" -gt 1 ]; then
+      printf 'This computer has %s instances, so Aman cannot tell which one you mean. Add --instance NAME.\n' "$count" >&2
+      exit 2
+    fi
+  fi
+  if [ -n "$value" ]; then
+    run_installer instance address "$instance" "$action" "$value"
+  else
+    run_installer instance address "$instance" "$action"
+  fi
 }
 
 # aman local-model PORT: the installer's local model bridge for the one instance on this computer, or the one --instance
@@ -2002,10 +2090,39 @@ write_host_reports() {
   done
 }
 
+# One line on the error output when an instance listens on an address this computer no longer has: other devices cannot
+# reach it, and nothing else would say so. The network doctor says it in its own words.
+warn_if_address_gone() {
+  local name gone
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    gone=$(network_gone_addresses "$(registry_value "$name" listen_addresses)")
+    [ -n "$gone" ] || continue
+    printf "This computer's network address changed, so other devices can't reach Aman (instance %s). Run: aman doctor network --fix\n" "$name" >&2
+  done < <(list_instances)
+}
+
 # ---------------------------------------------------------------- main
 
+case "${1:-} ${2:-}" in
+  "doctor network" | *--json*) ;;
+  *) warn_if_address_gone ;;
+esac
+
+# `aman COMMAND --help` shows the command's page; doctor reads its own arguments, so it is left out here.
+case "${2:-}" in
+  -h | --help)
+    case "${1:-}" in
+      status | upgrade | backup | restore | password | import | migrate | local-model | address)
+        run_help "$1"
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+
 case "${1:-}" in
-  doctor | backup | upgrade | import | migrate | local-model) renew_tls_if_due ;;
+  doctor | backup | upgrade | import | migrate | local-model | address) renew_tls_if_due ;;
 esac
 
 case "${1:-}" in
@@ -2019,15 +2136,28 @@ case "${1:-}" in
     shift
     run_local_model "$@"
     ;;
+  address)
+    shift
+    run_address "$@"
+    ;;
   password)
     shift
     run_installer instance password "$@"
     ;;
-  -h | --help)
-    usage
+  help)
+    shift
+    run_help "$@"
     exit 0
     ;;
-  *) die_usage "Unknown command: ${1:-(none)}" ;;
+  -h | --help)
+    run_help
+    exit 0
+    ;;
+  '')
+    run_help
+    exit 0
+    ;;
+  *) die_usage "Unknown command: $1" ;;
 esac
 
 case "${1:-}" in
@@ -2068,7 +2198,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h | --help)
-      usage
+      run_help doctor
       exit 0
       ;;
     *) die_usage "Unknown argument: $1" ;;

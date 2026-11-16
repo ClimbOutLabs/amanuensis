@@ -68,6 +68,27 @@ function pending(card: TrueForgeApi.Tier3Card | null, overrides: Partial<Pending
   };
 }
 
+function calendarCard(overrides: Partial<TrueForgeApi.Tier3CalendarEvent> = {}): TrueForgeApi.Tier3Card {
+  return emailCard({
+    email: null,
+    copy: { headline: 'Add "Train to the coast" to your calendar?', consequence: null, reason: null },
+    calendarEvent: {
+      action: 'create',
+      attendees: ['Pippa'],
+      before: null,
+      calendar: 'Personal',
+      description: '',
+      duration: '1 hour',
+      location: '',
+      oneOfRepeating: false,
+      timeZone: 'Europe/Madrid',
+      title: 'Train to the coast',
+      when: 'Saturday 15 November at 9:00',
+      ...overrides,
+    },
+  });
+}
+
 function failure(statusCode: number, code?: string): TrueForgeError {
   return new TrueForgeError({
     statusCode,
@@ -219,6 +240,27 @@ describe('the approval lines', () => {
     expect(lines).toContain('To: Team board');
     expect(lines).toContain('Full request');
     expect(lines).toContain('title: Hello team');
+  });
+
+  it('shows the calendar guest line in the words the card carries', () => {
+    const lines = approvalLines(
+      pending(calendarCard({ guestsLine: 'The calendar service will email every guest about this.' })),
+      'Mannie',
+    );
+    expect(lines).toContain('Guests: Pippa');
+    const guestsAt = lines.indexOf('Guests: Pippa');
+    expect(lines[guestsAt + 1]).toBe('The calendar service will email every guest about this.');
+    // The words are the card's own. The terminal never names a provider itself.
+    expect(lines.some(line => line.includes('Google'))).toBe(false);
+  });
+
+  it('shows no guest email line when the calendar card carries none', () => {
+    const withGuests = approvalLines(pending(calendarCard()), 'Mannie');
+    expect(withGuests).toContain('Guests: Pippa');
+    expect(withGuests.some(line => line.includes('email'))).toBe(false);
+    const noGuests = approvalLines(pending(calendarCard({ attendees: [] })), 'Mannie');
+    expect(noGuests).toContain('Guests: None');
+    expect(noGuests.some(line => line.includes('email'))).toBe(false);
   });
 });
 

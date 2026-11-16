@@ -398,7 +398,7 @@ describe('Memory explorer with several collections', () => {
     const zaraLine = await screen.findByText(ZARA_PENDING_LINE);
     expect(
       screen.getAllByText(
-        /^This happened on .*2026.*\d\d.*\. The model took too long to answer\. If this keeps happening, choose a faster Background model in Settings\.$/,
+        /^This happened on .*2026.*\d\d.*\. The model took too long to answer\. If this keeps happening, check that the model is not busy with other work, or choose a faster Background model in Settings\.$/,
       ),
     ).toHaveLength(2);
     // The server did not say which chat it was, so the note offers no way to open one.

@@ -63,12 +63,28 @@ RUN mkdir -p /data/memory /data/persona-knowledge /data/app /data/mail-policy /r
 ENV MEMORY_MARKDOWN_DIR=/data/memory \
   PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
   APP_DATA_DIR=/data/app \
-  VOICE_VAD_MODEL_DIR=/opt/aman-voice
+  VOICE_VAD_MODEL_DIR=/opt/aman-voice \
+  MEMORY_EMBEDDINGS_MODEL_DIR=/opt/aman-models/memory-search \
+  HF_HUB_OFFLINE=1 \
+  HF_HUB_DISABLE_TELEMETRY=1
 
 # Voice mode's listening model (Silero VAD v5.1.2, MIT), fetched at build time and checked against its
 # SHA-256, so the build fails on any other file and the running server never downloads it. The server
 # pins the same hash in packages/trueforge/src/voice/vad/sileroVad.ts; a test keeps the two equal.
 ADD --chmod=0644 --checksum=sha256:2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx /opt/aman-voice/silero_vad.onnx
+
+# Memory search model (Xenova/multilingual-e5-small, MIT upstream), fetched at build time from the pinned
+# revision and checked against its SHA-256 (the same pins as EMBEDDING_MODEL_FILES in
+# packages/trueforge/src/runtime/memory/embeddingModel.ts). The server loads it from here and only
+# downloads again if these bytes ever fail their check. The directory stays writable by the runtime user
+# because the server checks that the model folder is writable before it loads.
+RUN mkdir -p /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx \
+  && chown -R 10001:10001 /opt/aman-models
+ADD --chown=10001:10001 --chmod=0644 --checksum=sha256:cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1 https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/config.json /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/config.json
+ADD --chown=10001:10001 --chmod=0644 --checksum=sha256:cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1 https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/config.json /opt/aman-models/memory-search/Xenova/multilingual-e5-small/config.json
+ADD --chown=10001:10001 --chmod=0644 --checksum=sha256:0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39 https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json
+ADD --chown=10001:10001 --chmod=0644 --checksum=sha256:a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer_config.json /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer_config.json
+ADD --chown=10001:10001 --chmod=0644 --checksum=sha256:f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193 https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx/model_quantized.onnx /opt/aman-models/memory-search/Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx/model_quantized.onnx
 
 EXPOSE 8790
 

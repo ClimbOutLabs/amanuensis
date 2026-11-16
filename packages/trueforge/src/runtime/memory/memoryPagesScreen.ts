@@ -36,6 +36,7 @@ import {
   renderMemoryPage,
   unmarkedBulletText,
   withPageTitle,
+  withoutLines,
   writeMemoryPage,
   type MemoryPage,
   type PageKind,
@@ -46,6 +47,7 @@ import {
 import { commitPageChange, markEditedPage, type PageChangeOptions } from './memoryPageWriter';
 import { dismissDisagreement, readDisagreementsForScreen, type LiveDisagreement } from './pageDisagreements';
 import { isPageSlug } from './pageSlug';
+import { pageLineExcluded } from './recallExclusions';
 import {
   GitMissingError,
   pageBeforeCommit,
@@ -549,6 +551,42 @@ export async function dismissPageLine(input: {
   factId: string;
 }): Promise<ScreenOutcome<WirePage>> {
   return changeUnconfirmedLine({ ...input, verb: 'dismissed', apply: ({ page, at }) => removeFact(page, { at }) });
+}
+
+/**
+ * Deletes the lines of one page that a chat's memory panel showed in these words, wherever they sit on the page.
+ * The page's history keeps them. Returns how many lines went; none when the page or the words are gone.
+ */
+export async function deletePageLinesShownAs({
+  options,
+  kind,
+  slug,
+  shownText,
+}: {
+  options: PageChangeOptions;
+  kind: PageKind;
+  slug: string;
+  shownText: string;
+}): Promise<number> {
+  const exclusions = new Set([shownText]);
+  const shown = (line: PageLine): boolean => pageLineExcluded({ exclusions, line });
+  const { vaultDir } = options;
+  let title = slug;
+  return commitPageChange({
+    options,
+    message: count =>
+      `You: deleted ${clip(shownText)} (${clip(singleLine(title))})${count > 1 ? `, ${String(count)} lines` : ''}`,
+    change: async () => {
+      const page = isPageSlug(slug) ? await readMemoryPage({ vaultDir, kind, slug }) : undefined;
+      const count = page?.sections.reduce((sum, section) => sum + section.lines.filter(shown).length, 0) ?? 0;
+      if (page === undefined || count === 0) {
+        return 0;
+      }
+      title = page.frontMatter.title;
+      await writeMemoryPage({ vaultDir, kind, slug, page: withoutLines(page, shown) });
+      return count;
+    },
+  });
 }
 
 const NOT_LISTED = 'That pair is not listed any more. Reload the page to see what is there now.';

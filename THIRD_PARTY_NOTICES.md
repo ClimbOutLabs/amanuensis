@@ -16,6 +16,7 @@ Amanuensis (Aman) is licensed under the Mozilla Public License 2.0 (see `LICENSE
 10. Service logos and the API docs page (MIT, CC0-1.0, Apache-2.0)
 11. Voice mode: speech detection (MIT)
 12. Word list for Full texts (SCOWL, public domain and permissive terms)
+13. Speech and memory search model weights (MIT)
 
 ## 1. sharp and libvips (LGPL-3.0-or-later)
 
@@ -1066,4 +1067,36 @@ and Australian word list.  It is under the following copyright:
   LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
   OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
   SUCH DAMAGE.
+```
+
+## 13. Speech and memory search model weights (MIT)
+
+The speech-to-text image contains the Whisper `small` weights as converted for faster-whisper: `Systran/faster-whisper-small` (MIT, pinned to Hugging Face commit `536b0662742c02347bc0e980a01041f333bce120`). It is a CTranslate2 conversion of `openai/whisper-small`. The image build fetches the four files from that commit and fails unless each matches its SHA-256 pin in `ops/aman-stt/Dockerfile`.
+
+The app image contains the memory search model `Xenova/multilingual-e5-small` (ONNX conversion, pinned to commit `761b726dd34fb83930e26aab4e9ac3899aa1fa78`). The conversion repository states no licence; its base model `intfloat/multilingual-e5-small` is MIT. The build fetches the files from that commit and checks each against its SHA-256 pin in `Dockerfile` and `packages/trueforge/src/runtime/memory/embeddingModel.ts`.
+
+Both licences are MIT. The text below is the Whisper licence, which covers the speech weights. The memory model's base is also MIT; its copyright line must be taken from the upstream `intfloat/multilingual-e5-small` licence file before this notice is final.
+
+```text
+MIT License
+
+Copyright (c) 2022 OpenAI
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
