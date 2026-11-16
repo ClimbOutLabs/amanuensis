@@ -7,6 +7,7 @@ import {
   type ILocalUserStore,
   type LocalUserRecord,
 } from '../../localUserStore';
+import { TerminalKeyStore } from '../../terminalKeyStore';
 import { isUniqueViolation } from '../client';
 import type { Database } from '../types';
 
@@ -52,15 +53,36 @@ export class PostgresLocalUserStore implements ILocalUserStore {
     }
   }
 
-  async replacePasswordHash(input: { password_hash: string; updated_at: string }): Promise<boolean> {
-    const result = await this.#db
-      .updateTable('local_user')
-      .set({
-        password_hash: input.password_hash,
-        updated_at: input.updated_at,
-        session_version: sql<number>`session_version + 1`,
-      })
-      .executeTakeFirst();
-    return result.numUpdatedRows > 0n;
+  async replacePasswordHashAndRevokeTerminalKeys(input: {
+    password_hash: string;
+    updated_at: string;
+    tenant_id: string;
+    subject_id: string;
+    revoked_at: string;
+  }): Promise<{ replaced: boolean; revoked_count: number }> {
+    return this.#db.transaction().execute(async trx => {
+      const result = await trx
+        .updateTable('local_user')
+        .set({
+          password_hash: input.password_hash,
+          updated_at: input.updated_at,
+          session_version: sql<number>`session_version + 1`,
+        })
+        .executeTakeFirst();
+      if (result.numUpdatedRows === 0n) {
+        return { replaced: false, revoked_count: 0 };
+      }
+      // The revocation runs on the same transaction, through the key store that
+      // owns the table, so it commits or rolls back with the password itself. The
+      // transaction is named as a Kysely of this database first: the key store
+      // speaks the narrower shape, and a transaction only widens to its own.
+      const executor: Kysely<Database> = trx;
+      const revoked_count = await new TerminalKeyStore(executor).revokeAllForOwner({
+        tenant_id: input.tenant_id,
+        subject_id: input.subject_id,
+        revoked_at: input.revoked_at,
+      });
+      return { replaced: true, revoked_count };
+    });
   }
 }

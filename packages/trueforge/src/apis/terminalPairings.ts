@@ -12,6 +12,7 @@ import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 import {
   completeTerminalPairingRoute,
   confirmTerminalPairingRoute,
+  lookupTerminalPairingRoute,
   revokeCurrentTerminalKeyRoute,
   startTerminalPairingRoute,
 } from '../routes/terminalPairingRoutes';
@@ -28,7 +29,7 @@ export interface TerminalPairingRouterDeps {
   terminalKeyStore: ITerminalKeyStore;
   audit: AuditLogWriter;
   logger: Logger;
-  /** Gates the confirm and revoke-current routes; start and completion are public. */
+  /** Gates the confirm, lookup and revoke-current routes; start and completion are public. */
   authMiddleware: MiddlewareHandler;
   /**
    * The instance owner's subject id when the sign-in mode can name it before anyone
@@ -174,6 +175,23 @@ export function createTerminalPairingRouter(deps: TerminalPairingRouterDeps) {
       description: `You paired a terminal named ${confirmed.device_name}.`,
     });
     return c.json({ data: { device_name: confirmed.device_name, paired_at: confirmed.paired_at } }, 200);
+  });
+
+  gated.openapi(lookupTerminalPairingRoute, async c => {
+    const body = c.req.valid('json');
+    // The lookup answers from the code alone, so it is guarded like the confirm:
+    // the same limiter, and the same one refusal for a wrong, expired or used code.
+    const permit = limiter.begin(clientKey(c), 'terminal-pairing');
+    if (!permit.allowed) {
+      throw new HTTPException(429, { message: tooManyText(permit.retryAfterSeconds, permit.scope) });
+    }
+    const lookedUp = await service.lookup({ code: body.code });
+    if (lookedUp === undefined) {
+      permit.finish('failure');
+      throw new HTTPException(404, { message: PAIRING_CODE_REFUSED_MESSAGE });
+    }
+    permit.finish('success');
+    return c.json({ data: { device_name: lookedUp.device_name } }, 200);
   });
 
   gated.openapi(revokeCurrentTerminalKeyRoute, async c => {

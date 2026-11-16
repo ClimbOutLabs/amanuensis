@@ -609,6 +609,96 @@ describe('terminal pairing with the sign-in service', () => {
     const lastUsed = typeof row.last_used_at === 'string' ? row.last_used_at : row.last_used_at.toISOString();
     expect(lastUsed > '2000-01-01T00:00:00.000Z').toBe(true);
   });
+
+  it('shows the waiting terminal name to the signed-in person before they confirm', async () => {
+    const harness = await buildHarness();
+    const token = await harness.noraToken();
+    const started = await harness.request('/api/v1/terminal-pairings', postJson({ device_name: 'Pippa' }));
+    expect(started.status).toBe(201);
+    const start = StartResponseSchema.parse(await jsonBody(started));
+
+    const lookedUp = await harness.request(
+      '/api/v1/terminal-pairings/lookup',
+      postJson({ code: start.data.code }, { Authorization: `Bearer ${token}` }),
+    );
+    expect(lookedUp.status).toBe(200);
+    expect(await jsonBody(lookedUp)).toEqual({ data: { device_name: 'Pippa' } });
+
+    // The lookup only reads: the pairing is still there to confirm afterwards.
+    const confirmed = await harness.request(
+      '/api/v1/terminal-pairings/confirm',
+      postJson({ code: start.data.code }, { Authorization: `Bearer ${token}` }),
+    );
+    expect(confirmed.status).toBe(200);
+  });
+
+  it('answers a wrong code at lookup with the same refusal confirm gives', async () => {
+    const harness = await buildHarness();
+    const token = await harness.noraToken();
+
+    const lookedUp = await harness.request(
+      '/api/v1/terminal-pairings/lookup',
+      postJson({ code: 'ZZZZ-ZZZZ' }, { Authorization: `Bearer ${token}` }),
+    );
+    expect(lookedUp.status).toBe(404);
+    const lookupRefusal = ErrorResponseSchema.parse(await jsonBody(lookedUp));
+
+    const confirmed = await harness.request(
+      '/api/v1/terminal-pairings/confirm',
+      postJson({ code: 'ZZZZ-ZZZZ' }, { Authorization: `Bearer ${token}` }),
+    );
+    expect(confirmed.status).toBe(404);
+    const confirmRefusal = ErrorResponseSchema.parse(await jsonBody(confirmed));
+    expect(lookupRefusal).toEqual(confirmRefusal);
+  });
+
+  it('answers a used code at lookup with the same refusal', async () => {
+    const harness = await buildHarness();
+    const token = await harness.noraToken();
+    const started = await harness.request('/api/v1/terminal-pairings', postJson({ device_name: 'Pippa' }));
+    const start = StartResponseSchema.parse(await jsonBody(started));
+    const confirmed = await harness.request(
+      '/api/v1/terminal-pairings/confirm',
+      postJson({ code: start.data.code }, { Authorization: `Bearer ${token}` }),
+    );
+    expect(confirmed.status).toBe(200);
+
+    const lookedUp = await harness.request(
+      '/api/v1/terminal-pairings/lookup',
+      postJson({ code: start.data.code }, { Authorization: `Bearer ${token}` }),
+    );
+    expect(lookedUp.status).toBe(404);
+    const refusal = ErrorResponseSchema.parse(await jsonBody(lookedUp));
+    expect(refusal.error.message).toContain('not right, or it has expired');
+  });
+
+  it('answers an expired code at lookup with the same refusal', async () => {
+    let nowMs = Date.parse('2026-11-15T10:00:00.000Z');
+    const harness = await buildHarness({
+      pairingService: store => new TerminalPairingService({ terminalKeyStore: store, now: () => nowMs }),
+    });
+    const token = await harness.noraToken();
+    const started = await harness.request('/api/v1/terminal-pairings', postJson({ device_name: 'Pippa' }));
+    const start = StartResponseSchema.parse(await jsonBody(started));
+
+    nowMs += 6 * 60_000;
+    const lookedUp = await harness.request(
+      '/api/v1/terminal-pairings/lookup',
+      postJson({ code: start.data.code }, { Authorization: `Bearer ${token}` }),
+    );
+    expect(lookedUp.status).toBe(404);
+    const refusal = ErrorResponseSchema.parse(await jsonBody(lookedUp));
+    expect(refusal.error.message).toContain('not right, or it has expired');
+  });
+
+  it('refuses a lookup with no sign-in', async () => {
+    const harness = await buildHarness();
+    const started = await harness.request('/api/v1/terminal-pairings', postJson({ device_name: 'Pippa' }));
+    const start = StartResponseSchema.parse(await jsonBody(started));
+
+    const lookedUp = await harness.request('/api/v1/terminal-pairings/lookup', postJson({ code: start.data.code }));
+    expect(lookedUp.status).toBe(401);
+  });
 });
 
 describe('terminal key store', () => {

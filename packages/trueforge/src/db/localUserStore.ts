@@ -61,8 +61,18 @@ export interface ILocalUserStore {
    */
   createUser(record: LocalUserRecord): Promise<void>;
   /**
-   * Replaces the password hash and raises `session_version` in the same write, so every
-   * session issued under the old password stops working. Returns false when there is no user.
+   * The one way a password is replaced: the new hash, the raised `session_version`
+   * and the revocation of every live terminal key the person paired land in a
+   * single transaction, so either all of it happens or none of it does. A failed
+   * revocation can therefore never leave a changed password behind with the keys
+   * still live, and there is no second write for a pairing in flight to slip past.
+   * Returns `replaced: false` (and revokes nothing) when there is no user.
    */
-  replacePasswordHash(input: { password_hash: string; updated_at: string }): Promise<boolean>;
+  replacePasswordHashAndRevokeTerminalKeys(input: {
+    password_hash: string;
+    updated_at: string;
+    tenant_id: string;
+    subject_id: string;
+    revoked_at: string;
+  }): Promise<{ replaced: boolean; revoked_count: number }>;
 }

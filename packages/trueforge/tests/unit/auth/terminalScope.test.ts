@@ -1,9 +1,11 @@
 /**
  * The chat scope of a paired terminal key, path by path. The sessions prefix carries
  * more than chats: the repository binding can clone a repository with the person's
- * GitHub token, and the sandbox file download hands out files from a turn's sandbox.
- * Neither is chat, so both stay closed to a terminal key even though they sit under
- * the sessions prefix. Everyone and everything here is made up.
+ * GitHub token, the sandbox file download hands out files from a turn's sandbox, and
+ * the bug report, audit log, recall exclusions, privacy read and turn artifact list
+ * are diagnostics, memory controls and settings-shaped reads rather than chat. All
+ * of them stay closed to a terminal key even though they sit under the sessions
+ * prefix. Everyone and everything here is made up.
  */
 import { terminalKeyMayReachPath } from '../../../src/auth/terminalScope';
 
@@ -16,7 +18,6 @@ describe('terminal key scope', () => {
       '/api/v1/sessions/sess-1/turns/turn-1',
       '/api/v1/sessions/sess-1/turns/turn-1/events',
       '/api/v1/sessions/sess-1/turns/turn-1/subscribe',
-      '/api/v1/sessions/sess-1/turns/turn-1/artifacts',
       '/api/v1/sessions/sess-1/implementation-plan-grants',
       '/api/v1/sessions/sess-1/implementation-plan-grants/grant-1',
       '/api/v1/user/chat-search',
@@ -39,8 +40,21 @@ describe('terminal key scope', () => {
     }
   });
 
-  it('cannot download a sandbox file from a turn', () => {
+  it('cannot download a sandbox file from a turn or list a turn artifact files', () => {
     expect(terminalKeyMayReachPath('/api/v1/sessions/sess-1/turns/turn-1/download-sandbox-file')).toBe(false);
+    expect(terminalKeyMayReachPath('/api/v1/sessions/sess-1/turns/turn-1/artifacts')).toBe(false);
+  });
+
+  it('cannot reach the sessions routes that are not chat', () => {
+    const refused = [
+      '/api/v1/sessions/sess-1/bug-report',
+      '/api/v1/sessions/sess-1/audit-log',
+      '/api/v1/sessions/sess-1/recall-exclusions',
+      '/api/v1/sessions/sess-1/privacy',
+    ];
+    for (const path of refused) {
+      expect(terminalKeyMayReachPath(path)).toBe(false);
+    }
   });
 
   it('still reaches a chat whose own id reads like a subresource name', () => {

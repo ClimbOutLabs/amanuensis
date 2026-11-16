@@ -707,7 +707,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
-      terminalKeyStore: deps.terminalKeyStore,
       audit: deps.sentinelAuditStore,
       ...(deps.localUserStore === undefined
         ? {}

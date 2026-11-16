@@ -18,6 +18,8 @@ const NEW_PASSWORD = 'a different long password';
 /** The local user store, in memory, honoring the same contract as the database stores. */
 class MemoryLocalUserStore implements ILocalUserStore {
   #user: LocalUserRecord | undefined;
+  /** When set, the password write fails the way a lost database write would. */
+  failPasswordChange = false;
 
   getUser(): Promise<LocalUserRecord | undefined> {
     return Promise.resolve(this.#user);
@@ -31,9 +33,18 @@ class MemoryLocalUserStore implements ILocalUserStore {
     return Promise.resolve();
   }
 
-  replacePasswordHash(input: { password_hash: string; updated_at: string }): Promise<boolean> {
+  replacePasswordHashAndRevokeTerminalKeys(input: {
+    password_hash: string;
+    updated_at: string;
+    tenant_id: string;
+    subject_id: string;
+    revoked_at: string;
+  }): Promise<{ replaced: boolean; revoked_count: number }> {
+    if (this.failPasswordChange) {
+      return Promise.reject(new Error('the disk is gone'));
+    }
     if (this.#user === undefined) {
-      return Promise.resolve(false);
+      return Promise.resolve({ replaced: false, revoked_count: 0 });
     }
     this.#user = {
       ...this.#user,
@@ -41,7 +52,8 @@ class MemoryLocalUserStore implements ILocalUserStore {
       session_version: this.#user.session_version + 1,
       updated_at: input.updated_at,
     };
-    return Promise.resolve(true);
+    // No terminal keys live beside this memory store, so the revocation lands on none.
+    return Promise.resolve({ replaced: true, revoked_count: 0 });
   }
 }
 
@@ -257,5 +269,23 @@ describe('local sign-in routes', () => {
     // The old password no longer signs in; the new one does.
     expect((await formPost(router, '/login', { email: EMAIL, password: PASSWORD })).status).toBe(401);
     expect((await formPost(router, '/login', { email: EMAIL, password: NEW_PASSWORD })).status).toBe(302);
+  });
+
+  it('keeps the old password when the password write fails partway', async () => {
+    const { router, localUserStore } = setup();
+    const cookie = await createSignIn(router, localUserStore);
+    localUserStore.failPasswordChange = true;
+
+    const changed = await router.request('/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ current_password: PASSWORD, new_password: NEW_PASSWORD }),
+    });
+    // The change reports failure, and neither half of it landed: the old password
+    // still signs in and the new one does not.
+    expect(changed.status).toBe(500);
+    await changed.text();
+    expect((await formPost(router, '/login', { email: EMAIL, password: PASSWORD })).status).toBe(302);
+    expect((await formPost(router, '/login', { email: EMAIL, password: NEW_PASSWORD })).status).toBe(401);
   });
 });

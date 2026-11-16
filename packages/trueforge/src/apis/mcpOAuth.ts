@@ -76,6 +76,15 @@ export function createMcpOAuthRouter<TTransaction>(deps: McpOAuthRouterDeps<TTra
       return callbackFailure({ c, pending: undefined, message: 'Authentication required to complete OAuth' });
     }
 
+    // This router is mounted without the auth middleware, so a session resolved
+    // here can be a paired terminal's. A terminal key's scope is the chat surface
+    // only (see terminalScope.ts), and completing a connector authorization is
+    // outside it: the key is refused as no session at all, before the pending
+    // authorization is claimed, so the owner's grant stays unconsumed.
+    if (session.terminal_key_id !== undefined) {
+      return callbackFailure({ c, pending: undefined, message: 'Authentication required to complete OAuth' });
+    }
+
     // Claimed up front: this row carries the FE landing path every branch below returns to, and
     // claiming it atomically means a duplicate callback loses the race.
     const pending = await deps.tokenStore.consumePendingAuthorization({ state });

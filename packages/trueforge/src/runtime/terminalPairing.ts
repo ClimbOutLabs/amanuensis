@@ -181,6 +181,23 @@ export class TerminalPairingService {
   }
 
   /**
+   * The device name of the pairing a code names, while that pairing is still
+   * waiting: the confirm page shows it before the person approves, so they can see
+   * which terminal they are about to pair. Returns undefined when the code is
+   * unknown, expired or already used, so the three read the same from outside,
+   * exactly as at confirm. Looking a pairing up never changes it.
+   */
+  async lookup(input: { code: string }): Promise<{ device_name: string } | undefined> {
+    const codeHash = hashTerminalKey(normalizePairingCode(input.code));
+    const pairingId = this.#pairingIdByCodeHash.get(codeHash);
+    const pairing = pairingId === undefined ? undefined : await this.#livePairing(pairingId);
+    if (pairing?.state !== 'pending' || !codeHashesEqual(codeHash, pairing.code_hash)) {
+      return undefined;
+    }
+    return { device_name: pairing.device_name };
+  }
+
+  /**
    * What the waiting terminal polls: still waiting, the key (exactly once, after which
    * the pairing is gone), or undefined when the pairing id and code name nothing live.
    * A completion with a wrong code counts against the pairing, and enough of them end

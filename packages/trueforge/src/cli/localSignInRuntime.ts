@@ -6,7 +6,6 @@ import { StringDecoder } from 'node:string_decoder';
 
 import { LOCAL_NO_SIGN_IN_MESSAGE } from '../auth/localSignIn';
 import type { ILocalUserStore } from '../db/localUserStore';
-import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 
 /**
  * The real wiring for `aman create-account` and `aman reset-password`: the server probe, the
@@ -36,7 +35,7 @@ export async function openLocalUserStore({
   create,
 }: {
   create: boolean;
-}): Promise<{ store: ILocalUserStore; terminalKeyStore: ITerminalKeyStore; close(): Promise<void> }> {
+}): Promise<{ store: ILocalUserStore; close(): Promise<void> }> {
   const { default: configuration } = await import('../config');
   if (!configuration.STANDALONE) {
     throw new Error(
@@ -49,13 +48,11 @@ export async function openLocalUserStore({
   if (create) {
     await mkdir(path.dirname(configuration.SQLITE_PATH), { recursive: true });
   }
-  const [{ createSqliteDb }, { migrateSqliteToLatest }, { SqliteLocalUserStore }, { TerminalKeyStore }] =
-    await Promise.all([
-      import('../db/sqlite/client'),
-      import('../db/migrateSqlite'),
-      import('../db/sqlite/local-user-store/SqliteLocalUserStore'),
-      import('../db/terminalKeyStore'),
-    ]);
+  const [{ createSqliteDb }, { migrateSqliteToLatest }, { SqliteLocalUserStore }] = await Promise.all([
+    import('../db/sqlite/client'),
+    import('../db/migrateSqlite'),
+    import('../db/sqlite/local-user-store/SqliteLocalUserStore'),
+  ]);
   const db = createSqliteDb(configuration.SQLITE_PATH);
   try {
     await migrateSqliteToLatest(db);
@@ -65,7 +62,6 @@ export async function openLocalUserStore({
   }
   return {
     store: new SqliteLocalUserStore(db),
-    terminalKeyStore: new TerminalKeyStore(db),
     close: () => db.destroy(),
   };
 }

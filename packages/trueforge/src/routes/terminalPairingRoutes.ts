@@ -8,6 +8,8 @@ import {
   ConfirmTerminalPairingResponseSchema,
   DeleteTerminalKeyResponseSchema,
   GetTerminalKeysResponseSchema,
+  LookupTerminalPairingRequestSchema,
+  LookupTerminalPairingResponseSchema,
   RevokeCurrentTerminalKeyResponseSchema,
   StartTerminalPairingRequestSchema,
   StartTerminalPairingResponseSchema,
@@ -67,6 +69,45 @@ export const confirmTerminalPairingRoute = createRoute({
     200: {
       content: { 'application/json': { schema: ConfirmTerminalPairingResponseSchema } },
       description: 'The terminal that was paired.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid request body.',
+    },
+    401: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Authentication required.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The code is not right, has expired, or was already used.',
+    },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Too many pairing attempts.',
+    },
+  },
+});
+
+export const lookupTerminalPairingRoute = createRoute({
+  method: 'post',
+  path: '/lookup',
+  tags: [OpenApiTag.AUTH],
+  summary: 'Look up the terminal waiting on a pairing code',
+  description:
+    'Names the terminal waiting on a pairing code, for the signed-in person, before they confirm it. A code that is not right, has expired, or was already used answers the same refusal, so the lookup cannot be used to test codes.',
+  'x-fern-sdk-group-name': ['terminalPairings'],
+  'x-fern-sdk-method-name': 'lookup',
+  request: {
+    body: {
+      content: { 'application/json': { schema: LookupTerminalPairingRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: LookupTerminalPairingResponseSchema } },
+      description: 'The terminal waiting on the code.',
     },
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

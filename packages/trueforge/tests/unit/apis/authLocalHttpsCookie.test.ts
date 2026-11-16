@@ -40,9 +40,15 @@ class MemoryLocalUserStore implements ILocalUserStore {
     return Promise.resolve();
   }
 
-  replacePasswordHash(input: { password_hash: string; updated_at: string }): Promise<boolean> {
+  replacePasswordHashAndRevokeTerminalKeys(input: {
+    password_hash: string;
+    updated_at: string;
+    tenant_id: string;
+    subject_id: string;
+    revoked_at: string;
+  }): Promise<{ replaced: boolean; revoked_count: number }> {
     if (this.#user === undefined) {
-      return Promise.resolve(false);
+      return Promise.resolve({ replaced: false, revoked_count: 0 });
     }
     this.#user = {
       ...this.#user,
@@ -50,7 +56,8 @@ class MemoryLocalUserStore implements ILocalUserStore {
       session_version: this.#user.session_version + 1,
       updated_at: input.updated_at,
     };
-    return Promise.resolve(true);
+    // No terminal keys live beside this memory store, so the revocation lands on none.
+    return Promise.resolve({ replaced: true, revoked_count: 0 });
   }
 }
 

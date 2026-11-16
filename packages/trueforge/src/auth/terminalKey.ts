@@ -35,14 +35,24 @@ export function hashTerminalKey(key: string): string {
  * still signs in, because a stale last-used time must never lock a terminal out.
  * The context carries no roles: a terminal key is not an admin, and the auth layer
  * limits it to the chat scope (see terminalScope.ts).
+ *
+ * `passwordChangedAt` is the local sign-in's last password change, when the caller
+ * knows it. A key claimed before that moment is refused even when its row carries
+ * no revocation: a pairing confirmed just before the change can have its key row
+ * land after the change's revocation has run, and the claim time on the row is
+ * what proves the key belongs to the time before the change.
  */
 export async function terminalKeyRequestContext(params: {
   store: ITerminalKeyStore;
   bearerToken: string;
   logger?: Logger;
+  passwordChangedAt?: string;
 }): Promise<RequestContext | undefined> {
   const record = await params.store.findByKeyHash(hashTerminalKey(params.bearerToken));
   if (record?.revoked_at !== null) {
+    return undefined;
+  }
+  if (params.passwordChangedAt !== undefined && record.created_at <= params.passwordChangedAt) {
     return undefined;
   }
   try {
@@ -76,6 +86,7 @@ export async function resolveTerminalKeyContext(params: {
   store: ITerminalKeyStore | undefined;
   context: Parameters<typeof readBearerToken>[0];
   logger?: Logger;
+  passwordChangedAt?: string;
 }): Promise<RequestContext | undefined> {
   if (params.store === undefined) {
     return undefined;
@@ -88,6 +99,7 @@ export async function resolveTerminalKeyContext(params: {
     store: params.store,
     bearerToken: bearer,
     ...(params.logger === undefined ? {} : { logger: params.logger }),
+    ...(params.passwordChangedAt === undefined ? {} : { passwordChangedAt: params.passwordChangedAt }),
   });
 }
 

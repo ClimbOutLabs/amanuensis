@@ -30,7 +30,6 @@ import { safeReturnTo } from '../auth/safeReturnTo';
 import configuration, { getAllowedOrigins, getPublicUiBasePath, isTrueFoundryModeEnabled } from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { ILocalUserStore, LocalUserRecord } from '../db/localUserStore';
-import type { ITerminalKeyStore } from '../db/terminalKeyStore';
 import {
   authLoginRoute,
   authLogoutRoute,
@@ -117,8 +116,6 @@ export function createAuthRouter(params: {
   authMiddleware: MiddlewareHandler;
   /** Present only in local sign-in mode. */
   localSignIn?: LocalSignInDeps;
-  /** Paired terminal keys, revoked in full when the local password changes. */
-  terminalKeyStore?: ITerminalKeyStore;
   /** Where the password change's terminal key revocation is recorded, when wired. */
   audit?: AuditLogWriter;
 }) {
@@ -342,29 +339,22 @@ export function createAuthRouter(params: {
         throw new HTTPException(400, { message: result.message });
       }
       permit.finish('success');
-      // A password change ends every other sign-in, and every paired terminal with it:
-      // all terminal keys are revoked, so each terminal pairs again.
-      if (params.terminalKeyStore !== undefined) {
-        const revokedCount = await params.terminalKeyStore.revokeAllForOwner({
-          tenant_id: requestContext.tenant_id,
-          subject_id: user.id,
-          revoked_at: new Date().toISOString(),
-        });
-        if (revokedCount > 0 && params.audit !== undefined) {
-          try {
-            await params.audit.record({
-              tenant_id: requestContext.tenant_id,
-              created_by: user.id,
-              conversation_id: '',
-              tier: 1,
-              tool_name: 'terminal_key.revoked_all',
-              description: 'All paired terminal keys were revoked because the password changed.',
-              outcome: 'logged',
-              auto_deny_reason: null,
-            });
-          } catch (auditError) {
-            params.logger.error('Failed to record a terminal key audit row', extractErrorLogFields(auditError));
-          }
+      // The change itself already revoked every paired terminal key, inside the
+      // same store write as the new password; what remains is the audit row.
+      if (result.revoked_terminal_keys > 0 && params.audit !== undefined) {
+        try {
+          await params.audit.record({
+            tenant_id: requestContext.tenant_id,
+            created_by: user.id,
+            conversation_id: '',
+            tier: 1,
+            tool_name: 'terminal_key.revoked_all',
+            description: 'All paired terminal keys were revoked because the password changed.',
+            outcome: 'logged',
+            auto_deny_reason: null,
+          });
+        } catch (auditError) {
+          params.logger.error('Failed to record a terminal key audit row', extractErrorLogFields(auditError));
         }
       }
       // The stored session version just went up; re-issue so this session survives its own change.

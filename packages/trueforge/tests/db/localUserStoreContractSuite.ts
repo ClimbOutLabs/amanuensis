@@ -61,17 +61,33 @@ export function runLocalUserStoreContractSuite(getStore: () => ILocalUserStore):
     expect(user).toBeDefined();
   });
 
-  it('replaces the hash and raises the session version in the same write', async () => {
+  it('replaces the hash, raises the session version and reports the revocation in the same write', async () => {
     const store = getStore();
     await store.createUser(record());
-    await expect(store.replacePasswordHash({ password_hash: 'hash-two', updated_at: LATER })).resolves.toBe(true);
+    await expect(
+      store.replacePasswordHashAndRevokeTerminalKeys({
+        password_hash: 'hash-two',
+        updated_at: LATER,
+        tenant_id: 'default',
+        subject_id: 'user-1',
+        revoked_at: LATER,
+      }),
+    ).resolves.toEqual({ replaced: true, revoked_count: 0 });
     await expect(store.getUser()).resolves.toEqual(
       record({ password_hash: 'hash-two', session_version: 2, updated_at: LATER }),
     );
   });
 
-  it('reports false when replacing a password with no user stored', async () => {
+  it('reports replaced false from the password write when no user is stored', async () => {
     const store = getStore();
-    await expect(store.replacePasswordHash({ password_hash: 'hash-two', updated_at: LATER })).resolves.toBe(false);
+    await expect(
+      store.replacePasswordHashAndRevokeTerminalKeys({
+        password_hash: 'hash-two',
+        updated_at: LATER,
+        tenant_id: 'default',
+        subject_id: 'user-1',
+        revoked_at: LATER,
+      }),
+    ).resolves.toEqual({ replaced: false, revoked_count: 0 });
   });
 }

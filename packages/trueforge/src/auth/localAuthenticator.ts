@@ -39,12 +39,17 @@ export class LocalAuthenticator implements Authenticator {
   async authenticate(c: Context): Promise<RequestContext> {
     // A paired terminal key is a Bearer token of its own shape, checked against the
     // terminal key store before the token is read as a session token. A terminal key
-    // that is unknown or revoked signs nobody in.
+    // that is unknown or revoked signs nobody in. The stored user's updated time is
+    // the last password change (it moves at account creation and at a change or
+    // reset, and nowhere else), so a key claimed before that change is refused
+    // here even when its row landed after the change's revocation had run.
     if (carriesTerminalKey(c)) {
+      const localUser = await this.#localUserStore.getUser();
       const terminalContext = await resolveTerminalKeyContext({
         store: this.#terminalKeyStore,
         context: c,
         ...(this.#logger === undefined ? {} : { logger: this.#logger }),
+        ...(localUser === undefined ? {} : { passwordChangedAt: localUser.updated_at }),
       });
       if (terminalContext === undefined) {
         throw new HTTPException(401, { message: 'Authentication required' });

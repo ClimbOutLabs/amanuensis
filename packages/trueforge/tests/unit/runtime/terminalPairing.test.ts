@@ -160,4 +160,32 @@ describe('terminal pairing service', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.revoked_at).toBeNull();
   });
+
+  it('names the waiting terminal at lookup while the pairing is still pending', async () => {
+    const store = new MemoryTerminalKeyStore();
+    const service = new TerminalPairingService({ terminalKeyStore: store });
+    const started = await service.start({ device_name: 'Pippa' });
+
+    await expect(service.lookup({ code: started.code })).resolves.toEqual({ device_name: 'Pippa' });
+    // A lookup only reads: the pairing still confirms afterwards.
+    const confirmed = await service.confirm({ code: started.code, owner: OWNER });
+    expect(confirmed?.device_name).toBe('Pippa');
+  });
+
+  it('names nothing at lookup for an unknown, a used or an expired code', async () => {
+    let nowMs = Date.parse('2026-11-15T10:00:00.000Z');
+    const store = new MemoryTerminalKeyStore();
+    const service = new TerminalPairingService({ terminalKeyStore: store, now: () => nowMs });
+    const started = await service.start({ device_name: 'Pippa' });
+
+    await expect(service.lookup({ code: 'ZZZZ-ZZZZ' })).resolves.toBeUndefined();
+
+    await service.confirm({ code: started.code, owner: OWNER });
+    // The code is used now: a lookup must not name the terminal any more.
+    await expect(service.lookup({ code: started.code })).resolves.toBeUndefined();
+
+    const second = await service.start({ device_name: 'Pippa Two' });
+    nowMs += 6 * 60_000;
+    await expect(service.lookup({ code: second.code })).resolves.toBeUndefined();
+  });
 });

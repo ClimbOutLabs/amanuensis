@@ -50,6 +50,26 @@ export const ConfirmTerminalPairingResponseSchema = z
   })
   .openapi('ConfirmTerminalPairingResponse');
 
+export const LookupTerminalPairingRequestSchema = z
+  .object({
+    code: z.string().min(1).describe('The pairing code the terminal showed. Dashes and letter case do not matter.'),
+  })
+  .openapi('LookupTerminalPairingRequest');
+
+export type LookupTerminalPairingRequest = z.infer<typeof LookupTerminalPairingRequestSchema>;
+
+export const TerminalPairingLookupSchema = z
+  .object({
+    device_name: z.string().describe('The name of the terminal waiting on this pairing code.'),
+  })
+  .openapi('TerminalPairingLookup');
+
+export const LookupTerminalPairingResponseSchema = z
+  .object({
+    data: TerminalPairingLookupSchema,
+  })
+  .openapi('LookupTerminalPairingResponse');
+
 export const CompleteTerminalPairingRequestSchema = z
   .object({
     pairing_id: z.string().min(1).describe('The pairing id the start of this pairing returned.'),
