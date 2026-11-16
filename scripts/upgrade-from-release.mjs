@@ -6,7 +6,8 @@
  * must still be there, and one more of each must save, so a table that upgrades only while it is
  * empty is caught.
  *
- * With no arguments the last release is the newest `vX.Y.Z` tag: it is checked out beside this
+ * With no arguments the last release is the newest `vX.Y.Z` tag (or, before the first release,
+ * a fixed baseline commit): it is checked out beside this
  * code, built and packed, and this code is packed as it is built now. `--from` and `--to` take
  * two tarballs that are already packed instead.
  */
@@ -45,13 +46,33 @@ async function pack({ cwd, packDir }) {
   return path.join(packDir, tarballName);
 }
 
-/** The newest release tag, by version. Tags of release candidates are not releases. */
-function lastReleaseTag() {
+// No release is published yet. Until the first one is, the upgrade starts from the commit the
+// first release candidate was built from, so a database change is still checked against data
+// saved by earlier code. Remove this once a release tag exists.
+const BASELINE_BEFORE_FIRST_RELEASE = '8b87eaf817bbe44126cc1c01ae8e384b263e6dd8';
+
+/** The newest release tag, by version, or the baseline commit while no release exists. Tags of release candidates are not releases. */
+function lastRelease() {
   const tags = run({ command: 'git', args: ['tag', '--list', 'v*', '--sort=-v:refname'], cwd: rootDir })
     .split('\n')
     .filter(tag => /^v\d+\.\d+\.\d+$/.test(tag));
-  check(tags[0] !== undefined, 'This checkout has no release tag. Fetch the tags, then run this again.');
-  return tags[0];
+  if (tags[0] !== undefined) {
+    return { ref: tags[0], name: tags[0] };
+  }
+  let known = '';
+  try {
+    known = run({ command: 'git', args: ['cat-file', '-t', BASELINE_BEFORE_FIRST_RELEASE], cwd: rootDir }).trim();
+  } catch {
+    // A shallow checkout does not have the commit; the check below says what to do.
+  }
+  check(
+    known === 'commit',
+    'This checkout has no release tag and not the commit to start from. Fetch the whole history, then run this again.',
+  );
+  return {
+    ref: BASELINE_BEFORE_FIRST_RELEASE,
+    name: `commit ${BASELINE_BEFORE_FIRST_RELEASE.slice(0, 9)}, because no release is published yet`,
+  };
 }
 
 /** One signed-in person talking to the running app. */
@@ -284,9 +305,9 @@ try {
   let fromTarball = values.from === undefined ? undefined : path.resolve(values.from);
   let toTarball = values.to === undefined ? undefined : path.resolve(values.to);
   if (fromTarball === undefined || toTarball === undefined) {
-    const tag = lastReleaseTag();
-    console.log(`Building the last release, ${tag}.`);
-    run({ command: 'git', args: ['worktree', 'add', '--detach', releaseDir, tag], cwd: rootDir });
+    const release = lastRelease();
+    console.log(`Building the last release, ${release.name}.`);
+    run({ command: 'git', args: ['worktree', 'add', '--detach', releaseDir, release.ref], cwd: rootDir });
     releaseCheckedOut = true;
     run({ command: 'pnpm', args: ['install', '--frozen-lockfile'], cwd: releaseDir });
     run({ command: 'pnpm', args: ['build'], cwd: releaseDir });
