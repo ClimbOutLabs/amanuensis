@@ -45,6 +45,12 @@ export function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/**
+ * The argument a host tool adds to a call's approved arguments: its hash of the write the card showed. It binds the
+ * approval to that write and is never sent to the service.
+ */
+export const REVIEW_HASH_ARGUMENT = 'review_hash';
+
 /** sha256 over the canonical (stable-stringified) params. */
 export function hashCanonicalParams(params: unknown): string {
   return createHash('sha256').update(stableStringify(params)).digest('hex');

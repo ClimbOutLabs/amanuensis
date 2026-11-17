@@ -3,7 +3,7 @@ import { checkDatabase } from './checks/database';
 import { checkDemo } from './checks/demo';
 import { checkDisk } from './checks/disk';
 import { checkLogin, probeLogin } from './checks/login';
-import { checkModel } from './checks/model';
+import { checkModel, checkModelLocally } from './checks/model';
 import { checkAttachments, checkRunCode } from './checks/sandbox';
 import { checkService } from './checks/service';
 import type { DoctorDeps } from './deps';
@@ -55,7 +55,7 @@ export async function runInstanceChecks({
   ];
   // The model check spends a few tokens, so it only runs when asked for or when nothing is filtered.
   if (local) {
-    checks.push(offCheck({ id: 'model', detail: 'Skipped: only checks that need no outside service were asked for.' }));
+    checks.push(checkModelLocally({ deps }));
   } else if (only === undefined || only === 'model') {
     checks.push(await checkModel({ deps, timeoutMs: deep ? DEEP_PROBE_TIMEOUT_MS : MODEL_TIMEOUT_MS }));
   }

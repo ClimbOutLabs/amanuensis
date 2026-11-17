@@ -5,17 +5,14 @@
 // index.html, which shows every picture grouped by feature set with failures first, and results.json,
 // which holds the same facts for a later run to be compared with.
 
-import { readdir, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { COVERAGE_FILE, readCoverageMap, surfaceFileName } from './check-nightly-coverage.mjs';
+import { fromFailedTest, galleryHtml, parsedJson } from './screenshot-pages.mjs';
 
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FAILED_MARK = 'FAILED-';
-
-function escapeHtml(text) {
-  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-}
 
 /** The picture files in one feature-set folder, or none when the run saved nothing there. */
 async function pictureFiles(folder) {
@@ -29,8 +26,35 @@ async function pictureFiles(folder) {
 }
 
 /**
+ * What the test wrote beside a picture: its name, what it did, what the picture should show and
+ * whether it passed. All null for a picture saved without a note.
+ */
+async function pictureNote(file) {
+  const empty = { test: null, did: null, expect: null, passed: null };
+  const text = await readFile(`${file.slice(0, -'.png'.length)}.json`, 'utf8').catch(error => {
+    if (error?.code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  });
+  if (text === undefined) {
+    return empty;
+  }
+  const parsed = parsedJson(text);
+  const note = typeof parsed === 'object' && parsed !== null ? parsed : {};
+  const words = value => (typeof value === 'string' && value !== '' ? value : null);
+  return {
+    test: words(note.test),
+    did: words(note.did),
+    expect: words(note.expect),
+    passed: typeof note.passed === 'boolean' ? note.passed : null,
+  };
+}
+
+/**
  * The run as data: every feature set with its features, each feature's pictures, and whether the
- * feature has a test at all. A picture whose step starts with FAILED- was saved by a failing test.
+ * feature has a test at all. A picture whose step starts with FAILED- was saved at the moment a test
+ * failed; `passed` says how the test that took a picture ended.
  */
 export async function readRun({ folder, coverage }) {
   const byFileName = new Map(Object.keys(coverage.surfaces).map(id => [surfaceFileName(id), id]));
@@ -48,7 +72,12 @@ export async function readRun({ folder, coverage }) {
       const failed = step.startsWith(FAILED_MARK);
       pictures.set(surface, [
         ...(pictures.get(surface) ?? []),
-        { file: `${setId}/${file}`, step: failed ? step.slice(FAILED_MARK.length) : step, failed },
+        {
+          file: `${setId}/${file}`,
+          step: failed ? step.slice(FAILED_MARK.length) : step,
+          failed,
+          ...(await pictureNote(path.join(folder, setId, file))),
+        },
       ]);
     }
     const features = Object.entries(coverage.surfaces)
@@ -65,78 +94,10 @@ export async function readRun({ folder, coverage }) {
       features: features.length,
       features_with_a_test: features.filter(feature => feature.has_test).length,
       pictures: pictures.length,
-      failed_pictures: pictures.filter(picture => picture.failed).length,
+      failed_pictures: pictures.filter(fromFailedTest).length,
     },
     unknown_files: unknown,
   };
-}
-
-function pictureHtml({ feature, picture }) {
-  const label = `${feature.id} · ${picture.step}`;
-  const tag = picture.failed ? '<span class="tag failed">FAILED</span>' : '<span class="tag">OK</span>';
-  return `<figure${picture.failed ? ' class="failed"' : ''}><a href="${escapeHtml(picture.file)}"><img loading="lazy" src="${escapeHtml(picture.file)}" alt="${escapeHtml(label)}"></a><figcaption>${tag} ${escapeHtml(label)}</figcaption></figure>`;
-}
-
-/** The contact sheet as one page with no outside files, so it opens straight from the download. */
-export function galleryHtml({ run, title }) {
-  const failures = run.feature_sets.flatMap(set =>
-    set.features.flatMap(feature =>
-      feature.pictures.filter(picture => picture.failed).map(picture => ({ feature, picture })),
-    ),
-  );
-  const sections = run.feature_sets.map(set => {
-    const shown = set.features.flatMap(feature => feature.pictures.map(picture => ({ feature, picture })));
-    const tested = set.features.filter(feature => feature.has_test).length;
-    const noTest = set.features.filter(feature => !feature.has_test).map(feature => feature.id);
-    return [
-      `<section id="${escapeHtml(set.id)}">`,
-      `<h2>${escapeHtml(set.name)}</h2>`,
-      `<p>${String(tested)} of ${String(set.features.length)} features have a test. ${String(shown.length)} pictures.</p>`,
-      shown.length > 0 ? `<div class="grid">${shown.map(pictureHtml).join('')}</div>` : '',
-      noTest.length > 0 ? `<p class="gap">No test yet: ${escapeHtml(noTest.join(', '))}</p>` : '',
-      '</section>',
-    ].join('\n');
-  });
-  const { totals } = run;
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<style>
-:root { color-scheme: light dark; --bg: #fff; --fg: #1a1a1a; --soft: #5c5c5c; --line: #d9d9d9; --bad: #b3261e; }
-@media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #ededed; --soft: #a3a3a3; --line: #3a3a3a; --bad: #ff8a80; } }
-body { margin: 0; padding: 1rem; background: var(--bg); color: var(--fg); font: 1rem/1.5 system-ui, sans-serif; }
-h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
-h2 { font-size: 1.25rem; margin: 2rem 0 0.25rem; border-top: 0.0625rem solid var(--line); padding-top: 1rem; }
-p { margin: 0.25rem 0; color: var(--soft); }
-nav { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; }
-nav a { white-space: nowrap; }
-a { color: inherit; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; margin-top: 0.75rem; }
-figure { margin: 0; border: 0.0625rem solid var(--line); border-radius: 0.5rem; overflow: hidden; }
-figure.failed { border-color: var(--bad); }
-img { display: block; width: 100%; height: 12rem; object-fit: cover; object-position: top; background: var(--line); }
-figcaption { padding: 0.5rem; font-size: 0.8125rem; overflow-wrap: anywhere; }
-.tag { font-weight: 600; }
-.failed .tag, .tag.failed, .bad { color: var(--bad); }
-.gap { font-size: 0.8125rem; overflow-wrap: anywhere; }
-</style>
-</head>
-<body>
-<h1>${escapeHtml(title)}</h1>
-<p>${String(totals.features_with_a_test)} of ${String(totals.features)} features have a test. ${String(totals.pictures)} pictures, ${String(totals.failed_pictures)} from failed tests.</p>
-<nav>${run.feature_sets.map(set => `<a href="#${escapeHtml(set.id)}">${escapeHtml(set.name)}</a>`).join('')}</nav>
-${
-  failures.length > 0
-    ? `<section><h2 class="bad">Failed</h2><div class="grid">${failures.map(pictureHtml).join('')}</div></section>`
-    : ''
-}
-${sections.join('\n')}
-</body>
-</html>
-`;
 }
 
 /** Writes index.html and results.json into the run folder and returns the run's data. */

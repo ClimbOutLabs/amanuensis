@@ -68,6 +68,7 @@ describe('a new event', () => {
       description: '',
       attendees: [],
       guests_emailed: false,
+      guests_line: '',
       one_of_repeating: false,
       before: null,
       incomplete_reason: null,
@@ -144,6 +145,7 @@ describe('a new event', () => {
     expect(request.body.attendees).toEqual([{ email: 'lin@example.com' }, { email: 'sam@example.com' }]);
     expect(review.attendees).toEqual(['lin@example.com', 'sam@example.com']);
     expect(review.guests_emailed).toBe(true);
+    expect(review.guests_line).toBe('Google will email every guest about this.');
   });
 
   it('requires an explicit email choice with guests, and sends none without guests', () => {
@@ -234,6 +236,7 @@ describe('a change to an event', () => {
     expect(request.send_updates).toBe('all');
     expect(review.attendees).toEqual(['lin@example.com']);
     expect(review.guests_emailed).toBe(true);
+    expect(review.guests_line).toBe('Google will email every guest about this.');
   });
 
   it('counts a guest with no address as a guest, so the email choice is still required and the card names them', () => {

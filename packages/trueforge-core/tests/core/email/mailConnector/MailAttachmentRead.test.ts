@@ -1,8 +1,9 @@
 import { MailAttachmentProcessor } from '../../../../src/core/email/mailConnector/MailAttachmentProcessor';
 import type { DocumentScope } from '../../../../src/core/llm/LLMTypes';
 import type { ToolCallResult } from '../../../../src/core/mcp/executeToolCalls';
-import { classifyTier, type SentinelAction } from '../../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../../src/core/permissions/context';
+import type { SentinelAction } from '../../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../../src/core/permissions/webSearch';
 import { getEmptyCurrentContextUsage } from '../../../../src/core/runtime/contextUsage';
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../../src/documents/toolContract';

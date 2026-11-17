@@ -277,7 +277,7 @@ describe('scheduled runs', () => {
       const writesBefore = server.mcp.writeInvocations();
       const { chatId, turn, held } = await runThatHoldsAChange('tidy-notes');
       expect(turn.state.status === 'done' && turn.state.required_actions).toEqual([]);
-      expect(held.tier3_card?.outbound_text).toBe('text: inert');
+      expect(held.tier3_card?.outbound_text).toBe('text: inert\nmailbox: inert');
       expect(server.mcp.writeInvocations()).toBe(writesBefore);
 
       const answered = await approve({ chatId, held });

@@ -10,8 +10,9 @@ import {
   type MailAccountSnapshot,
 } from '../core/email/mailConnector/MailConnectorSource';
 import { MAIL_CONNECTOR_NAME } from '../core/email/mailConnector/toolContract';
+import { HOME_ASSISTANT_SERVER_NAME, homeAssistantDeclaredChangeTools } from '../core/homeassistant/toolContract';
 import type { ILLM } from '../core/llm/ILLM';
-import type { ToolSource } from '../core/mcp/IMCPServer';
+import { isAuthRequired, type ToolSource } from '../core/mcp/IMCPServer';
 import { RemoteMCP, type RemoteMcpHeaders } from '../core/mcp/RemoteMCP';
 import type { ToolSelectorConfig } from '../core/mcp/ToolSelectorPolicy';
 import { ToolSet } from '../core/mcp/ToolSet';
@@ -29,7 +30,7 @@ import type { ToolBundleName } from '../core/runtime/toolBundleCatalog';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import { fetchedPages, type FetchedPageScope } from '../core/search/fetchedPages';
 import type { PageFixtureSource } from '../core/search/pageFixtures';
-import { isTavilyConnectorUrl, tavilyAuthFromHeader, TavilyClient } from '../core/search/TavilyClient';
+import { tavilyAuthFromHeader, TavilyClient } from '../core/search/TavilyClient';
 import { TavilySource } from '../core/search/TavilySource';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
@@ -134,6 +135,8 @@ export class TurnResourceResolver<
   readonly #firstPartyServers = new Set<string>();
   /** MCP servers the user designated as their search provider, with the host's list of their search tools and the argument names that are provider plumbing. */
   readonly #searchProviderServers = new Map<string, SearchProviderGrant>();
+  /** Bare names of the tools each MCP server itself declared as changing things, from the host's record of the connector. */
+  readonly #declaredChangeTools = new Map<string, readonly string[]>();
   readonly webSearchTurn = createWebSearchTurnState();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
   #sandbox?: Sandbox | undefined;
@@ -168,9 +171,21 @@ export class TurnResourceResolver<
         headers?: RemoteMcpHeaders;
         first_party?: boolean;
         search_provider?: SearchProviderGrant | undefined;
+        /**
+         * Bare names of the tools this server itself declared as changing things, from the host's
+         * record of the connector. Undefined when the record holds none yet: for Home Assistant the
+         * turn then captures it from the server's own tool list.
+         */
+        declared_change_tools?: readonly string[] | undefined;
         /** What an "Always allow" grant on this connector binds to, from the host's record of it; see `ToolGrantKey`. */
         grant_binding?: string | undefined;
       }>;
+      /**
+       * Stores the change tools a Home Assistant connector declared in the tool list this turn
+       * read, on a record that held none. Omit and the capture applies to this turn only.
+       */
+      storeDeclaredChangeTools?:
+        ((input: { name: string; url: string; declared_change_tools: readonly string[] }) => Promise<void>) | undefined;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
       mcpMaxResponseBytes?: number | undefined;
@@ -344,6 +359,40 @@ export class TurnResourceResolver<
       return undefined;
     });
     return this.#calendarAccountFactsPromise;
+  }
+
+  /**
+   * A Home Assistant record saved before change tools were stored on it holds no declaration.
+   * The server's own tool list, which this turn reads anyway (the remote caches it), supplies it,
+   * and the host stores it so later turns read it from the record. A failed read leaves every
+   * change asking, the safe direction.
+   */
+  async #captureDeclaredChangeTools({
+    name,
+    url,
+    remote,
+  }: {
+    name: string;
+    url: string;
+    remote: RemoteMCP;
+  }): Promise<void> {
+    let declared: string[];
+    try {
+      const listed = await remote.listTools();
+      if (isAuthRequired(listed)) {
+        return;
+      }
+      declared = homeAssistantDeclaredChangeTools(listed.result.tools);
+    } catch (error) {
+      this.deps.logger.warn(`The change tools of "${name}" could not be read`, extractErrorLogFields(error));
+      return;
+    }
+    this.#declaredChangeTools.set(name, declared);
+    try {
+      await this.deps.storeDeclaredChangeTools?.({ name, url, declared_change_tools: declared });
+    } catch (error) {
+      this.deps.logger.warn(`The change tools of "${name}" could not be stored`, extractErrorLogFields(error));
+    }
   }
 
   #setUpConnectorNamesPromise?: Promise<readonly string[] | undefined> | undefined;
@@ -556,14 +605,18 @@ export class TurnResourceResolver<
         const source = await this.getOrCreateToolSource({
           id: entry.name,
           create: async () => {
-            const { url, headers, first_party, search_provider, grant_binding } = await this.deps.mcp(entry.name);
+            const { url, headers, first_party, search_provider, declared_change_tools, grant_binding } =
+              await this.deps.mcp(entry.name);
             if (first_party === true) {
               this.#firstPartyServers.add(entry.name);
             }
             if (search_provider !== undefined) {
               this.#searchProviderServers.set(entry.name, search_provider);
             }
-            if (search_provider !== undefined && isTavilyConnectorUrl(url)) {
+            if (declared_change_tools !== undefined && declared_change_tools.length > 0) {
+              this.#declaredChangeTools.set(entry.name, declared_change_tools);
+            }
+            if (search_provider?.served_in_process === true) {
               return new TavilySource({
                 id: entry.name,
                 name: entry.name,
@@ -594,6 +647,9 @@ export class TurnResourceResolver<
               tracing,
               signal,
             });
+            if (entry.name === HOME_ASSISTANT_SERVER_NAME && declared_change_tools === undefined) {
+              await this.#captureDeclaredChangeTools({ name: entry.name, url, remote });
+            }
             if (entry.name === CALDAV_SERVER_NAME && first_party === true) {
               return new CalendarConnectorSource({
                 inner: remote,
@@ -639,6 +695,7 @@ export class TurnResourceResolver<
           sentinel,
           firstParty: this.#firstPartyServers.has(entry.name),
           searchProvider: this.#searchProviderServers.get(entry.name),
+          declaredChangeTools: this.#declaredChangeTools.get(entry.name),
           bundle: connectorBundle({
             name: entry.name,
             firstParty: this.#firstPartyServers.has(entry.name),

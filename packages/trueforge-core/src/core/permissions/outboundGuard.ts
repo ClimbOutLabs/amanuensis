@@ -510,10 +510,11 @@ export function checkOutboundStrings(input: {
     ...decoded.filter((_, index) => !isExempt(index)),
     ...keyTexts,
   ].join('\n');
-  // Adjacent values glued together, on either side of the earlier calls' text: a key split across
-  // array items or across searches shows its prefix, whichever of the parallel calls was read first.
+  // Adjacent values glued together, and each value alone, on either side of the earlier calls' text: a key
+  // split across array items or across calls shows its prefix, whichever of the parallel calls was read
+  // first, and whichever argument of the later call carries the rest.
   const earlier = input.earlier ?? '';
-  const joined = [raw.join(''), decoded.join(''), decoded.map(withoutUrlOrigin).join('')];
+  const joined = [raw.join(''), decoded.join(''), decoded.map(withoutUrlOrigin).join(''), ...raw, ...decoded];
   const glued = joined.flatMap(candidate => [earlier + candidate, candidate + earlier]);
 
   if (containsServerSecret({ texts: [text, ...glued], secrets: input.secrets })) {

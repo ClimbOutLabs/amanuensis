@@ -8,7 +8,7 @@ import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ToolInvocationContext } from '../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../mcp/ToolSet';
-import { stableStringify } from '../permissions/approvalTokens';
+import { REVIEW_HASH_ARGUMENT, stableStringify } from '../permissions/approvalTokens';
 import { classifyHostToolCall } from '../permissions/classifier';
 import type { SentinelHostContext } from '../permissions/context';
 import type { ToolBundleName } from '../runtime/toolBundleCatalog';
@@ -39,9 +39,6 @@ import {
   sharedWithCount,
   type DriveWriteReview,
 } from './writeReview';
-
-/** Key the host adds to an approved write: the hash of the write the card showed. */
-const REVIEW_HASH_KEY = 'review_hash';
 
 const NOT_APPROVED = 'This was not approved, so nothing was changed. Ask again to make the change.';
 
@@ -98,6 +95,7 @@ export class DriveToolSet extends LocalToolMCP {
     return [
       defineTool({
         name: LIST_FILES_TOOL_NAME,
+        requiresNetwork: true,
         description:
           'List or search the Google Drive files Aman can see: files Aman created, or that the user opened with Aman. Most recently changed first. Pass query words to search file names. The single list and search tool.',
         schema: ListFilesSchema,
@@ -106,6 +104,7 @@ export class DriveToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: READ_DRIVE_FILE_TOOL_NAME,
+        requiresNetwork: true,
         description:
           'Read one file Aman can see, by file_id from list_files: the text of a Google Doc, or the rows of one tab of a Google Sheet. Name the tab with sheet, or read the first tab.',
         schema: ReadDriveFileSchema,
@@ -114,6 +113,7 @@ export class DriveToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: CREATE_DOC_TOOL_NAME,
+        requiresNetwork: true,
         description:
           'Create a new Google Doc with a title and text. The user sees the title and the whole text and is asked first.',
         schema: CreateDocSchema,
@@ -122,6 +122,7 @@ export class DriveToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: APPEND_ROWS_TOOL_NAME,
+        requiresNetwork: true,
         description:
           'Add rows to one tab of a Google Sheet, by file_id from list_files, after its existing rows. Values are read the way Sheets reads typed values, so a number stays a number. The user sees every row and is asked first.',
         schema: AppendRowsSchema,
@@ -158,6 +159,7 @@ export class DriveToolSet extends LocalToolMCP {
         tool_name: params.name,
         canonical_params: prepared?.approved ?? params.arguments ?? {},
         tool_type: 'truefoundry-system',
+        requires_network: info.requires_network,
         mcp_server_name: DRIVE_SERVER_ID,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
@@ -206,7 +208,7 @@ export class DriveToolSet extends LocalToolMCP {
           text: parsed.data.text,
           request: undefined,
         });
-        return { approved: { ...parsed.data, [REVIEW_HASH_KEY]: hash }, review };
+        return { approved: { ...parsed.data, [REVIEW_HASH_ARGUMENT]: hash }, review };
       }
       const parsed = AppendRowsSchema.safeParse(params.arguments);
       if (!parsed.success) {
@@ -224,7 +226,7 @@ export class DriveToolSet extends LocalToolMCP {
         shared_with: sharedWithCount(file),
       });
       const hash = hashDriveWrite({ tool_name: APPEND_ROWS_TOOL_NAME, title: undefined, text: undefined, request });
-      return { approved: { ...parsed.data, [REVIEW_HASH_KEY]: hash }, review };
+      return { approved: { ...parsed.data, [REVIEW_HASH_ARGUMENT]: hash }, review };
     } catch (error) {
       if (
         error instanceof GoogleReconnectRequiredError ||
@@ -304,7 +306,7 @@ export class DriveToolSet extends LocalToolMCP {
     if (!(await this.#writePermitted({ approval: input.approval, toolName: input.toolName }))) {
       return { refusal: NOT_APPROVED };
     }
-    const { [REVIEW_HASH_KEY]: hash, ...approvedArgs } = input.context?.approved_params ?? {};
+    const { [REVIEW_HASH_ARGUMENT]: hash, ...approvedArgs } = input.context?.approved_params ?? {};
     if (typeof hash !== 'string') {
       return { refusal: NOT_APPROVED };
     }

@@ -20,6 +20,9 @@ const PASSED_SETTINGS = [
   'TOKEN_FACTORY_BASE_URL',
   'TOKEN_FACTORY_MODEL',
   'TOKEN_FACTORY_PRICES',
+  'SANDBOX_BACKEND',
+  'SANDBOX_SLOTS_DIR',
+  'SANDBOX_SLOTS',
   'PATH',
   'HOME',
 ];
@@ -78,14 +81,27 @@ async function waitForHealth({ origin, child }) {
   throw new Error('The eval instance did not start within 5 minutes. Read its log above for the reason.');
 }
 
-/** Creates the instance's one sign-in and returns its session token. The token is never printed. */
-export async function createSignIn({ origin, fetchImpl = fetch }) {
-  const password = randomBytes(24).toString('hex');
-  const response = await fetchImpl(`${origin}/api/v1/auth/create-account`, {
+/** Makes the instance's one sign-in the way a person does, at the terminal, with the answers piped in. */
+function createAccount({ cwd, env, password }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('pnpm', ['run', 'create-account'], { cwd, env, stdio: ['pipe', 'ignore', 'inherit'] });
+    child.once('error', reject);
+    child.once('exit', code =>
+      code === 0
+        ? resolve()
+        : reject(new Error('The eval instance has no sign-in. Start from a fresh instance and try again.')),
+    );
+    child.stdin.end(`${EVAL_EMAIL}\n${password}\n${password}\n`);
+  });
+}
+
+/** Signs in to the instance and returns its session token. The token is never printed. */
+export async function signIn({ origin, password, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${origin}/api/v1/auth/login`, {
     method: 'POST',
     redirect: 'manual',
     headers: { 'content-type': 'application/x-www-form-urlencoded', origin },
-    body: new URLSearchParams({ email: EVAL_EMAIL, password, password_confirm: password }).toString(),
+    body: new URLSearchParams({ email: EVAL_EMAIL, password }).toString(),
   });
   const cookie = response.headers.getSetCookie().find(line => line.startsWith('id_token='));
   const token = cookie?.slice('id_token='.length).split(';')[0];
@@ -109,6 +125,13 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
   if (args.includes('--help') || args.includes('-h')) {
     return runModels({ argv: ['--help'], env, stdout, stderr, rootDir });
   }
+  const skills = args.includes('--skills');
+  if (skills && (env.SANDBOX_BACKEND !== 'slots' || (env.SANDBOX_SLOTS_DIR ?? '').trim() === '')) {
+    stderr(
+      '--skills needs a sandbox. Start one with pnpm sandbox:slots, then set SANDBOX_BACKEND=slots and SANDBOX_SLOTS_DIR to the folder that holds its sockets.\n',
+    );
+    return 2;
+  }
   const dataDir = await mkdtemp(path.join(tmpdir(), 'aman-eval-'));
   const port = await freePort();
   const origin = `http://127.0.0.1:${String(port)}`;
@@ -119,8 +142,15 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
     AMAN_EVAL_MODE: 'true',
     TRUEFORGE_AUTH_MODE: 'local',
     APP_DATA_DIR: dataDir,
+    // The runner talks to 127.0.0.1. Left at localhost, the server may listen only on the IPv6 address.
+    HOST: '127.0.0.1',
+    // Named outright, so the sign-in command and the server open the same database whatever a local .env says.
+    SQLITE_PATH: path.join(dataDir, 'db', 'db.sqlite'),
     PORT: String(port),
+    // Lets the eval approve adding, running and removing a skill, which only the skill cases ask for.
+    ...(skills ? { AMAN_EVAL_SKILLS: 'true' } : {}),
   });
+  const password = randomBytes(24).toString('hex');
   const trueforge = path.join(rootDir, 'packages', 'trueforge');
   let child;
   try {
@@ -132,6 +162,7 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
       env: keyFree,
       stdio: ['ignore', 'ignore', 'inherit'],
     });
+    await createAccount({ cwd: trueforge, env: serverEnv, password });
     child = spawn('pnpm', ['run', 'serve:eval'], {
       cwd: trueforge,
       env: serverEnv,
@@ -139,7 +170,7 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
       stdio: ['ignore', 'ignore', 'inherit'],
     });
     await waitForHealth({ origin, child });
-    const token = await createSignIn({ origin });
+    const token = await signIn({ origin, password });
     const added = await addEvalProviders({ providers, env, origin, token });
     stderr(
       `Eval instance ready at ${origin}${added.length > 0 ? `, with ${added.map(provider => provider.name).join(', ')}` : ''}.\n`,

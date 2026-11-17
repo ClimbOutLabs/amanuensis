@@ -3,9 +3,10 @@
  * names it. A test passes the feature it exercises and never picks a folder itself.
  */
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, beforeEach } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import type { Browser } from 'playwright-core';
@@ -52,14 +53,78 @@ function shotRoot(): Promise<string> {
   return root;
 }
 
-/** The path for one picture of a feature at a named step, with its feature-set folder made. */
-export async function featureShotPath({ surface, step }: { surface: string; step: string }): Promise<string> {
+/** What a person needs to read a picture: the test it came from, what the test did and what should show. */
+interface ShotNote {
+  test: string;
+  did: string;
+  expect: string;
+  /** Set when the test ends. It stays null for a test that was cut off before it could end. */
+  passed: boolean | null;
+}
+
+let runningTest = '';
+const notesOfRunningTest = new Map<string, ShotNote>();
+
+async function writeNote({ file, note }: { file: string; note: ShotNote }): Promise<void> {
+  await writeFile(file, `${JSON.stringify(note, null, 2)}\n`);
+}
+
+// Each test file runs alone, so these hooks see every test of the file that imports this helper.
+beforeEach(t => {
+  runningTest = t.name;
+  notesOfRunningTest.clear();
+});
+afterEach(async t => {
+  // Older Node type definitions do not list `passed`, so it is read with a guard.
+  const passed = 'passed' in t && typeof t.passed === 'boolean' ? t.passed : null;
+  for (const [file, note] of notesOfRunningTest) {
+    await writeNote({ file, note: { ...note, passed } });
+  }
+});
+
+async function shotPath({
+  surface,
+  step,
+  did,
+  expect,
+  failed,
+}: {
+  surface: string;
+  step: string;
+  did: string;
+  expect: string;
+  failed: boolean;
+}): Promise<string> {
   if (!STEP_NAME.test(step)) {
     throw new Error(`The step name "${step}" must be lower-case letters, digits and hyphens.`);
   }
   const folder = join(await shotRoot(), featureSetOf(surface));
   await mkdir(folder, { recursive: true });
-  return join(folder, `${surface.replace(':', '.')}--${step}.png`);
+  const name = `${surface.replace(':', '.')}--${failed ? 'FAILED-' : ''}${step}`;
+  const note: ShotNote = { test: runningTest, did, expect, passed: null };
+  const noteFile = join(folder, `${name}.json`);
+  notesOfRunningTest.set(noteFile, note);
+  await writeNote({ file: noteFile, note });
+  return join(folder, `${name}.png`);
+}
+
+/**
+ * The path for one picture of a feature at a named step, with its feature-set folder made. `did` says
+ * in plain words what the test did to reach this picture, and `expect` what the picture should show.
+ * Both are saved beside the picture with the test's name and whether it passed.
+ */
+export async function featureShotPath({
+  surface,
+  step,
+  did,
+  expect,
+}: {
+  surface: string;
+  step: string;
+  did: string;
+  expect: string;
+}): Promise<string> {
+  return shotPath({ surface, step, did, expect, failed: false });
 }
 
 /**
@@ -76,7 +141,13 @@ export async function saveFailureShots({
   if (browser === undefined) return;
   const pages = browser.contexts().flatMap(context => context.pages());
   for (const [index, page] of pages.entries()) {
-    const path = await featureShotPath({ surface, step: `page-${String(index + 1)}` });
-    await page.screenshot({ path: path.replace(/--page-/, '--FAILED-page-'), timeout: 10_000 }).catch(() => undefined);
+    const path = await shotPath({
+      surface,
+      step: `page-${String(index + 1)}`,
+      did: 'The test failed. This is the page as it was at that moment.',
+      expect: 'Nothing. This picture is here to show what went wrong.',
+      failed: true,
+    });
+    await page.screenshot({ path, timeout: 10_000 }).catch(() => undefined);
   }
 }

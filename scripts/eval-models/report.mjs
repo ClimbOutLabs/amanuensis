@@ -91,7 +91,7 @@ function cell(text) {
 }
 
 /**
- * @param {{ label: string, generatedAt: string, origin: string, judgeModel: string, judgeCost: number | undefined, runs: number, temperature: number, setVersions: Record<string, number>, models: string[], costs: Record<string, number | undefined>, rows: any[], cleanupProblems: string[] }} options
+ * @param {{ label: string, generatedAt: string, origin: string, judgeModel: string, judgeCost: number | undefined, runs: number, temperature: number, setVersions: Record<string, number>, models: string[], costs: Record<string, number | undefined>, rows: any[], cleanupProblems: string[], journeyLeftovers?: string[], personaLeftovers?: string[] }} options
  */
 export function buildReport(options) {
   const scores = scoreModels(options);
@@ -138,6 +138,20 @@ export function buildReport(options) {
     lines.push(
       '',
       `Some memories from this run could not be removed: ${options.cleanupProblems.join(', ')}. Delete them in the eval instance under Memory.`,
+    );
+  }
+  const leftovers = options.journeyLeftovers ?? [];
+  if (leftovers.length > 0) {
+    lines.push(
+      '',
+      `Some schedules or agents this run made could not be removed: ${leftovers.join(', ')}. Delete them in the eval instance under Schedules and Agents.`,
+    );
+  }
+  const personaLeftovers = options.personaLeftovers ?? [];
+  if (personaLeftovers.length > 0) {
+    lines.push(
+      '',
+      `Some of the persona test could not be put back: ${personaLeftovers.join(', ')}. Remove or reset them in the eval instance under Personas, Memory and Personalization.`,
     );
   }
 

@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { type PathResolution } from '../../../src/core/permissions/trackedExecutables';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 

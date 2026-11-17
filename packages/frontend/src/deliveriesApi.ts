@@ -190,6 +190,10 @@ function parseMailSource(value: unknown): ReachView['mailSource'] {
   return value === 'google' || value === 'email_connector' ? value : null;
 }
 
+function parseMailSenderConfirmation(value: unknown): ReachView['mailSenderConfirmation'] {
+  return typeof value === 'boolean' ? value : null;
+}
+
 function parseView(body: unknown): ReachView {
   const data = isRecord(body) ? body.data : undefined;
   if (!isRecord(data)) {
@@ -212,6 +216,7 @@ function parseView(body: unknown): ReachView {
     mailProblem: parseMailProblem(data.mail_problem),
     calendarProblem: parseCalendarProblem(data.calendar_problem),
     mailSource: parseMailSource(data.mail_source),
+    mailSenderConfirmation: parseMailSenderConfirmation(data.mail_sender_confirmation),
   };
 }
 

@@ -1,5 +1,6 @@
 import { withoutNoteTrailer } from './memoryNotes';
-import { sanitizeMemoryLine } from './memoryPageLoader';
+import { pageLineShownText, sanitizeMemoryLine } from './memoryPageLoader';
+import type { PageLine } from './memoryPages';
 
 /**
  * Matching a recalled fact against the facts a person pulled out of one chat's recall. The
@@ -50,4 +51,12 @@ export function recallFactExcluded(input: { exclusions: ReadonlySet<string>; sho
     }
   }
   return false;
+}
+
+/** Whether a page line is one of the facts pulled out of this chat, matched on the words the panel showed for it. */
+export function pageLineExcluded(input: { exclusions: ReadonlySet<string>; line: PageLine }): boolean {
+  const text = pageLineShownText(input.line);
+  return (
+    text !== undefined && recallFactExcluded({ exclusions: input.exclusions, shownText: sanitizeMemoryLine(text) })
+  );
 }

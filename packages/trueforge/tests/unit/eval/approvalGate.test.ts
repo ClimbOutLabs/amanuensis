@@ -37,36 +37,41 @@ function allow(tool_call_id: string) {
 }
 
 describe('gateEvalApprovals', () => {
-  it('keeps approvals for fixture-backed tools, maps and search', async () => {
+  it('keeps approvals for fixture-backed tools, maps, search and a new schedule', async () => {
     const session = sessionWithCalls([
       { id: 'call-calendar', name: 'create_event' },
       { id: 'call-draft', name: 'draft_email' },
       { id: 'call-map', name: 'render_route' },
       { id: 'call-search', name: 'tavily_search' },
+      { id: 'call-schedule', name: 'create_schedule' },
     ]);
 
     const gated = await gateEvalApprovals({
       session,
       previous_turn_id: 'turn-1',
-      input: ['call-calendar', 'call-draft', 'call-map', 'call-search'].map(allow),
+      allowSkills: false,
+      input: ['call-calendar', 'call-draft', 'call-map', 'call-search', 'call-schedule'].map(allow),
     });
 
     expect(gated?.every(item => item.type === 'user.tool_approval' && item.approval.status === 'allow')).toBe(true);
   });
 
-  it('declines a send, an extract, an unknown call and a call the paused turn never asked for', async () => {
+  it('declines a send, an extract, a schedule removal, an unknown call and a call the turn never asked for', async () => {
     const session = sessionWithCalls([
       { id: 'call-send', name: 'send_draft' },
       { id: 'call-extract', name: 'tavily_extract' },
+      { id: 'call-remove', name: 'delete_schedule' },
     ]);
 
     const gated = await gateEvalApprovals({
       session,
       previous_turn_id: 'turn-1',
-      input: ['call-send', 'call-extract', 'call-unknown'].map(allow),
+      allowSkills: false,
+      input: ['call-send', 'call-extract', 'call-remove', 'call-unknown'].map(allow),
     });
 
     expect(gated?.map(item => (item.type === 'user.tool_approval' ? item.approval : undefined))).toEqual([
+      { status: 'deny', reason: EVAL_DECLINE_REASON },
       { status: 'deny', reason: EVAL_DECLINE_REASON },
       { status: 'deny', reason: EVAL_DECLINE_REASON },
       { status: 'deny', reason: EVAL_DECLINE_REASON },
@@ -79,6 +84,7 @@ describe('gateEvalApprovals', () => {
     const gated = await gateEvalApprovals({
       session,
       previous_turn_id: 'turn-1',
+      allowSkills: false,
       input: [allow('call-late')],
     });
 
@@ -89,6 +95,7 @@ describe('gateEvalApprovals', () => {
     const gated = await gateEvalApprovals({
       session: { getTurn: async () => undefined },
       previous_turn_id: 'missing',
+      allowSkills: false,
       input: [allow('call-any')],
     });
 
@@ -98,7 +105,12 @@ describe('gateEvalApprovals', () => {
   it('denies every approval when the chat has no turn to answer', async () => {
     const getTurn = jest.fn();
 
-    const gated = await gateEvalApprovals({ session: { getTurn }, previous_turn_id: null, input: [allow('call-any')] });
+    const gated = await gateEvalApprovals({
+      session: { getTurn },
+      previous_turn_id: null,
+      allowSkills: false,
+      input: [allow('call-any')],
+    });
 
     expect(gated?.[0]).toMatchObject({ approval: { status: 'deny', reason: EVAL_DECLINE_REASON } });
     expect(getTurn).not.toHaveBeenCalled();
@@ -116,9 +128,33 @@ describe('gateEvalApprovals', () => {
     ];
     const getTurn = jest.fn();
 
-    const gated = await gateEvalApprovals({ session: { getTurn }, previous_turn_id: 'turn-1', input });
+    const gated = await gateEvalApprovals({
+      session: { getTurn },
+      previous_turn_id: 'turn-1',
+      allowSkills: false,
+      input,
+    });
 
     expect(gated).toBe(input);
     expect(getTurn).not.toHaveBeenCalled();
+  });
+
+  it('approves adding, running and removing a skill only on an instance set up for skills, and never a send', async () => {
+    const calls = [
+      { id: 'call-add', name: 'install_skill' },
+      { id: 'call-exec', name: 'exec' },
+      { id: 'call-write', name: 'write_file' },
+      { id: 'call-script', name: 'run_skill_script' },
+      { id: 'call-remove', name: 'remove_skill' },
+      { id: 'call-send', name: 'send_draft' },
+    ];
+    const input = calls.map(call => allow(call.id));
+    const statuses = async (allowSkills: boolean) =>
+      (
+        await gateEvalApprovals({ session: sessionWithCalls(calls), previous_turn_id: 'turn-1', input, allowSkills })
+      )?.map(item => (item.type === 'user.tool_approval' ? item.approval.status : undefined));
+
+    expect(await statuses(true)).toEqual(['allow', 'allow', 'allow', 'allow', 'allow', 'deny']);
+    expect(await statuses(false)).toEqual(['deny', 'deny', 'deny', 'deny', 'deny', 'deny']);
   });
 });

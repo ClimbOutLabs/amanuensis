@@ -251,18 +251,21 @@ describe('usage', () => {
       const result = world.run(args);
       assert.equal(result.code, 2, args.join(' '));
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, /Usage:/);
+      assert.match(result.stderr, /Run aman help/);
     }
   });
 
   it('needs the doctor command and no longer takes --home (the state directory is AMANUENSIS_HOME)', () => {
     make();
-    for (const argv of [[], ['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
+    for (const argv of [['--json'], ['bogus'], ['doctor', '--home', '/tmp/elsewhere']]) {
       const result = world.shim(argv);
       assert.equal(result.code, 2, argv.join(' '));
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, /Usage:/);
+      assert.match(result.stderr, /Run aman help/);
     }
+    const bare = world.shim([]);
+    assert.equal(bare.code, 0, 'a bare aman shows the list of commands');
+    assert.match(bare.stdout, /aman help doctor/);
     assert.equal(world.shim(['doctor', '--json', '--instance', 'main']).code, 0);
   });
 
@@ -1637,15 +1640,25 @@ describe('network address check', () => {
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
 
-  it('does not offer a carrier-grade address unless it is on the Tailscale link', () => {
+  it('never offers a VPN address by itself, Tailscale included: the owner adds one with aman address add', () => {
     make();
     world.install('tailscale', '#!/usr/bin/env bash\nexit 1\n');
     world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'eth1:100.101.102.103'] });
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
     world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'tailscale0:100.101.102.103'] });
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
+  });
+
+  it('names an address an older version listed by itself that this one would not use, such as a VPN address', () => {
+    make();
+    world.network('main', {
+      origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791',
+      addresses: ['127.0.0.1', '192.168.1.20', 'tailscale0:100.101.102.103'],
+    });
     const check = find(world.json().doc.instances.main, 'network');
     assert.equal(check.state, 'warn');
-    assert.match(check.detail, /100\.101\.102\.103/);
+    assert.match(check.detail, /would not use today: 100\.101\.102\.103/);
+    assert.match(check.fix, /aman doctor network --fix/);
   });
 
   it('does not offer an address on a container or VPN link', () => {
@@ -1914,11 +1927,13 @@ describe('aman backup and aman upgrade', () => {
     );
   });
 
-  it('aman --help says the password command is run on the computer where Aman is installed', () => {
+  it('aman help password says the password command is run on the computer where Aman is installed', () => {
     make();
-    const result = world.shim(['--help']);
-    assert.match(result.stderr, /aman password \[--instance NAME\] \[--password-stdin\]/);
-    assert.match(result.stderr, /on the computer where Aman is installed/);
+    const result = world.shim(['help', 'password']);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /aman password \[--instance NAME\] \[--password-stdin\]/);
+    assert.match(result.stdout, /Run it on the computer/);
+    assert.match(result.stdout, /where Aman is installed/);
   });
 
   it('say plainly when the folder Aman was installed from is gone', () => {
@@ -2008,6 +2023,63 @@ describe('the folder Aman runs its installer from', () => {
     chmodSync(repo, 0o775);
     assert.equal(world.shim(['upgrade', '--check']).code, 1);
     assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  /** A getent that tells of the person's own group: who else is in it, and which other accounts have it as main group. */
+  function groupIs({ members = [], othersWithIt = false } = {}) {
+    const me = spawnSync('id', ['-un'], { encoding: 'utf8' }).stdout.trim();
+    const uid = process.getuid();
+    const gid = process.getgid();
+    const group = `${me}:x:${gid}:${members.join(',')}`;
+    const passwd = [`${me}:x:${uid}:${gid}::/home/${me}:/bin/sh`];
+    if (othersWithIt) {
+      passwd.push(`pippa:x:${uid + 1}:${gid}::/home/pippa:/bin/sh`);
+    }
+    world.install(
+      'getent',
+      `#!/usr/bin/env bash\ncase "$1" in\n  group) [ "$2" = ${gid} ] && echo '${group}' ;;\n  passwd) printf '%s\\n' ${passwd.map(line => `'${line}'`).join(' ')} ;;\n  *) exit 2 ;;\nesac\n`,
+    );
+  }
+
+  it("is made private again by aman upgrade when only the person's own group can write to it, as a pull leaves it", () => {
+    const repo = checkoutWith(0o775);
+    chmodSync(repo, 0o775);
+    groupIs({ members: [spawnSync('id', ['-un'], { encoding: 'utf8' }).stdout.trim()] });
+    const result = world.shim(['upgrade', '--check']);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /private to you again/);
+    assert.equal(statSync(repo).mode & 0o022, 0);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o022, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} upgrade --check`));
+  });
+
+  for (const [what, group] of [
+    ["someone else is in the person's group", { members: ['pippa'] }],
+    ["another account has the person's group as its main group", { othersWithIt: true }],
+  ]) {
+    it(`is still not used when ${what}, and nothing is changed`, () => {
+      const repo = checkoutWith(0o775);
+      groupIs(group);
+      assert.equal(world.shim(['upgrade', '--check']).code, 1);
+      assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o777, 0o775);
+      assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+    });
+  }
+
+  it('is still not used when anyone can write to its installer, even with a private group', () => {
+    const repo = checkoutWith(0o666);
+    groupIs();
+    assert.equal(world.shim(['upgrade', '--check']).code, 1);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o777, 0o666);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  it('is still not used with a private group when a folder above it can be changed by others', () => {
+    const repo = checkoutWith(0o775);
+    groupIs();
+    chmodSync(world.root, 0o775);
+    assert.equal(world.shim(['upgrade', '--check']).code, 1);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o777, 0o775);
   });
 
   it('is reported by the doctor with the one fix, and --fix makes it private to the user again', () => {

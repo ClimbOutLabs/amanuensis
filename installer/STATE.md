@@ -110,7 +110,12 @@ Later steps add keys with the same rule (for example `healthy` is set to `1`
 once an instance answers, `sms_port` holds the Twilio port the compose
 file publishes, empty when none, `sms_settings` the digest of its texts
 lines, empty when none, and `local_models` holds the comma-separated ports of
-this computer that `aman local-model` named for the local model bridge). Instance names use lowercase letters, digits and
+this computer that `aman local-model` named for the local model bridge,
+`listen_addresses` the space-separated addresses besides 127.0.0.1 the lan
+service listens on, so a later `aman` command can tell when this computer no
+longer has one, and `forwards` the comma-separated full addresses
+`aman address add` listed for programs that pass visitors on to the app at
+127.0.0.1). Instance names use lowercase letters, digits and
 hyphens.
 
 ## The release record
@@ -266,4 +271,10 @@ longer than the dead limit while the others stay out.
 - Volumes an instance owns on Docker are named after it: `aman_<name>_data`
   and `aman_<name>_dex`, its Compose project is `aman-<name>`, and the
   shared volumes are `aman_home`, `aman_source`, `aman_stt_cache` and
-  `aman_machine`.
+  `aman_machine`. Its containers are `aman-<short>-<service>`, where
+  `<short>` is the name without a leading `aman-`, so `aman-` is written once;
+  the volumes that hold no data (`aman_<short>_local_model`,
+  `aman_<short>_mail_policy_status`) use the short name too. Volumes with data
+  keep the full name, so an older install keeps its data in place. A new `x`
+  beside an existing `aman-x` is refused. An `aman-x` beside an `x` (older
+  installs could make the pair) keeps `aman-` twice, as `aman-aman-x-<service>`.

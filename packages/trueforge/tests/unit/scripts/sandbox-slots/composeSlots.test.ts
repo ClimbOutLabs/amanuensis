@@ -105,6 +105,8 @@ describe('docker-compose.slots.yml', () => {
 function renderInstanceTemplate({ calendar }: { calendar: boolean }): unknown {
   const pairs = [
     'NAME=main',
+    'CONTAINER_PREFIX=aman-main',
+    'SHORT_NAME=main',
     `IF_CALENDAR=${calendar ? '1' : '0'}`,
     'CALENDAR_IMAGE=calendar-test:1',
     'IF_EMAIL=0',
@@ -125,6 +127,11 @@ function renderInstanceTemplate({ calendar }: { calendar: boolean }): unknown {
     'TLS_LEAF_DIR=/tmp/leaf',
     'TLS_TRUST_DIR=/tmp/trust',
     'TLS_HTTP_IN=8080',
+    'IF_LAN=0',
+    'LAN_PORTS=',
+    'LAN_FORWARDS=',
+    'LAN_PROXY=0',
+    'TLS_CONFIG=',
   ];
   // `die` lives in a library that needs the whole installer; the renderer only needs it to stop with a message.
   const script = 'die() { printf "%s\\n" "$*" >&2; exit 1; }; . "$1"; shift; render_template "$@"';

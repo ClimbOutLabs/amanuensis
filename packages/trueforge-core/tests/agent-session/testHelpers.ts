@@ -203,6 +203,7 @@ export interface MakeCreateTurnInputOptions<TTurnCustom extends object = Record<
   tool_call_memos?: CreateTurnInput<TTurnCustom>['tool_call_memos'];
   task_states?: CreateTurnInput<TTurnCustom>['task_states'];
   approval_grants?: string[];
+  approval_refusals?: string[];
   require_previous_turn_is_tip?: boolean;
   update_session_title_if_not_exist?: string;
   sandbox_info?: CreateTurnInput<TTurnCustom>['sandbox_info'];
@@ -227,6 +228,7 @@ export function makeCreateTurnInput<TTurnCustom extends object = Record<string, 
     turn: turnInit,
     sandbox_info: input.sandbox_info ?? null,
     approval_grants: input.approval_grants ?? [],
+    approval_refusals: input.approval_refusals ?? [],
     require_previous_turn_is_tip: input.require_previous_turn_is_tip ?? false,
     retained_previous_thread_ids:
       input.retained_previous_thread_ids ??

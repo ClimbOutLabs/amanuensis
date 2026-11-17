@@ -130,7 +130,12 @@ test('home screens render in light and dark at desktop and phone width', { timeo
             `${state} overflows horizontally at ${viewport.name}`,
           );
           await page.screenshot({
-            path: await featureShotPath({ surface: 'screen:first-run', step: `${state}-${viewport.name}-${theme}` }),
+            path: await featureShotPath({
+              surface: 'screen:first-run',
+              step: `${state}-${viewport.name}-${theme}`,
+              did: `Opened the home screen in its "${state}" state on a ${viewport.name} screen in the ${theme} theme.`,
+              expect: 'The greeting shows, the opening animation has finished, and the page does not scroll sideways.',
+            }),
             fullPage: true,
           });
         };

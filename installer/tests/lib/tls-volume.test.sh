@@ -18,14 +18,15 @@ render_compose() { # if_tls_host if_tls_volume
     # shellcheck source=../../lib/templates.sh
     . "$INSTALLER_DIR/lib/templates.sh"
     render_template "$INSTALLER_DIR/templates/instance/compose.yaml.tpl" \
-      "NAME=main" "IF_CALENDAR=0" "CALENDAR_IMAGE=" "IF_EMAIL=0" "MAIL_EMAIL_IMAGE=" \
+      "NAME=main" "CONTAINER_PREFIX=aman-main" "SHORT_NAME=main" "IF_CALENDAR=0" "CALENDAR_IMAGE=" "IF_EMAIL=0" "MAIL_EMAIL_IMAGE=" \
       "IF_BROWSER=0" "BROWSER_IMAGE=" "BROWSER_GATEWAY_IMAGE=" \
       "STT_NETWORK=aman_main_stt" "APP_IMAGE=aman-app:test" "DEX_IMAGE=dex:test" \
       "IF_SANDBOX=0" "IF_EDGE=0" "LOGIN_HOST=" "LOGIN_PORT=5556" "DEX_TELEMETRY_PORT=5557" \
       "APP_PORTS=      - '127.0.0.1:8791:8790'" \
       "IF_TLS=1" "IF_TLS_HOST=$1" "IF_TLS_VOLUME=$2" "CADDY_IMAGE=caddy:test" "TLS_USER=1000:1000" \
       "TLS_LEAF_DIR=/home/person/.amanuensis/tls/leaf/main" \
-      "TLS_TRUST_DIR=/home/person/.amanuensis/tls/trust/main" "TLS_HTTP_IN=8081"
+      "TLS_TRUST_DIR=/home/person/.amanuensis/tls/trust/main" "TLS_HTTP_IN=8081" \
+      "IF_LAN=0" "LAN_PORTS=" "LAN_FORWARDS=" "LAN_PROXY=0" "TLS_CONFIG=test"
   )
 }
 

@@ -9,7 +9,7 @@ import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import type { ToolInvocationContext } from '../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../mcp/LocalToolMCP';
 import { stampSentinelDecision } from '../mcp/ToolSet';
-import { stableStringify } from '../permissions/approvalTokens';
+import { REVIEW_HASH_ARGUMENT, stableStringify } from '../permissions/approvalTokens';
 import { classifyHostToolCall } from '../permissions/classifier';
 import type { SentinelHostContext } from '../permissions/context';
 import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../permissions/sendAllowlist';
@@ -46,9 +46,8 @@ import {
   type UpdateEventInput,
 } from './toolContract';
 
-/** Keys the host adds to an approved write: the zone the times were read in and the hash of what was shown. */
+/** Key the host adds to an approved write beside the review hash: the zone the times were read in. */
 const APPROVED_ZONE_KEY = 'resolved_time_zone';
-const REVIEW_HASH_KEY = 'review_hash';
 
 const NO_ZONE =
   "Nothing was saved because Aman doesn't know which time zone the times are in. Ask the user, then pass time_zone.";
@@ -138,6 +137,7 @@ export class CalendarToolSet extends LocalToolMCP {
     return [
       defineTool({
         name: LIST_EVENTS_TOOL_NAME,
+        requiresNetwork: true,
         description: `List primary-calendar events in a time range, in start order, with repeats unfolded into their dates. Dates (YYYY-MM-DD) use the user's time zone; a time_max date includes that whole day. All-day events have all_day true and no clock time.${canWrite ? '' : NO_WRITE_NOTE}`,
         schema: ListEventsSchema,
         annotations: CALENDAR_READ_ANNOTATIONS,
@@ -145,6 +145,7 @@ export class CalendarToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: GET_EVENT_TOOL_NAME,
+        requiresNetwork: true,
         description: 'Read one event in full by event_id: description, place, guests and how it repeats.',
         schema: GetEventSchema,
         annotations: CALENDAR_READ_ANNOTATIONS,
@@ -155,6 +156,7 @@ export class CalendarToolSet extends LocalToolMCP {
         ? [
             defineTool({
               name: CREATE_EVENT_TOOL_NAME,
+              requiresNetwork: true,
               description:
                 "Add an event to the user's primary Google Calendar. Use this, not a calendar file, when the user wants an event saved. Times are local wall-clock times (2026-10-19T09:00) in time_zone, or the user's own zone when it is left out; two dates make an all-day event. With attendees, send_updates must say whether Google emails them. The user sees the whole event and is asked first.",
               schema: CreateEventSchema,
@@ -163,6 +165,7 @@ export class CalendarToolSet extends LocalToolMCP {
             }),
             defineTool({
               name: UPDATE_EVENT_TOOL_NAME,
+              requiresNetwork: true,
               description:
                 'Move or rename an event the user organizes, by event_id from list_events. Set only what changes; a new start alone keeps the length. If the event has guests, send_updates must say whether Google emails them. Guests cannot be changed and events cannot be deleted. The user sees before and after and is asked first.',
               schema: UpdateEventSchema,
@@ -208,6 +211,7 @@ export class CalendarToolSet extends LocalToolMCP {
         tool_name: params.name,
         canonical_params: canonical,
         tool_type: 'truefoundry-system',
+        requires_network: info.requires_network,
         mcp_server_name: CALENDAR_SERVER_ID,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
@@ -279,7 +283,7 @@ export class CalendarToolSet extends LocalToolMCP {
         approved: {
           ...(params.arguments ?? {}),
           [APPROVED_ZONE_KEY]: zone,
-          [REVIEW_HASH_KEY]: hashEventWrite(resolved.request),
+          [REVIEW_HASH_ARGUMENT]: hashEventWrite(resolved.request),
         },
         review: resolved.review,
       };
@@ -351,7 +355,7 @@ export class CalendarToolSet extends LocalToolMCP {
     }
     const {
       [APPROVED_ZONE_KEY]: zone,
-      [REVIEW_HASH_KEY]: hash,
+      [REVIEW_HASH_ARGUMENT]: hash,
       ...approvedArgs
     } = input.context?.approved_params ?? {};
     // The approved params are settled when the call is classified, before anyone answers, so only the person's

@@ -53,6 +53,8 @@ export interface SessionRecord<TCustom extends object = Record<string, never>> {
   last_activity_timestamp_ms: number;
   /** Server-derived grants created by "Always allow in this chat". */
   approval_grants: string[];
+  /** Server-derived browser refusals: a "no" to a browser open or click, kept for the rest of the chat. */
+  approval_refusals: string[];
   /** Host-owned ordered task state, persisted outside the model context. */
   task_checklist: TaskChecklist;
   metrics: SessionMetrics;

@@ -75,7 +75,7 @@ const dentist: NonNullable<Tier3Card['calendar_event']> = {
   location: '',
   description: '',
   attendees: [],
-  guests_emailed: false,
+  guests_line: '',
   one_of_repeating: false,
   already_created: false,
   span_days: 1,
@@ -104,7 +104,14 @@ export const typedOnlyCards: [string, Tier3Card][] = [
   ],
   [
     'guests on an event',
-    { ...BASE_CARD, calendar_event: { ...dentist, attendees: ['bob@example.com'], guests_emailed: true } },
+    {
+      ...BASE_CARD,
+      calendar_event: {
+        ...dentist,
+        attendees: ['bob@example.com'],
+        guests_line: 'Google will email every guest about this.',
+      },
+    },
   ],
   [
     'a new schedule',

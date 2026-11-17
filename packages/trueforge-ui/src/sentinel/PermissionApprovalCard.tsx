@@ -17,6 +17,7 @@ import {
   cardConsequence,
   cardHeadline,
   cardReason,
+  chatGrantLabel,
   declineVerb,
   outboundRepeatsFacts,
   safeVerb,
@@ -39,6 +40,8 @@ export type PermissionApprovalCardProps = {
   onApprove: () => void;
   /** Only passed when the server declared a chat-scoped allow for this call. */
   onApproveForChat?: (() => void) | undefined;
+  /** Only passed when the server says that chat-scoped allow covers the whole site, so the button can name it. */
+  chatGrantScope?: 'site' | undefined;
   /**
    * Records a standing "Always allow everywhere" grant and approves this call. Only passed when the
    * server says the owner may always allow this tool; the card asks for confirmation first.
@@ -128,6 +131,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   othersWaiting,
   onApprove,
   onApproveForChat,
+  chatGrantScope,
   onApproveAlways,
   alwaysAllowCovers,
   onDeny,
@@ -264,7 +268,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             onClick={markSent(onApproveForChat)}
             disabled={busy}
           >
-            {APPROVAL_CHOICES.approveForChat.label}
+            {chatGrantLabel(chatGrantScope)}
           </ApprovalButton>
         )}
         {onApproveAll !== undefined && (

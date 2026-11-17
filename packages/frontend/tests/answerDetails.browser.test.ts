@@ -54,7 +54,14 @@ test('answer details open and close from the keyboard', { timeout: 180_000 }, as
     await page.keyboard.press('Enter');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
     assert.equal(await usage.isVisible(), true, 'Enter did not open the details');
-    await page.screenshot({ path: await featureShotPath({ surface: 'screen:answer-details', step: 'open' }) });
+    await page.screenshot({
+      path: await featureShotPath({
+        surface: 'screen:answer-details',
+        step: 'open',
+        did: 'Opened an answer with a Details button, moved to the button with Tab and pressed Enter.',
+        expect: 'The details under the answer are open and show the usage line.',
+      }),
+    });
 
     await page.keyboard.press('Space');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
