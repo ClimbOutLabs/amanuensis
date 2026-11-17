@@ -928,6 +928,9 @@ export const INSTALL_PASSWORD_AGAIN_QUESTION = 'Type it again:';
 
 export const INSTALL_PASSWORD_MISMATCH_LINE = 'The passwords do not match. Type them again.';
 
+export const INSTALL_PASSWORD_CONTROL_LINE =
+  'That password has something in it that is not a letter, a number or a symbol, like a line break. Type it instead of pasting it.';
+
 export const INSTALL_PASSWORD_TOO_LONG_LINE =
   'The password can have at most 72 characters. Accented or non-Latin letters count as more than one.';
 
@@ -937,8 +940,15 @@ export const INSTALL_PASSWORD_TOO_LONG_LINE =
 // later. The sentence is the shell's, built from what is missing.
 // Both lengths are counted in bytes, as the shell counts them under
 // LC_ALL=C: an accented letter is two of them, on both checks.
-export function installPasswordProblem(password: string): string | null {
-  const byteLength = new TextEncoder().encode(password).length;
+// The password is judged as the bytes the installer will be handed
+// (UTF-8), so a secret never has to become text to be checked. A line
+// break or another control character is refused first: the installer
+// reads the password as one line, and a paste can carry one.
+export function installPasswordProblem(password: Uint8Array): string | null {
+  if (password.some(byte => byte < 0x20 || byte === 0x7f)) {
+    return INSTALL_PASSWORD_CONTROL_LINE;
+  }
+  const byteLength = password.length;
   if (byteLength > 72) {
     return INSTALL_PASSWORD_TOO_LONG_LINE;
   }
@@ -946,10 +956,15 @@ export function installPasswordProblem(password: string): string | null {
   if (byteLength < 8) {
     missing.push('at least 8 characters');
   }
-  if (!/\d/.test(password)) {
+  if (!password.some(byte => byte >= 0x30 && byte <= 0x39)) {
     missing.push('a number');
   }
-  if (!/[!-/:-@[-`{-~]/.test(password)) {
+  const isSymbol = (byte: number): boolean =>
+    (byte >= 0x21 && byte <= 0x2f) ||
+    (byte >= 0x3a && byte <= 0x40) ||
+    (byte >= 0x5b && byte <= 0x60) ||
+    (byte >= 0x7b && byte <= 0x7e);
+  if (!password.some(isSymbol)) {
     missing.push('a symbol, like @ # $ %');
   }
   if (missing.length === 0) {
@@ -985,6 +1000,198 @@ export const INSTALL_DRY_RUN_LINES: readonly string[] = [
   'It puts the aman command and the Start menu entries in place, and opens Aman in your browser.',
   'It opens a short getting started page in your browser at the end.',
 ];
+
+// The setup window's words. The window draws only what it is sent, so
+// every word it shows is here.
+export const WINDOW_TITLE = 'Amanuensis Setup';
+
+export const WINDOW_BRAND = 'Amanuensis';
+
+export const WINDOW_STEPS: readonly string[] = [
+  'Welcome',
+  'Check this computer',
+  'About you',
+  'Options',
+  'Review',
+  'Install',
+  'Done',
+];
+
+export const WINDOW_NEXT = 'Next';
+export const WINDOW_BACK = 'Back';
+export const WINDOW_INSTALL = 'Install';
+export const WINDOW_TRY_AGAIN = 'Try again';
+export const WINDOW_CLOSE = 'Close';
+export const WINDOW_DETAILS = 'Show details';
+export const WINDOW_MARK_LABELS: readonly string[] = ['Not started', 'In progress', 'Done', 'Needs attention'];
+
+export const WINDOW_CLOSE_QUESTION =
+  'Amanuensis is still installing. If you close this window, the setup screens close, but the install keeps going. Close it?';
+
+export const WINDOW_WELCOME_TITLE = 'Welcome to Amanuensis';
+
+export const WINDOW_WELCOME_LINES: readonly string[] = [
+  'Set up Amanuensis, your personal assistant, on this computer.',
+  'Setup can take a while, depending on your internet connection.',
+];
+
+export const WINDOW_CHECK_TITLE = 'Checking this computer';
+
+export const WINDOW_CHECK_LINES: readonly string[] = [
+  'Amanuensis needs Docker Desktop to run. If it is missing, setup will install it and Windows may ask for permission.',
+];
+
+export const WINDOW_CHECK_READY_LINE = 'This computer is ready for Amanuensis.';
+
+export const WINDOW_CHECK_DOCKER_ROW = 'Docker Desktop is installed and running';
+export const WINDOW_CHECK_MEMORY_ROW = 'Docker Desktop has what Amanuensis needs';
+
+export const WINDOW_ABOUT_TITLE = 'Create your sign-in';
+
+export const WINDOW_ABOUT_LINES: readonly string[] = ['Use this email and password to sign in to Amanuensis.'];
+
+export const WINDOW_EMAIL_LABEL = 'Your email';
+export const WINDOW_PASSWORD_LABEL = 'Choose a password';
+export const WINDOW_AGAIN_LABEL = 'Type the password again';
+
+// The password rule, one line for each part, in the order the window
+// ticks them off as the person types.
+export const WINDOW_RULE_LABELS: readonly string[] = [
+  'At least 8 characters',
+  'A number',
+  'A symbol, like @ # $ %',
+  'The two passwords match',
+];
+
+export const WINDOW_KEEP_LINE =
+  'Keep this password somewhere safe. Aman does not show it again, and nobody else can look it up for you.';
+
+export const WINDOW_EMAIL_PROBLEM = 'Type your email address, like name@example.com.';
+
+export const WINDOW_OPTIONS_TITLE = 'Use Amanuensis on your phone?';
+
+export const WINDOW_OPTIONS_LINES: readonly string[] = [
+  'You can use Amanuensis on your phone and other devices on your home Wi-Fi. If you choose yes, Windows will ask for permission to change the firewall.',
+];
+
+export const WINDOW_PHONE_YES = 'Yes, on my home Wi-Fi';
+export const WINDOW_PHONE_NO = 'No, only this computer';
+
+export const WINDOW_REVIEW_TITLE = 'Ready to install';
+
+export const WINDOW_REVIEW_LINES: readonly string[] = [
+  'Check your choices below, then choose Install. Windows may ask for permission during setup.',
+];
+
+export function windowReviewEmailRow(email: string): string {
+  return `You sign in as ${printable(email)}`;
+}
+
+export const WINDOW_REVIEW_ROWS: readonly string[] = [
+  'Download and check the newest Amanuensis',
+  'Build and set up Amanuensis, with a daily backup',
+  'Add Amanuensis to the Start menu',
+  'Open Amanuensis in your browser. Windows asks you to allow its security certificate.',
+];
+
+export const WINDOW_REVIEW_PHONE_ROW =
+  'Open Amanuensis to your home Wi-Fi. Windows asks you to allow a firewall change.';
+export const WINDOW_REVIEW_NO_PHONE_ROW = 'Use Amanuensis only on this computer';
+
+export const WINDOW_INSTALL_TITLE = 'Installing Amanuensis';
+
+export const WINDOW_INSTALL_LINES: readonly string[] = [
+  'Setup may take a while, depending on your internet connection. You can keep using this computer while you wait.',
+];
+
+export const WINDOW_STAGE_ROWS: Readonly<Record<string, string>> = {
+  download: 'Download the newest Amanuensis',
+  install: 'Build and set up Amanuensis. This takes the longest.',
+  shortcuts: 'Add Amanuensis to the Start menu',
+  update: 'Check for a newer setup program',
+  private: 'Make the Amanuensis folder private to you',
+  open: 'Open Amanuensis in your browser',
+  phone: 'Open Amanuensis to your home Wi-Fi',
+};
+
+export const WINDOW_DONE_TITLE = 'Amanuensis is ready';
+
+export const WINDOW_DONE_LINES: readonly string[] = [
+  'Amanuensis is open in your browser, with a short getting started page beside it.',
+  'To open it later, choose Amanuensis from the Start menu.',
+];
+
+export const WINDOW_STOPPED_TITLE = 'Setup stopped';
+
+export const WINDOW_STOPPED_LINES: readonly string[] = [
+  "Amanuensis isn't fully set up yet. The problem and the next step are below.",
+  'After following the next step, open Amanuensis Setup again. It picks up where it stopped.',
+];
+
+export const WINDOW_OPEN_LINE =
+  'Amanuensis Setup is open in its own window. Leave this window open until setup is done.';
+
+export const WINDOW_FALLBACK_LINE =
+  'The setup window could not be opened on this computer, so setup asks its questions here.';
+
+export const WINDOW_CLOSED_LINE = 'The setup window was closed. The install carries on here.';
+
+export const WINDOW_CLOSED_EARLY: Problem = {
+  happened: 'The setup window closed, so nothing was installed.',
+  fix: "Open Amanuensis Setup again when you're ready.",
+};
+
+export function windowMessageLines(): string[] {
+  return [
+    WINDOW_TITLE,
+    WINDOW_BRAND,
+    ...WINDOW_STEPS,
+    WINDOW_NEXT,
+    WINDOW_BACK,
+    WINDOW_INSTALL,
+    WINDOW_TRY_AGAIN,
+    WINDOW_CLOSE,
+    WINDOW_DETAILS,
+    ...WINDOW_MARK_LABELS,
+    WINDOW_CLOSE_QUESTION,
+    WINDOW_WELCOME_TITLE,
+    ...WINDOW_WELCOME_LINES,
+    WINDOW_CHECK_TITLE,
+    ...WINDOW_CHECK_LINES,
+    WINDOW_CHECK_READY_LINE,
+    WINDOW_CHECK_DOCKER_ROW,
+    WINDOW_CHECK_MEMORY_ROW,
+    WINDOW_ABOUT_TITLE,
+    ...WINDOW_ABOUT_LINES,
+    WINDOW_EMAIL_LABEL,
+    WINDOW_PASSWORD_LABEL,
+    WINDOW_AGAIN_LABEL,
+    ...WINDOW_RULE_LABELS,
+    WINDOW_KEEP_LINE,
+    WINDOW_EMAIL_PROBLEM,
+    WINDOW_OPTIONS_TITLE,
+    ...WINDOW_OPTIONS_LINES,
+    WINDOW_PHONE_YES,
+    WINDOW_PHONE_NO,
+    WINDOW_REVIEW_TITLE,
+    ...WINDOW_REVIEW_LINES,
+    windowReviewEmailRow('friend@example.com'),
+    ...WINDOW_REVIEW_ROWS,
+    WINDOW_REVIEW_PHONE_ROW,
+    WINDOW_REVIEW_NO_PHONE_ROW,
+    WINDOW_INSTALL_TITLE,
+    ...WINDOW_INSTALL_LINES,
+    ...Object.values(WINDOW_STAGE_ROWS),
+    WINDOW_DONE_TITLE,
+    ...WINDOW_DONE_LINES,
+    WINDOW_STOPPED_TITLE,
+    ...WINDOW_STOPPED_LINES,
+    WINDOW_OPEN_LINE,
+    WINDOW_FALLBACK_LINE,
+    WINDOW_CLOSED_LINE,
+    problemText(WINDOW_CLOSED_EARLY),
+  ];
+}
 
 export const UNINSTALL_NOT_WINDOWS: Problem = {
   happened: 'aman uninstall removes an Aman set up with the Aman Setup download, and this is not a Windows computer.',
@@ -1249,12 +1456,14 @@ export function allMessageLines(): string[] {
   lines.push(INSTALL_PASSWORD_AGAIN_QUESTION);
   lines.push(INSTALL_PASSWORD_MISMATCH_LINE);
   lines.push(INSTALL_PASSWORD_TOO_LONG_LINE);
-  lines.push(installPasswordProblem('short') ?? '');
-  lines.push(installPasswordProblem('longenough') ?? '');
+  lines.push(INSTALL_PASSWORD_CONTROL_LINE);
+  lines.push(installPasswordProblem(new TextEncoder().encode('short')) ?? '');
+  lines.push(installPasswordProblem(new TextEncoder().encode('longenough')) ?? '');
   lines.push(INSTALL_PHONE_QUESTION);
   lines.push(INSTALL_YES_OR_NO_LINE);
   lines.push(INSTALL_DONE_LINE);
   lines.push(...INSTALL_DRY_RUN_LINES);
+  lines.push(...windowMessageLines());
   lines.push(PRESS_ENTER_TO_CLOSE_LINE);
   lines.push(problemText(UNINSTALL_NOT_WINDOWS));
   lines.push(problemText(UNINSTALL_DOCKER_NOT_ANSWERING));

@@ -64,6 +64,10 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 
     Restart the computer. After you sign back in, Aman Setup opens again by itself and carries on. If it doesn't, see the next question.
 
+??? question "On Windows, the Aman Setup window didn't open and the questions are in a black window"
+
+    Windows did not let Aman Setup open its own window. This happens mostly on computers managed by an employer. Answer the questions in the black window instead. The install is the same. The [Windows guide](install-windows.md) walks through each step.
+
 ??? question "On Windows, Aman Setup didn't open again after the restart"
 
     Open the Aman Setup download again from where you saved it, usually your Downloads folder. It carries on where it left off. The [Windows guide](install-windows.md) walks through each step.

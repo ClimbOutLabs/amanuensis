@@ -20,7 +20,42 @@ export interface ProcessRunner {
   run: (command: string, args: readonly string[]) => Promise<ProcessResult>;
   // For commands whose input or output is not text (the state volume is read
   // and written as a tar stream): bytes in on stdin, bytes out on stdout.
-  runBytes: (command: string, args: readonly string[], stdin: Uint8Array) => Promise<ProcessBytesResult>;
+  // When onLine is given, every line the command prints (output and
+  // errors) is handed to it as it arrives, so a long run can be shown
+  // while it works. The result still carries the whole output.
+  runBytes: (
+    command: string,
+    args: readonly string[],
+    stdin: Uint8Array,
+    onLine?: (line: string) => void,
+  ) => Promise<ProcessBytesResult>;
+}
+
+// Cuts a stream of chunks into whole lines. A letter whose bytes are
+// split across two chunks is still one letter, and a last line with
+// no line break is handed over when the stream ends.
+export function lineSplitter(onLine: (line: string) => void): { push: (chunk: Uint8Array) => void; end: () => void } {
+  const decoder = new TextDecoder();
+  let rest = '';
+  const flush = (text: string): void => {
+    const parts = (rest + text).split('\n');
+    rest = parts.pop() ?? '';
+    for (const part of parts) {
+      onLine(part.endsWith('\r') ? part.slice(0, -1) : part);
+    }
+  };
+  return {
+    push: chunk => {
+      flush(decoder.decode(chunk, { stream: true }));
+    },
+    end: () => {
+      flush(decoder.decode());
+      if (rest !== '') {
+        onLine(rest);
+        rest = '';
+      }
+    },
+  };
 }
 
 export function commandLine(command: string, args: readonly string[]): string {
@@ -56,28 +91,41 @@ export class SystemProcessRunner implements ProcessRunner {
     });
   }
 
-  runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
+  runBytes(
+    command: string,
+    args: readonly string[],
+    stdin: Uint8Array,
+    onLine?: (line: string) => void,
+  ): Promise<ProcessBytesResult> {
     return new Promise(resolve => {
       const child = spawn(command, [...args], { shell: false });
       const chunks: Buffer[] = [];
       let stderr = '';
+      const outLines = onLine === undefined ? null : lineSplitter(onLine);
+      const errLines = onLine === undefined ? null : lineSplitter(onLine);
       child.stdout.on('data', (chunk: Buffer) => {
         chunks.push(chunk);
+        outLines?.push(chunk);
       });
       child.stderr.on('data', (chunk: Buffer) => {
         stderr += chunk.toString('utf8');
+        errLines?.push(chunk);
       });
       child.on('error', () => {
         resolve({ exitCode: 1, stdout: Buffer.concat(chunks), stderr, started: false });
       });
       child.on('close', code => {
+        outLines?.end();
+        errLines?.end();
         resolve({ exitCode: code ?? 1, stdout: Buffer.concat(chunks), stderr, started: true });
       });
       child.stdin.on('error', () => {
         // The program ended before reading its input; the close event
         // still reports how it ended.
       });
-      child.stdin.end(Buffer.from(stdin));
+      // A view of the caller's bytes, not a copy: a caller that wipes
+      // a secret after the run leaves no second copy behind here.
+      child.stdin.end(Buffer.from(stdin.buffer, stdin.byteOffset, stdin.byteLength));
     });
   }
 }
@@ -98,9 +146,14 @@ export class RecordingProcessRunner implements ProcessRunner {
     return this.inner.run(command, args);
   }
 
-  async runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
+  async runBytes(
+    command: string,
+    args: readonly string[],
+    stdin: Uint8Array,
+    onLine?: (line: string) => void,
+  ): Promise<ProcessBytesResult> {
     this.recorded.push(commandLine(command, args));
-    return this.inner.runBytes(command, args, stdin);
+    return this.inner.runBytes(command, args, stdin, onLine);
   }
 
   lines(): readonly string[] {

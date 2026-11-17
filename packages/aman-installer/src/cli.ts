@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { runAdopt } from './commands/adopt.ts';
 import { runBackup } from './commands/backup.ts';
 import { runBackups } from './commands/backups.ts';
-import { runInstall } from './commands/install.ts';
+import { runInstall, type InstallDeps, type WindowOutcome } from './commands/install.ts';
 import { runNetwork } from './commands/network.ts';
 import { runOpen } from './commands/open.ts';
 import { parseRestoreArgs, runRestore } from './commands/restore.ts';
@@ -30,6 +30,8 @@ import { fetchBytesFromNetwork, type FetchBytes } from './release/download.ts';
 import type { ProcessRunner } from './runner/processRunner.ts';
 import type { StateStore } from './state/state.ts';
 import { INSTALLER_VERSION } from './version.ts';
+import type { WindowLaunch } from './window/launch.ts';
+import { runWindowInstall } from './window/session.ts';
 
 // The doctor's extra inputs ride along in the same deps, so every command
 // is built from the one deps object main wires up.
@@ -64,6 +66,10 @@ export interface CliDeps extends DoctorDeps {
   // defaults keep an unwired install safe: no answer is ever given.
   ask?: (question: string) => Promise<string | null>;
   askSecret?: (question: string) => Promise<string | null>;
+  // Opens the setup window, set by main on a Windows computer with a
+  // person in front of it. Left out, the first install asks its
+  // questions on the terminal.
+  openWindow?: () => WindowLaunch | null;
 }
 
 export async function runCli(args: readonly string[], deps: CliDeps): Promise<number> {
@@ -107,11 +113,12 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
       deps.print(problemText(INSTALL_KEY_ON_COMMAND_LINE));
       return 1;
     }
-    const unknown = rest.find(arg => arg !== '--dry-run');
+    const unknown = rest.find(arg => arg !== '--dry-run' && arg !== '--console');
     if (unknown !== undefined) {
       deps.print(problemText(installUsageProblem(unknown)));
       return 1;
     }
+    const { openWindow } = deps;
     return runInstall(
       {
         ...deps,
@@ -138,7 +145,25 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
           }),
         ...(deps.releasePublicKey === undefined ? {} : { releasePublicKey: deps.releasePublicKey }),
       },
-      { dryRun: rest.includes('--dry-run') },
+      {
+        dryRun: rest.includes('--dry-run'),
+        ...(openWindow === undefined || rest.includes('--console')
+          ? {}
+          : {
+              window: async (installDeps: InstallDeps): Promise<WindowOutcome | null> => {
+                const launch = openWindow();
+                if (launch === null) {
+                  return null;
+                }
+                return runWindowInstall(installDeps, {
+                  channel: launch.channel,
+                  powershellPath: launch.powershellPath,
+                  windowsDir: launch.windowsDir,
+                  helloWait: launch.helloWait,
+                });
+              },
+            }),
+      },
     );
   }
   if (first === 'setup') {
