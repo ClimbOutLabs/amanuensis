@@ -916,28 +916,29 @@ export class BrowserSidecar {
     if (existing !== undefined) {
       return existing;
     }
-    const starting = this.#startProfile(owner);
-    this.#profiles.set(owner, starting);
-    starting.then(
+    const starting = this.#startProfile(owner, () => {
       // A browser that went away (it crashed, or was closed) is started again on the next call.
-      profile =>
-        profile.context.on('close', () => {
-          if (this.#profiles.get(owner) === starting) {
-            this.#profiles.delete(owner);
-          }
-        }),
-      () => this.#profiles.delete(owner),
-    );
+      if (this.#profiles.get(owner) === starting) {
+        this.#profiles.delete(owner);
+      }
+    });
+    this.#profiles.set(owner, starting);
+    // A start that failed is dropped too, so the next call tries the launch again.
+    starting.then(undefined, () => this.#profiles.delete(owner));
     return starting;
   }
 
-  async #startProfile(owner) {
+  async #startProfile(owner, onClose) {
     // The page the browser starts with is never a chat's tab, and stays open: it keeps the window,
     // so the browser can still open tabs after the person closes every chat's tab.
     const { context } = await this.#launch({
       userDataDir: path.join(this.#profilesDir, ownerDirName(owner)),
       proxyServer: this.#proxyServer,
     });
+    // The close is handled from the moment the browser exists, as part of the launch itself: one
+    // that closes while the rest of the start is still being set up is dropped too, instead of
+    // leaving its profile in place for every later step to run on.
+    context.on('close', onClose);
     const profile = {
       context,
       tabs: new Map(),

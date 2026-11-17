@@ -294,11 +294,12 @@ const FAILURE_SENTENCES = {
   timeout: 'the page took too long to answer',
   navigation_failed: 'the page could not be loaded',
   page_changed: 'the page changed while Aman was using it, so read it again first',
+  page_closed: 'the page is no longer open',
   page_script_error: "the page's own code stopped it",
 } as const;
 
 const FailureReplySchema = z.object({
-  reason: z.enum(['timeout', 'navigation_failed', 'page_changed', 'page_script_error']),
+  reason: z.enum(['timeout', 'navigation_failed', 'page_changed', 'page_closed', 'page_script_error']),
 });
 
 /** The plain reason a step failed, after a colon, or empty when the sidecar gave no known one. */

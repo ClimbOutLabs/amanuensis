@@ -179,6 +179,13 @@ describe('browser capability', () => {
     expect(textOf(result)).not.toContain('evil.test');
   });
 
+  it('says a step failed because its page closed, in the words the closed answer uses', async () => {
+    const { call } = mount(() => ({ status: 500, json: { status: 'error', reason: 'page_closed' } }));
+    const result = await call('browser_read');
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("Aman's browser could not do that: the page is no longer open.");
+  });
+
   it('gives no reason for a failure it does not know', async () => {
     const { call } = mount(() => ({ status: 500, json: { status: 'error', reason: 'surprise' } }));
     const result = await call('browser_read');
