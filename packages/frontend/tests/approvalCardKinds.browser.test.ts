@@ -37,18 +37,18 @@ async function checkKinds(page: Page, width: number): Promise<void> {
   const bodyText = await page.evaluate(() => document.body.innerText);
   assert.ok(!bodyText.includes(TOKEN), 'an internal id reached the page');
 
-  // Allow leads on every kind, safe-first ones too; a safe-first card keeps its safe words on the last choice.
-  const kinds: { testId: string; no: string }[] = [
-    { testId: 'kind-calendar', no: 'Keep it' },
-    { testId: 'kind-email', no: "Don't send" },
-    { testId: 'kind-payment', no: 'Keep it' },
-    { testId: 'kind-file', no: 'Not now' },
-    { testId: 'kind-sandbox', no: 'Not now' },
+  // The yes word leads on every kind, Send on the email card and Allow on the rest; a safe-first card keeps its safe words on the last choice.
+  const kinds: { testId: string; lead: string; no: string }[] = [
+    { testId: 'kind-calendar', lead: 'Allow', no: 'Keep it' },
+    { testId: 'kind-email', lead: 'Send', no: "Don't send" },
+    { testId: 'kind-payment', lead: 'Allow', no: 'Keep it' },
+    { testId: 'kind-file', lead: 'Allow', no: 'Not now' },
+    { testId: 'kind-sandbox', lead: 'Allow', no: 'Not now' },
   ];
-  for (const { testId, no } of kinds) {
+  for (const { testId, lead, no } of kinds) {
     const card = page.getByTestId(testId);
     const order = await buttonOrder(card);
-    assert.equal(order[0], 'Allow', `${testId} does not lead with Allow: ${order.join(', ')}`);
+    assert.equal(order[0], lead, `${testId} does not lead with ${lead}: ${order.join(', ')}`);
     assert.equal(order.at(-1), no, `${testId} does not end with ${no}: ${order.join(', ')}`);
   }
 

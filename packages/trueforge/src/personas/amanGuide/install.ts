@@ -6,7 +6,7 @@ import { blobPath, writeKnowledgeBlob } from '../../personaKnowledge/knowledgeIn
 import { ensurePersonaKnowledgeRoot, personaKnowledgeLocation } from '../../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../runtime/memory/embeddingModel';
-import { amanGuidePersonaId } from './identity';
+import { AMAN_GUIDE_SOURCE_LABEL_PREFIX, amanGuidePersonaId } from './identity';
 import { AMAN_GUIDE_TOPICS } from './knowledgePack.generated';
 import type { AmanGuideTopic } from './topic';
 
@@ -21,9 +21,6 @@ export const AMAN_GUIDE_INSTRUCTIONS = [
   'When the person asks for help, their first message carries the help check. Read its `setup_steps`, its `connectors` with each `last_error`, its `sandbox_ready` and `app_version`, and say the one thing to do next. When a check line already gives a next step, give that step and no other. Never guess a state the check does not report.',
   'You cannot change anything. You cannot send email, change the calendar, make a schedule or change settings. If asked, say so and point to where the person can do it themselves.',
 ].join('\n');
-
-/** Marks the knowledge documents this module wrote, so a refresh replaces only them and never a person's own upload. */
-const GUIDE_SOURCE_PREFIX = `${AMAN_GUIDE_NAME}, build `;
 
 interface GuideKnowledgeInput {
   knowledgeDir: string;
@@ -43,7 +40,7 @@ function renderTopic(topic: { title: string; body: string }): string {
  */
 export function amanGuideTopicLabel(topic: { title: string; body: string }): string {
   const hash = createHash('sha256').update(renderTopic(topic)).digest('hex').slice(0, 16);
-  return `${GUIDE_SOURCE_PREFIX}${hash}`;
+  return `${AMAN_GUIDE_SOURCE_LABEL_PREFIX}${hash}`;
 }
 
 /**
@@ -68,7 +65,7 @@ async function refreshGuideKnowledge(input: GuideKnowledgeInput): Promise<void> 
     }
     const guideDocuments = repo
       .listDocuments()
-      .filter(document => document.source_label.startsWith(GUIDE_SOURCE_PREFIX));
+      .filter(document => document.source_label.startsWith(AMAN_GUIDE_SOURCE_LABEL_PREFIX));
     for (const document of guideDocuments) {
       const pages = missing.get(document.source_label);
       if (pages !== undefined && pages.length > 0) {

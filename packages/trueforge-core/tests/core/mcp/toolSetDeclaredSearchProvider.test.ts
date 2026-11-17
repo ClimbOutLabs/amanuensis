@@ -138,4 +138,27 @@ describe('a designated provider nobody shipped a preset for', () => {
     expect(info.search_provider_call).toBeUndefined();
     expect(info.search_result_call).toBeUndefined();
   });
+
+  it('describes the declared page reader to the model in Aman’s own words, and no other tool', async () => {
+    const { toolSet } = harness(MOON_GRANT);
+    const response = await toolSet.listTools();
+    if (!('result' in response)) {
+      throw new Error('expected a resolved listTools response');
+    }
+    const byName = new Map(response.result.tools.map(tool => [tool.name, tool.description]));
+    expect(byName.get('moon_fetch')).toBe("Read a web page's text. Use this first to read or summarise a page.");
+    expect(byName.get('moon_search')).toBe('Searches the moon archive.');
+    expect(byName.get('moon_write')).toBe('Writes to the moon archive.');
+  });
+
+  it('lists the tools with the server’s own descriptions when the server is not designated', async () => {
+    const { toolSet } = harness(undefined);
+    const response = await toolSet.listTools();
+    if (!('result' in response)) {
+      throw new Error('expected a resolved listTools response');
+    }
+    const byName = new Map(response.result.tools.map(tool => [tool.name, tool.description]));
+    expect(byName.get('moon_fetch')).toBe('Reads one moon page.');
+    expect(byName.get('moon_search')).toBe('Searches the moon archive.');
+  });
 });

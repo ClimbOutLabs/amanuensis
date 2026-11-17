@@ -179,6 +179,13 @@ describe('browser capability', () => {
     expect(textOf(result)).not.toContain('evil.test');
   });
 
+  it('says a step failed because its page closed, in the words the closed answer uses', async () => {
+    const { call } = mount(() => ({ status: 500, json: { status: 'error', reason: 'page_closed' } }));
+    const result = await call('browser_read');
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("Aman's browser could not do that: the page is no longer open.");
+  });
+
   it('gives no reason for a failure it does not know', async () => {
     const { call } = mount(() => ({ status: 500, json: { status: 'error', reason: 'surprise' } }));
     const result = await call('browser_read');
@@ -291,6 +298,18 @@ describe('browser capability', () => {
     expect(open?.description).toContain('/aman/browser-live');
   });
 
+  it('keeps the browser for pages that need one, and sends plain reading to the page reader', async () => {
+    const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
+    const response = await toolSet.listTools();
+    if (!('result' in response)) {
+      throw new Error('expected a resolved listTools response');
+    }
+    const open = response.result.tools.find(tool => tool.name === 'browser_open');
+    expect(open?.description).toContain('Use the browser when a page needs a real browser');
+    expect(open?.description).toContain('use the page reader when one is available instead');
+    expect(open?.description).not.toContain('find something on a site or open a specific page');
+  });
+
   it('registers all eight browser tools', async () => {
     const { toolSet } = mount(() => ({ json: { status: 'ok', text: '' } }));
     const response = await toolSet.listTools();
@@ -329,7 +348,7 @@ describe('browser capability', () => {
     const { sent, call } = mount(() => ({ json: { status: 'refused', reason: 'sensitive_field' } }));
     const result = await call('browser_type', { ref: 'e1', text: 'hunter2' }, checkedContext(FIELD));
     expect(result.isError).toBe(true);
-    expect(JSON.parse(textOf(result)).message).toBe(
+    expect(textOf(result)).toBe(
       'This field is for a password, a payment detail or a one-time code. Ask the person to type it themselves.',
     );
     expect(sent[0]?.url).toBe('http://browser-relay:8792/type');
@@ -389,7 +408,7 @@ describe('browser capability', () => {
       const { call } = mount(() => ({ json: { status: 'refused', reason } }));
       const result = await call('browser_click', { ref: 'e3' }, checkedContext(CHECKED));
       expect(result.isError).toBe(true);
-      expect(JSON.parse(textOf(result)).message).toBe(message);
+      expect(textOf(result)).toBe(message);
     }
   });
 
@@ -402,7 +421,7 @@ describe('browser capability', () => {
     ] as const) {
       const result = await call(name, args);
       expect(result.isError).toBe(true);
-      expect(JSON.parse(textOf(result)).message).toBe(
+      expect(textOf(result)).toBe(
         'Aman could not check that part of the page first, so it was not touched. Read the page again, then try again.',
       );
     }
@@ -413,7 +432,7 @@ describe('browser capability', () => {
     const { call } = mount(() => ({ json: { status: 'refused', reason: 'changed' } }));
     const result = await call('browser_click', { ref: 'e3' }, checkedContext(CHECKED));
     expect(result.isError).toBe(true);
-    expect(JSON.parse(textOf(result)).message).toBe(
+    expect(textOf(result)).toBe(
       'That part of the page changed after Aman checked it, so it was not touched. Read the page again, then try again.',
     );
   });
