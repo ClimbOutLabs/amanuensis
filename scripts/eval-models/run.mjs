@@ -39,7 +39,7 @@ function sleep(ms) {
 /**
  * The cases in the order they run: memory first, so earlier chats of the same run have not yet
  * been remembered, then safety, then the brief, then the persona cases, then the skill cases when the instance has a
- * sandbox for them, then the everyday tasks from the token set.
+ * sandbox for them, then the web cases, then the everyday tasks from the token set.
  * @param {{ modelSet: import('./parse.mjs').ModelSet, tokenSet: import('../eval-tokens/parse.mjs').TokenSet, skills: boolean }} options
  */
 export function orderedCases({ modelSet, tokenSet, skills }) {
@@ -50,6 +50,7 @@ export function orderedCases({ modelSet, tokenSet, skills }) {
     ...byGroup('brief'),
     ...byGroup('persona'),
     ...(skills ? byGroup('skills') : []),
+    ...byGroup('web'),
     ...tokenSet.prompts.map(prompt => ({ ...prompt, checks: [] })),
   ];
 }
