@@ -264,6 +264,7 @@ import {
   withoutEarlierThinking,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryParseCallToolWrapper, tryUnwrapCallToolInput } from './DeferredTool';
+import { ExactSourceValues } from './ExactSourceValues';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import {
   createEmptyAgentThreadMetrics,
@@ -2020,6 +2021,8 @@ export class AgentThread {
    * the tool-results append is yielded.
    */
   private taskStateToolSet: TaskStateToolSet | undefined;
+  private readonly exactSourceValues: ExactSourceValues | undefined;
+  private exactPresentationAttempted = false;
   /** Mirrored capability KV — source for toSnapshot().capability_state. */
   private capabilityState: CapabilityState = {};
   private readonly capabilityStateKeys: ReadonlySet<string>;
@@ -2115,8 +2118,17 @@ export class AgentThread {
       ...(this.toolBundles === undefined ? [] : [this.toolBundles.capability()]),
       ...(input.capabilities ?? []),
     ];
+    this.exactSourceValues =
+      input.parent === undefined && !this.definition.readOnly && (this.definition.toolSets?.length ?? 0) > 0
+        ? new ExactSourceValues(this.tracing)
+        : undefined;
     // A read-only definition offers no tools, so built-in tool sets from capabilities are withheld too.
-    this.systemToolSets = this.definition.readOnly ? [] : capabilities.flatMap(c => c.systemToolSets ?? []);
+    this.systemToolSets = this.definition.readOnly
+      ? []
+      : [
+          ...capabilities.flatMap(c => c.systemToolSets ?? []),
+          ...(this.exactSourceValues === undefined ? [] : [this.exactSourceValues]),
+        ];
     this.preLLMContextProcessors = capabilities.flatMap(c => c.preLLMProcessors ?? []);
     this.preEphemeralLLMContextProcessors = capabilities.flatMap(c => c.preLLMEphemeralProcessors ?? []);
     this.postToolCallContextProcessor = capabilities.flatMap(c => c.postToolCallProcessors ?? []);
@@ -2405,6 +2417,8 @@ export class AgentThread {
         toolGrantsAvailable: this.sentinel !== undefined,
       });
       if (messages.some(isInputUserMessage)) {
+        this.exactSourceValues?.clear();
+        this.exactPresentationAttempted = false;
         this.toolCallMemo = createToolCallMemoState();
         this.seedChatRefusals(this.toolCallMemo);
         this.callSignatureCountsThisTurn = new Map<string, number>();
@@ -3714,16 +3728,11 @@ export class AgentThread {
     tools: ConvertToolsResult['tools'],
     toolMapping: Map<string, MappedMCPTool>,
   ): ConvertToolsResult['tools'] {
-    if (this.withheldTools.length === 0) {
-      return tools;
-    }
     return tools.filter(tool => {
       const info = tool.type === 'function' ? toolMapping.get(tool.function.name) : undefined;
-      return (
-        info === undefined ||
-        !this.tfyManagedServerNames.has(info.toolSet.name) ||
-        !this.withheldTools.includes(info.originalToolName)
-      );
+      if (info === undefined) return true;
+      if (info.toolSet === this.exactSourceValues && !this.exactSourceValues.hasRows) return false;
+      return !this.tfyManagedServerNames.has(info.toolSet.name) || !this.withheldTools.includes(info.originalToolName);
     });
   }
 
@@ -4170,6 +4179,9 @@ export class AgentThread {
     }
 
     let requestBody = this.transformToLLMRequest(tools);
+    // A model may stream guesses before its presentation call arrives. Wait for the complete
+    // message before showing prose when the host offers exact rows.
+    const bufferSourceAnswer = this.exactSourceValues?.hasRows === true || this.exactPresentationAttempted;
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
@@ -4291,6 +4303,7 @@ export class AgentThread {
               id: modelMessageEventId,
               logger: this.logger,
             });
+            if (bufferSourceAnswer && event !== undefined) delete event.content;
             if (event) {
               if (!firstDeltaTimestamped) {
                 firstDeltaTimestamped = true;
@@ -4544,6 +4557,18 @@ export class AgentThread {
       });
     }
 
+    if (
+      this.exactSourceValues !== undefined &&
+      result.value.output.tool_calls?.some(
+        call => toolMapping.get(call.function.name)?.toolSet === this.exactSourceValues,
+      )
+    ) {
+      this.exactPresentationAttempted = true;
+      result.value.output.content = null;
+    } else if (this.exactPresentationAttempted && (result.value.output.tool_calls?.length ?? 0) === 0) {
+      result.value.output.content = 'I couldn’t verify those values. Ask me to look them up again.';
+    }
+
     // The person is told about leaked markup only when no write succeeded in the turn; an earlier
     // success means the reply's claim is not what this line is for.
     const replyText = assistantMessageContentToStringForSubAgent(result.value.output.content);
@@ -4586,12 +4611,14 @@ export class AgentThread {
       if (notice !== undefined) {
         const withNotice = noticeAfter({ text: replyText, notice });
         result.value.output.content = replyText + withNotice;
-        yield {
-          type: EventType.MODEL_MESSAGE_DELTA,
-          id: modelMessageEventId,
-          thread_id: this.threadId,
-          content: withNotice,
-        };
+        if (!bufferSourceAnswer) {
+          yield {
+            type: EventType.MODEL_MESSAGE_DELTA,
+            id: modelMessageEventId,
+            thread_id: this.threadId,
+            content: withNotice,
+          };
+        }
       }
       // A reply can carry one of this turn's tool results pasted as raw data instead of words.
       // The reply has already streamed, so this repairs only what is saved: the dump is swapped
@@ -4954,6 +4981,17 @@ export class AgentThread {
     }
 
     const completedWithinTokenBudget = finishReason !== 'length';
+    if (bufferSourceAnswer) {
+      const content = assistantMessageContentToStringForSubAgent(assistantMessage.content);
+      if (content !== '') {
+        yield {
+          type: EventType.MODEL_MESSAGE_DELTA,
+          id: modelMessageEventId,
+          thread_id: this.threadId,
+          content,
+        };
+      }
+    }
     yield* this.appendToContext({
       context: completedWithinTokenBudget ? [assistantMessage] : [],
       output: [agentAssistantMessage],
@@ -5367,6 +5405,14 @@ export class AgentThread {
     const repeatedUnavailableToolNames = [
       ...new Set(unavailableToolNames.filter(name => unavailableToolsSeen.has(name))),
     ];
+    const onlyCall = assistantMessage.tool_calls?.length === 1 ? openCalls[0] : undefined;
+    const exactCallId =
+      onlyCall !== undefined &&
+      this.exactSourceValues !== undefined &&
+      toolMapping.get(onlyCall.function.name)?.toolSet === this.exactSourceValues
+        ? onlyCall.id
+        : undefined;
+    this.exactSourceValues?.beginBatch(exactCallId);
     const {
       toolCallResults: executedToolCallResults,
       initializationInfo,
@@ -5569,6 +5615,8 @@ export class AgentThread {
       yield { type: InternalEventType.PASSTHROUGH, event };
     }
 
+    const exactAnswer = this.exactSourceValues?.takeAnswer();
+    const exactResult = exactCallId === undefined ? undefined : resultsById.get(exactCallId);
     const toolIdsBeforeProcessing = toolCallResults.map(t => t.message.tool_call_id);
     const toolResponseExecution: Readonly<AgentThreadExecutionContext> = {
       threadId: this.threadId,
@@ -5992,6 +6040,10 @@ export class AgentThread {
     }
     nextToolCallMemo.pendingHostNotes = [...pendingNotesByKey.values()];
 
+    const sourceRows: ReturnType<ExactSourceValues['prepare']> = [];
+    for (const result of toolCallResults) {
+      sourceRows.push(...(this.exactSourceValues?.prepare(result, sourceRows.length) ?? []));
+    }
     const canonicalToolResults = toolCallResults.map(result => buildCanonicalToolCallResult(this.threadId, result));
     const agentToolMessages: ToolResponseEventV2[] = canonicalToolResults.map(result => result.event);
     for (const msg of agentToolMessages) {
@@ -6020,6 +6072,7 @@ export class AgentThread {
       toolCallMemo: nextToolCallMemo,
       taskState: nextTaskState,
     });
+    this.exactSourceValues?.commit(sourceRows);
     // The app lists held actions from this event. It never pauses the turn: nobody is there to answer.
     const heldRefs = toolCallResults.flatMap((result): ToolApprovalRequiredEvent['tool_calls'] => {
       const call = openCalls.find(candidate => candidate.id === result.message.tool_call_id);
@@ -6269,8 +6322,40 @@ export class AgentThread {
     if (createThreadEvents.length > 0) {
       return 'exit';
     }
+    if (exactAnswer !== undefined && exactResult?.disposition === 'executed_ok' && !exactResult.failure) {
+      yield* this.finishExactSourceAnswer(exactAnswer);
+      return 'exit';
+    }
 
     return 'continue';
+  }
+
+  private *finishExactSourceAnswer(answer: string): Generator<AgentThreadEvent, void, unknown> {
+    const content = this.heldSentences.length === 0 ? answer : `${answer}\n\n${heldActionsNote(this.heldSentences)}`;
+    const assistantMessage: InternalEnrichedAssistantMessage = { role: 'assistant', content };
+    const output = buildModelMessageEvent({
+      assistantMessage,
+      threadId: this.threadId,
+      finishReason: 'stop',
+      usage: undefined,
+      id: newEventId(),
+    });
+    yield* this.appendToContext({
+      context: [assistantMessage],
+      output: [output],
+      currentContextUsage: undefined,
+      usage: undefined,
+    });
+    yield output;
+    yield {
+      type: InternalEventType.AGENT_DONE,
+      status: 'done',
+      thread_id: this.threadId,
+      title: this.title,
+      output,
+      parent: undefined,
+      send_to_parent: undefined,
+    };
   }
 
   /** Ends a turn that only answered held actions: the tool result, or the denial note, is the answer. */
