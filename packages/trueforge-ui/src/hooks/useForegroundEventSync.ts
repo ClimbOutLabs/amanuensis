@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuiState } from '@assistant-ui/react';
-import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
+import { toolInvocationRawId, useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
 import {
   APPROVAL_EXPIRY_MINUTES,
   approvalExpiredReason,
@@ -16,6 +16,7 @@ import {
   type SessionTipInfo,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { useOptionalServer } from '../server/ServerContext.js';
+import { pendingApprovalIdsOf } from '../utils/pendingApprovalIds.js';
 import { isStaleApprovalError, subscribeToStaleApproval } from '../utils/staleApproval.js';
 
 /**
@@ -90,6 +91,7 @@ type SyncPorts = {
   toaster: ReturnType<typeof useToasterOptional>;
   sessionId: string | null | undefined;
   isRunning: boolean;
+  visibleApprovals: ReadonlySet<string>;
 };
 
 function isPageHidden(): boolean {
@@ -111,7 +113,7 @@ function createChatSync({
   setStatus: (status: ChatConnectionStatus) => void;
 }) {
   let syncInFlight = false;
-  let lastTip: string | undefined;
+  let lastTip: { sessionId: string; turnId: string } | undefined;
   let resyncOwed = false;
   let lost = false;
   let failedAttempts = 0;
@@ -160,6 +162,7 @@ function createChatSync({
 
   const handleTip = async (tip: SessionTipInfo, sessionId: string, ports: SyncPorts) => {
     const { server, reload, toaster } = ports;
+    let approvalsChanged = tip.pendingApprovals.some(approval => !ports.visibleApprovals.has(approval.toolCallId));
     if (tip.pendingApprovals.length > 0) {
       const oldestMs = Math.min(...tip.pendingApprovals.map(approval => Date.parse(approval.createdAt)));
       if (
@@ -176,6 +179,7 @@ function createChatSync({
             if (isStaleApprovalError(error)) return { dismissed: 0, alreadyResolved: true };
             throw error;
           });
+        approvalsChanged = true;
         if (!result.alreadyResolved) {
           const one = result.dismissed === 1;
           toaster?.showSuccess({
@@ -186,15 +190,17 @@ function createChatSync({
           });
         }
       }
-      // Surface the approval card (or the turn the decision started) even
-      // when nothing was old enough to expire.
-      reload();
-    } else if (tip.status === 'running' || ports.isRunning || (lastTip !== undefined && tip.turnId !== lastTip)) {
-      // A reply still running may have lost its stream without an error while the page slept, and one
-      // that finished meanwhile leaves the page showing it as running until it reloads.
+    }
+    // An active reply may have lost its stream while the page slept.
+    if (
+      approvalsChanged ||
+      tip.status === 'running' ||
+      ports.isRunning ||
+      (lastTip?.sessionId === sessionId && tip.turnId !== lastTip.turnId)
+    ) {
       reload();
     }
-    lastTip = tip.turnId;
+    lastTip = { sessionId, turnId: tip.turnId };
   };
 
   const sync = () => {
@@ -227,7 +233,7 @@ function createChatSync({
           // The server answered: rebuild the chat from it. A full reload replaces what is on
           // screen, so a reply still running resumes once and pending approvals come back.
           endRecovery();
-          lastTip = tip?.turnId;
+          lastTip = tip != null && sessionId != null ? { sessionId, turnId: tip.turnId } : undefined;
           ports.reload();
           return;
         }
@@ -291,10 +297,15 @@ export function ForegroundEventSync({
   const toaster = useToasterOptional();
   const sessionId = useAuiState(state => state.threadListItem?.remoteId);
   const isRunning = useAuiState(state => state.thread.isRunning);
+  const newestMessage = useAuiState(state => state.thread.messages.at(-1));
+  const visibleApprovals = useMemo(
+    () => new Set(Array.from(pendingApprovalIdsOf(newestMessage), approvalId => toolInvocationRawId(approvalId))),
+    [newestMessage],
+  );
   const [status, setStatus] = useState<ChatConnectionStatus>('connected');
 
-  const liveRef = useRef<SyncPorts>({ server, reload, toaster, sessionId, isRunning });
-  liveRef.current = { server, reload, toaster, sessionId, isRunning };
+  const liveRef = useRef<SyncPorts>({ server, reload, toaster, sessionId, isRunning, visibleApprovals });
+  liveRef.current = { server, reload, toaster, sessionId, isRunning, visibleApprovals };
   const retryRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
@@ -312,25 +323,24 @@ export function ForegroundEventSync({
       }, FOREGROUND_SYNC_DEBOUNCE_MS);
     };
 
-    const onVisibilityChange = () => {
-      if (document.hidden) {
-        hiddenAt = Date.now();
-        chatSync.hidden();
-        return;
-      }
+    const onVisible = () => {
       const hiddenForMs = hiddenAt == null ? 0 : Date.now() - hiddenAt;
       hiddenAt = null;
       const minHiddenMs = liveRef.current.isRunning ? RUNNING_REPLY_MIN_HIDDEN_MS : FOREGROUND_SYNC_MIN_HIDDEN_MS;
       if (chatSync.visible() || hiddenForMs >= minHiddenMs) scheduleSync();
     };
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+        chatSync.hidden();
+      } else {
+        onVisible();
+      }
+    };
     // Some mobile browsers deliver focus without visibilitychange; treat a
     // focus after a recorded hide the same way.
     const onFocus = () => {
-      if (hiddenAt != null && !document.hidden) {
-        hiddenAt = null;
-        chatSync.visible();
-        scheduleSync();
-      }
+      if (hiddenAt != null && !document.hidden) onVisible();
     };
     const onPageShow = (event: PageTransitionEvent) => {
       if (event.persisted) chatSync.resync();
