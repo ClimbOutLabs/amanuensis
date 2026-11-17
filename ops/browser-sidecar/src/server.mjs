@@ -916,20 +916,31 @@ export class BrowserSidecar {
     if (existing !== undefined) {
       return existing;
     }
-    const starting = this.#startProfile(owner);
+    const starting = this.#startProfile(owner, () => {
+      // A browser that went away (it crashed, or was closed) is started again on the next call.
+      if (this.#profiles.get(owner) === starting) {
+        this.#profiles.delete(owner);
+      }
+    });
     this.#profiles.set(owner, starting);
-    starting.catch(() => this.#profiles.delete(owner));
+    // A start that failed is dropped too, so the next call tries the launch again.
+    starting.then(undefined, () => this.#profiles.delete(owner));
     return starting;
   }
 
-  async #startProfile(owner) {
-    const { context, page } = await this.#launch({
+  async #startProfile(owner, onClose) {
+    // The page the browser starts with is never a chat's tab, and stays open: it keeps the window,
+    // so the browser can still open tabs after the person closes every chat's tab.
+    const { context } = await this.#launch({
       userDataDir: path.join(this.#profilesDir, ownerDirName(owner)),
       proxyServer: this.#proxyServer,
     });
+    // The close is handled from the moment the browser exists, as part of the launch itself: one
+    // that closes while the rest of the start is still being set up is dropped too, instead of
+    // leaving its profile in place for every later step to run on.
+    context.on('close', onClose);
     const profile = {
       context,
-      spare: page,
       tabs: new Map(),
       tabsByPage: new Map(),
       opening: Promise.resolve(),
@@ -957,19 +968,29 @@ export class BrowserSidecar {
       const existing = profile.tabs.get(tabId);
       if (existing !== undefined) {
         profile.tabs.delete(tabId);
-        profile.tabs.set(tabId, existing);
-        return existing;
+        if (!existing.page.isClosed()) {
+          profile.tabs.set(tabId, existing);
+          return existing;
+        }
+        // The page closed some other way than through the sidecar (the person or the page closed it,
+        // or it crashed) before its close was seen: the chat has no tab, and an open makes a fresh one.
+        profile.tabsByPage.delete(existing.page);
       }
       if (!create) {
         return undefined;
       }
-      const page = profile.spare ?? (await profile.context.newPage());
-      profile.spare = undefined;
+      const page = await profile.context.newPage();
       // A download never opens in the browser; refusing it keeps the tab from navigating to a file.
       page.on('download', download => {
         download.cancel().catch(() => undefined);
       });
       const tab = createTab({ page, cdp: await profile.context.newCDPSession(page) });
+      page.on('close', () => {
+        if (profile.tabs.get(tabId) === tab) {
+          profile.tabs.delete(tabId);
+        }
+        profile.tabsByPage.delete(page);
+      });
       // A file picker never opens on the virtual screen; the live view fills it with the person's file.
       page.on('filechooser', chooser => {
         tab.fileChooser = chooser;
@@ -1680,7 +1701,10 @@ export function failureReason(error) {
   if (/net::ERR_|NS_ERROR_|Navigation failed/.test(message)) {
     return 'navigation_failed';
   }
-  if (/not attached|detached|Target page, context or browser has been closed|Target closed/i.test(message)) {
+  if (/Target page, context or browser has been closed|Target closed|Session closed|Page closed/i.test(message)) {
+    return 'page_closed';
+  }
+  if (/not attached|detached/i.test(message)) {
     return 'page_changed';
   }
   if (/^(page|frame|locator)\.evaluate:/.test(message) || /Execution context was destroyed/.test(message)) {
@@ -1706,12 +1730,17 @@ async function handleRequest({ req, res, sidecar }) {
     const result = await route(sidecar, { owner: body.owner, tab: body.tab }, body);
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
   } catch (error) {
+    const reason = failureReason(error);
+    // The chat's page closed while the step ran: that is the same answer as a chat with no tab, so
+    // the app tells the model to open the page again rather than to retry a page that is gone.
+    if (reason === 'page_closed' && req.url !== '/live/tabs') {
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(NO_TAB));
+      return;
+    }
     // The full message stays in the sidecar's own log; the caller gets only the fixed reason.
     process.stderr.write(
       `browser sidecar: ${req.url} failed: ${error instanceof Error ? error.message : String(error)}\n`,
     );
-    res
-      .writeHead(500, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ status: 'error', reason: failureReason(error) }));
+    res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'error', reason }));
   }
 }
