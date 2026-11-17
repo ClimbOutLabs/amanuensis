@@ -262,8 +262,8 @@ export function withGatewayMetadataHeaders(input: {
   if (typeof headers !== 'function') {
     return { ...headers, ...metadataHeaders };
   }
-  return async () => {
-    const result = await headers();
+  return async challenge => {
+    const result = await headers(challenge);
     if ('authRequired' in result) {
       return result;
     }
@@ -484,9 +484,16 @@ function dcrHeadersResolver(params: {
   mcpServerStore: IMcpServerStore;
   clientName: string;
   userRef: string;
+  autoDetect?: boolean | undefined;
 }): RemoteMcpHeaders {
   const { record, tokenStore, mcpServerStore, clientName, userRef } = params;
-  return async () => {
+  return async challenge => {
+    if (params.autoDetect && challenge === undefined) {
+      const token = await tokenStore.getToken({ id: record.id, userRef });
+      if (token === undefined && (await mcpServerStore.getClient({ id: record.id })) === undefined) {
+        return { headers: {} };
+      }
+    }
     const manifestAuthType = record.manifest.auth?.type;
     const authType: 'dcr' | 'oauth_client' = manifestAuthType === 'oauth_client' ? 'oauth_client' : 'dcr';
     const oauthParams =
@@ -505,6 +512,12 @@ function dcrHeadersResolver(params: {
       mcpServerName: record.name,
       clientName,
       authType,
+      resourceMetadataUrl: challenge?.resourceMetadataUrl,
+      scope:
+        record.manifest.auth?.type === 'oauth_client' && record.manifest.auth.scopes?.length
+          ? record.manifest.auth.scopes.join(' ')
+          : challenge?.scope,
+      forceRefresh: challenge !== undefined,
       ...oauthParams,
     });
     if (isMcpAuthRequired(result)) {
@@ -610,6 +623,22 @@ export async function getMcpConnection({
         clientName,
         userRef,
       }),
+      first_party: firstParty,
+      search_provider: searchProvider,
+      declared_change_tools: declaredChangeTools,
+      grant_binding: grantBinding,
+    };
+  }
+  if (
+    record.manifest.type === 'remote' &&
+    record.manifest.auth === undefined &&
+    !firstParty &&
+    tokenStore !== undefined &&
+    clientName !== undefined
+  ) {
+    return {
+      url: record.manifest.url,
+      headers: dcrHeadersResolver({ record, tokenStore, mcpServerStore: store, clientName, userRef, autoDetect: true }),
       first_party: firstParty,
       search_provider: searchProvider,
       declared_change_tools: declaredChangeTools,

@@ -14,6 +14,11 @@ import { getMcpConnection, RemoteAddressRefusedError } from '../../../src/runtim
 // resolve, localhost resolves to loopback, and every other name resolves to a public address.
 // The address check at connection time judges names by what they resolve to, so the suite's
 // answer cannot depend on the DNS of the machine running it.
+jest.mock('node:os', () => ({
+  ...jest.requireActual<typeof import('node:os')>('node:os'),
+  networkInterfaces: () => ({}),
+}));
+
 jest.mock('node:dns/promises', () => {
   const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
   return {

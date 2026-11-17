@@ -565,12 +565,15 @@ const ConnectorSettings = () => {
         ? homeAssistantChecker({ id: connector.id }).then(homeAssistantCheckMessage)
         : connectionTester === undefined
           ? Promise.reject(new Error('The connection test is not available'))
-          : connectionTester({ id: connector.id }).then(result => ({
-              ok: result.ok,
-              message: result.ok
-                ? connectionTestSuccessMessage(result.toolNames.length)
-                : connectionTestFailureMessage(result),
-            }));
+          : connectionTester({ id: connector.id }).then(result => {
+              if (!result.ok && result.kind === 'auth_required' && isCurrent()) void refresh();
+              return {
+                ok: result.ok,
+                message: result.ok
+                  ? connectionTestSuccessMessage(result.toolNames.length)
+                  : connectionTestFailureMessage(result),
+              };
+            });
     void status
       .then(result => {
         if (!isCurrent()) return;

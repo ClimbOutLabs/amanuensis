@@ -213,7 +213,10 @@ export function toUiTool(tool: Record<string, unknown>): ToolBase & { annotation
 
 export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConnector {
   const manifest = server.manifest;
-  const auth = toUiAuthPublic(manifest.auth);
+  const auth =
+    manifest.type === 'remote' && manifest.auth === undefined && server.authStatus.status !== 'not_required'
+      ? { type: 'dcr' as const }
+      : toUiAuthPublic(manifest.auth);
   const remote = manifest.type === 'remote' ? manifest : undefined;
   const searchProvider = remote?.searchProvider;
   return {
@@ -229,7 +232,10 @@ export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConne
 }
 
 export function toUiConnectorFromReadEntry(server: TrueForgeApi.AvailableMcpServer): UiConnector {
-  const auth = toUiAuthPublic(server.auth);
+  const auth =
+    server.auth === undefined && server.authStatus.status !== 'not_required'
+      ? { type: 'dcr' as const }
+      : toUiAuthPublic(server.auth);
   return {
     id: server.name,
     name: server.name,
@@ -376,7 +382,14 @@ export function createConnectorCatalog(
       return toUiConnector(body.data);
     },
     updateConnector: async req => {
-      const auth = await resolveWriteAuth({ id: req.id, auth: req.auth });
+      const existing = await getConfigured(req.id);
+      const auth =
+        existing.manifest.type === 'remote' &&
+        existing.manifest.auth === undefined &&
+        existing.authStatus.status !== 'not_required' &&
+        req.auth.type === 'dcr'
+          ? { type: 'none' as const }
+          : await resolveWriteAuth({ id: req.id, auth: req.auth });
       const body = await client.settings.mcpServers.createOrUpdate({
         manifest: toHarnessManifest({
           name: req.id,
@@ -397,7 +410,14 @@ export function createConnectorCatalog(
     },
     disconnectConnector: async req => {
       const existing = await getConfigured(req.id);
-      if (existing.manifest.auth?.type !== 'dcr') {
+      if (
+        existing.manifest.auth?.type !== 'dcr' &&
+        !(
+          existing.manifest.type === 'remote' &&
+          existing.manifest.auth === undefined &&
+          existing.authStatus.status !== 'not_required'
+        )
+      ) {
         throw new Error(`Disconnect is only supported for OAuth MCP servers`);
       }
       const body = await client.mcpServers.deleteAuthorization(req.id);

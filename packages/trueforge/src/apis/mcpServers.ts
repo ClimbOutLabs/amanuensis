@@ -523,11 +523,11 @@ export function createSettingsMcpServersRouter<TTransaction>(
           clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
         });
       } catch (error) {
-        deps.logger.error(
-          `DCR client registration failed for "${incomingManifest.name}"; rejecting create`,
-          extractErrorLogFields(error),
-        );
-        const message = error instanceof Error ? error.message : 'Failed to register OAuth client for this MCP server';
+        deps.logger.error(`DCR client registration failed for "${incomingManifest.name}"; rejecting create`);
+        const message =
+          error instanceof McpConnectionError
+            ? error.message
+            : 'Could not set up sign-in. Check the connector settings.';
         return c.json({ error: { message } }, 422);
       }
     }
@@ -691,15 +691,16 @@ export function createSettingsMcpServersRouter<TTransaction>(
           existing: existing?.manifest,
         });
         let dcrClientToSave: OAuthClientRecord | undefined;
-        const urlChanged =
-          existing !== undefined && existing.manifest.url !== manifest.url && manifest.auth?.type === 'dcr';
+        const urlChanged = existing !== undefined && existing.manifest.url !== manifest.url;
+        const authChanged =
+          existing !== undefined && JSON.stringify(existing.manifest.auth) !== JSON.stringify(manifest.auth);
         if (manifest.auth?.type === 'dcr') {
           const existingClient = existing
             ? await deps.resolveMcpServerStore(c).getClient({ id: existing.id }, transaction)
             : undefined;
           // Register when: brand-new server, client was cleared (e.g. invalid_client), or MCP URL changed
           // (resource/AS may differ; reuse would keep stale oauth_server/client for the old AS).
-          const needsDcr = existingClient === undefined || urlChanged;
+          const needsDcr = existingClient === undefined || urlChanged || authChanged;
           if (needsDcr) {
             dcrClientToSave = await createMcpOAuthClient({
               mcpServerUrl: manifest.url,
@@ -723,8 +724,11 @@ export function createSettingsMcpServersRouter<TTransaction>(
           // New DCR registration (create, missing client, or URL change): replace the shared client.
           await deps.resolveMcpServerStore(c).saveClient({ id: saved.id, record: dcrClientToSave }, transaction);
         }
-        if (urlChanged) {
-          // URL is the OAuth resource/audience — drop every user's tokens and in-flight authorizes.
+        if (urlChanged || authChanged) {
+          if (dcrClientToSave === undefined) {
+            await deps.resolveMcpServerStore(c).deleteClient({ id: saved.id }, transaction);
+          }
+          // A changed address or sign-in cannot reuse grants for the previous setup.
           await deps.tokenStore.deleteTokensForServer({ id: saved.id }, transaction);
           await deps.tokenStore.deletePendingAuthorizationsForServer({ id: saved.id }, transaction);
         }
@@ -754,10 +758,7 @@ export function createSettingsMcpServersRouter<TTransaction>(
         return c.json({ error: { message: 'Header secret is required' } }, 400);
       }
       if (error instanceof McpConnectionError) {
-        deps.logger.error(
-          `DCR client registration failed for "${incomingManifest.name}"; rejecting upsert`,
-          extractErrorLogFields(error),
-        );
+        deps.logger.error(`DCR client registration failed for "${incomingManifest.name}"; rejecting upsert`);
         return c.json({ error: { message: error.message } }, 422);
       }
       throw error;
@@ -842,7 +843,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
         return c.json({ error: { message: error.message } }, 404);
       }
       if (error instanceof McpConnectionError) {
-        deps.logger.warn(`MCP authorize failed for "${name}"`, extractErrorLogFields(error));
+        deps.logger.warn(`MCP authorize failed for "${name}"`);
         if (error.statusCode === 400) {
           return c.json({ error: { message: error.message } }, 400);
         }
@@ -854,7 +855,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
         }
         return c.json({ error: { message: error.message } }, 500);
       }
-      deps.logger.error(`MCP authorize unexpected failure for "${name}"`, extractErrorLogFields(error));
+      deps.logger.error(`MCP authorize unexpected failure for "${name}"`);
       return c.json({ error: { message: 'Internal server error' } }, 500);
     }
   };
@@ -872,6 +873,8 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
         tenant_id: requestContext.tenant_id,
         name,
         store: deps.resolveMcpServerStore(c),
+        tokenStore: deps.tokenStore,
+        clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
         userRef,
       });
     } catch (error) {
@@ -1038,6 +1041,9 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     } catch (error) {
       if (error instanceof McpServerNotFoundError) {
         return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof McpConnectionError && error.statusCode === 424) {
+        return c.json({ error: { message: error.message } }, 424);
       }
       throw error;
     }

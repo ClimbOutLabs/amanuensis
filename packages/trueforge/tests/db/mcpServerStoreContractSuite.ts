@@ -21,6 +21,10 @@ function manifest(overrides: Partial<RemoteMcpServerManifest> = {}): RemoteMcpSe
 
 const sampleOAuthClient: OAuthClientRecord = {
   server: {
+    issuer: 'https://auth.example.com',
+    issuerResponseRequired: false,
+    resource: null,
+    revocation: null,
     authorizationEndpoint: 'https://auth.example.com/authorize',
     tokenEndpoint: 'https://auth.example.com/token',
     codeChallengeMethodsSupported: ['S256'],
@@ -28,6 +32,7 @@ const sampleOAuthClient: OAuthClientRecord = {
   client: {
     clientId: 'client-1',
     clientSecret: 'secret-1',
+    tokenAuthMethod: 'client_secret_post',
   },
 };
 

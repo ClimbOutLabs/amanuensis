@@ -97,7 +97,7 @@ The address can be on the internet or on your home network. A service on the sam
 2. Type a **Name** and a short **Description**.
 3. Paste the address in **URL**.
 4. Under **Auth type**, choose how the service signs in. The service's own help says which one to pick:
-    - **None:** the service needs no sign-in.
+    - **None:** start without sign-in. If the service asks you to sign in, Aman can offer a sign-in window when the service supports automatic setup.
     - **API key:** paste the key or token from the service. **Header name** is optional. Leave it empty unless the service names one.
     - **OAuth (automatic):** you sign in through a window, and Aman sets up the rest.
     - **OAuth (manual):** paste the **Client ID** and **Client Secret** from the service. **Scopes** are optional.
@@ -122,7 +122,7 @@ Choose which connectors a chat uses from the message box. In a new chat, your ch
 
 - **Change it:** click **Edit** next to the connector, change the address or key, and click **Save**. Leave the key empty to keep the current one.
 - **See its tools:** click the connector to open it. The page lists its tools, and the tools you allowed for good under **Always allowed**. Click **Revoke** to take one back.
-- **Sign out:** open a connector that uses a sign-in window and click **Disconnect**.
+- **Sign out:** open a connector that uses a sign-in window and click **Disconnect**. Aman removes its saved sign-in and asks the service to revoke access when the service provides that option. If the service does not provide it, remove access in the service settings too.
 - **Remove it:** click **Delete**, then **Delete** again. Chats that used it show it as unavailable until you remove it there.
 
 ## Which tools ask first
@@ -192,7 +192,7 @@ Placing the pins is its own step and always asks, because the addresses are sent
     - **OAuth (automatic, Dynamic Client Registration):** Aman registers itself with the service, runs the sign-in, and stores and refreshes the tokens. Nobody pastes tokens into a chat.
     - **OAuth (manual):** the same, with a client you registered with the service yourself.
 
-    Keys and sign-ins are stored with the connector, never in an agent. Agents attach connectors by name.
+    Keys and sign-ins are stored with the connector, never in an agent. Agents attach connectors by name. The database stores them unencrypted, so keep its data folder and backups private.
 
 ??? note "Which addresses a connector may use"
 
@@ -203,7 +203,7 @@ Placing the pins is its own step and always asks, because the addresses are sent
     - When Aman runs in a container, every address on the container networks it sits on is refused too. The other members of those networks are Aman's own parts.
     - The check looks at the addresses a name points to, not just the name. A name that points to a refused address is refused.
     - A name that can't be looked up when the connector connects is refused, because it can't be checked.
-    - For OAuth sign-in, the addresses the service names for sign-in are checked the same way before Aman connects to them. That includes every address a sign-in answer redirects to.
+    - For OAuth sign-in, the service must use https for its sign-in addresses. Aman checks those addresses the same way before connecting to them. Discovery redirects are checked too. A sign-in request that carries credentials is stopped if the service redirects it; check the connector settings if that happens.
 
     Whoever runs Aman can still allow one exact service on the same computer. List its origin in the `FIRST_PARTY_MCP_ORIGINS` setting (see `packages/trueforge/.env.example`). That marks it as the operator's own service, and the check doesn't second-guess it. It gives the service no other trust: its tools still ask before they run, like any connector you add.
 

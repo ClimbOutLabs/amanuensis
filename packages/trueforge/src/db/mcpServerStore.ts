@@ -139,6 +139,10 @@ export const PENDING_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
 
 /** RFC 8414 AS metadata cached at DCR time (`mcp_server.oauth_server`). */
 export interface OAuthServer {
+  issuer: string | null;
+  issuer_response_required: boolean | undefined;
+  resource: string | null;
+  revocation: { endpoint: string; auth_methods: string[] | null } | null;
   authorization_endpoint: string;
   token_endpoint: string;
   code_challenge_methods_supported: string[] | null;
@@ -148,6 +152,7 @@ export interface OAuthServer {
 export interface OAuthClient {
   client_id: string;
   client_secret: string | null;
+  token_auth_method: 'none' | 'client_secret_basic' | 'client_secret_post' | undefined;
 }
 
 /** `oauth_pending_authorization.auth_data` JSONB. */
@@ -155,6 +160,7 @@ export interface OAuthPendingAuthorizationData {
   /** MCP server URL from authorize time — needed by the shared callback for RFC 8707 `resource`. */
   mcp_server_url: string;
   code_verifier: string | null;
+  redirect_uri: string | null;
   return_to: string | null;
 }
 
@@ -191,6 +197,13 @@ export function toStoredOAuthClientRecord(record: ContractOAuthClientRecord): {
 } {
   return {
     server: {
+      issuer: record.server.issuer,
+      issuer_response_required: record.server.issuerResponseRequired,
+      resource: record.server.resource,
+      revocation:
+        record.server.revocation === null
+          ? null
+          : { endpoint: record.server.revocation.endpoint, auth_methods: record.server.revocation.authMethods },
       authorization_endpoint: record.server.authorizationEndpoint,
       token_endpoint: record.server.tokenEndpoint,
       code_challenge_methods_supported: record.server.codeChallengeMethodsSupported,
@@ -198,6 +211,7 @@ export function toStoredOAuthClientRecord(record: ContractOAuthClientRecord): {
     client: {
       client_id: record.client.clientId,
       client_secret: record.client.clientSecret,
+      token_auth_method: record.client.tokenAuthMethod,
     },
   };
 }
@@ -208,6 +222,13 @@ export function fromStoredOAuthClientRecord(params: {
 }): ContractOAuthClientRecord {
   return {
     server: {
+      issuer: params.server.issuer ?? null,
+      issuerResponseRequired: params.server.issuer_response_required ?? false,
+      resource: params.server.resource ?? null,
+      revocation:
+        params.server.revocation == null
+          ? null
+          : { endpoint: params.server.revocation.endpoint, authMethods: params.server.revocation.auth_methods },
       authorizationEndpoint: params.server.authorization_endpoint,
       tokenEndpoint: params.server.token_endpoint,
       codeChallengeMethodsSupported: params.server.code_challenge_methods_supported,
@@ -215,6 +236,8 @@ export function fromStoredOAuthClientRecord(params: {
     client: {
       clientId: params.client.client_id,
       clientSecret: params.client.client_secret,
+      tokenAuthMethod:
+        params.client.token_auth_method ?? (params.client.client_secret === null ? 'none' : 'client_secret_post'),
     },
   };
 }
@@ -226,16 +249,18 @@ export function toStoredOAuthPendingAuthorizationData(
   return {
     mcp_server_url: pending.mcpServerUrl,
     code_verifier: pending.codeVerifier,
+    redirect_uri: pending.redirectUri,
     return_to: pending.returnTo,
   };
 }
 
 export function fromStoredOAuthPendingAuthorizationData(
   stored: OAuthPendingAuthorizationData,
-): Pick<ContractOAuthPendingAuthorization, 'mcpServerUrl' | 'codeVerifier' | 'returnTo'> {
+): Pick<ContractOAuthPendingAuthorization, 'mcpServerUrl' | 'codeVerifier' | 'redirectUri' | 'returnTo'> {
   return {
     mcpServerUrl: stored.mcp_server_url,
     codeVerifier: stored.code_verifier,
+    redirectUri: stored.redirect_uri ?? null,
     returnTo: stored.return_to,
   };
 }
