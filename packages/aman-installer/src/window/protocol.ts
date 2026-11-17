@@ -29,6 +29,7 @@ export interface WindowWords {
   phoneYes: string;
   phoneNo: string;
   detailsLabel: string;
+  markLabels: readonly string[];
   closeTitle: string;
   closeQuestion: string;
 }

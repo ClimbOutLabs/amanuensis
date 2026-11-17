@@ -1023,6 +1023,7 @@ export const WINDOW_INSTALL = 'Install';
 export const WINDOW_TRY_AGAIN = 'Try again';
 export const WINDOW_CLOSE = 'Close';
 export const WINDOW_DETAILS = 'Show details';
+export const WINDOW_MARK_LABELS: readonly string[] = ['Not started', 'In progress', 'Done', 'Needs attention'];
 
 export const WINDOW_CLOSE_QUESTION =
   'Amanuensis is still installing. If you close this window, the setup screens close, but the install keeps going. Close it?';
@@ -1030,14 +1031,14 @@ export const WINDOW_CLOSE_QUESTION =
 export const WINDOW_WELCOME_TITLE = 'Welcome to Amanuensis';
 
 export const WINDOW_WELCOME_LINES: readonly string[] = [
-  'Setup will install Amanuensis, your personal assistant, on this computer.',
-  'The first install may take a while, depending on your internet connection.',
+  'Set up Amanuensis, your personal assistant, on this computer.',
+  'Setup can take a while, depending on your internet connection.',
 ];
 
 export const WINDOW_CHECK_TITLE = 'Checking this computer';
 
 export const WINDOW_CHECK_LINES: readonly string[] = [
-  'Setup installs Docker Desktop if it is missing. Windows may ask for permission first.',
+  'Amanuensis needs Docker Desktop to run. If it is missing, setup will install it and Windows may ask for permission.',
 ];
 
 export const WINDOW_CHECK_READY_LINE = 'This computer is ready for Amanuensis.';
@@ -1047,7 +1048,7 @@ export const WINDOW_CHECK_MEMORY_ROW = 'Docker Desktop has what Amanuensis needs
 
 export const WINDOW_ABOUT_TITLE = 'Create your sign-in';
 
-export const WINDOW_ABOUT_LINES: readonly string[] = ['You sign in to Amanuensis with this email and password.'];
+export const WINDOW_ABOUT_LINES: readonly string[] = ['Use this email and password to sign in to Amanuensis.'];
 
 export const WINDOW_EMAIL_LABEL = 'Your email';
 export const WINDOW_PASSWORD_LABEL = 'Choose a password';
@@ -1070,7 +1071,7 @@ export const WINDOW_EMAIL_PROBLEM = 'Type your email address, like name@example.
 export const WINDOW_OPTIONS_TITLE = 'Use Amanuensis on your phone?';
 
 export const WINDOW_OPTIONS_LINES: readonly string[] = [
-  'Amanuensis can also open on your phone and other devices on your home Wi-Fi. If you choose yes, Windows asks once for permission.',
+  'You can use Amanuensis on your phone and other devices on your home Wi-Fi. If you choose yes, Windows will ask for permission to change the firewall.',
 ];
 
 export const WINDOW_PHONE_YES = 'Yes, on my home Wi-Fi';
@@ -1079,7 +1080,7 @@ export const WINDOW_PHONE_NO = 'No, only this computer';
 export const WINDOW_REVIEW_TITLE = 'Ready to install';
 
 export const WINDOW_REVIEW_LINES: readonly string[] = [
-  'Choose Install to start. Windows may ask you to allow one or two steps.',
+  'Check your choices below, then choose Install. Windows may ask for permission during setup.',
 ];
 
 export function windowReviewEmailRow(email: string): string {
@@ -1095,21 +1096,22 @@ export const WINDOW_REVIEW_ROWS: readonly string[] = [
 
 export const WINDOW_REVIEW_PHONE_ROW =
   'Open Amanuensis to your home Wi-Fi. Windows asks you to allow a firewall change.';
+export const WINDOW_REVIEW_NO_PHONE_ROW = 'Use Amanuensis only on this computer';
 
 export const WINDOW_INSTALL_TITLE = 'Installing Amanuensis';
 
 export const WINDOW_INSTALL_LINES: readonly string[] = [
-  'The first install may take a while, depending on your internet connection. You can keep using this computer meanwhile.',
+  'Setup may take a while, depending on your internet connection. You can keep using this computer while you wait.',
 ];
 
 export const WINDOW_STAGE_ROWS: Readonly<Record<string, string>> = {
-  download: 'Downloading the newest Amanuensis...',
-  install: 'Building and setting up Amanuensis. This takes the longest.',
-  shortcuts: 'Adding Amanuensis to the Start menu...',
-  update: 'Checking for a newer setup program...',
-  private: 'Making the Amanuensis folder private to you...',
-  open: 'Opening Amanuensis in your browser...',
-  phone: 'Opening Amanuensis to your home Wi-Fi...',
+  download: 'Download the newest Amanuensis',
+  install: 'Build and set up Amanuensis. This takes the longest.',
+  shortcuts: 'Add Amanuensis to the Start menu',
+  update: 'Check for a newer setup program',
+  private: 'Make the Amanuensis folder private to you',
+  open: 'Open Amanuensis in your browser',
+  phone: 'Open Amanuensis to your home Wi-Fi',
 };
 
 export const WINDOW_DONE_TITLE = 'Amanuensis is ready';
@@ -1123,7 +1125,7 @@ export const WINDOW_STOPPED_TITLE = 'Setup stopped';
 
 export const WINDOW_STOPPED_LINES: readonly string[] = [
   "Amanuensis isn't fully set up yet. The problem and the next step are below.",
-  'Open Amanuensis Setup again and choose Try again. It picks up where it stopped.',
+  'After following the next step, open Amanuensis Setup again. It picks up where it stopped.',
 ];
 
 export const WINDOW_OPEN_LINE =
@@ -1150,6 +1152,7 @@ export function windowMessageLines(): string[] {
     WINDOW_TRY_AGAIN,
     WINDOW_CLOSE,
     WINDOW_DETAILS,
+    ...WINDOW_MARK_LABELS,
     WINDOW_CLOSE_QUESTION,
     WINDOW_WELCOME_TITLE,
     ...WINDOW_WELCOME_LINES,
@@ -1175,6 +1178,7 @@ export function windowMessageLines(): string[] {
     windowReviewEmailRow('friend@example.com'),
     ...WINDOW_REVIEW_ROWS,
     WINDOW_REVIEW_PHONE_ROW,
+    WINDOW_REVIEW_NO_PHONE_ROW,
     WINDOW_INSTALL_TITLE,
     ...WINDOW_INSTALL_LINES,
     ...Object.values(WINDOW_STAGE_ROWS),

@@ -49,6 +49,7 @@ $S = @{
   ended = $false
   confirmClose = $false
   panel = 'none'
+  screen = 'none'
   rows = @{}
   words = $null
   ruleOk = $false
@@ -128,7 +129,7 @@ $xaml = @'
         <RowDefinition Height="Auto"/>
       </Grid.RowDefinitions>
       <TextBlock x:Name="Title" Grid.Row="0" FontSize="25" FontWeight="SemiBold" Foreground="#FF1B2630" TextWrapping="Wrap" Margin="0,0,0,14"/>
-      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Focusable="False">
+      <ScrollViewer x:Name="ContentScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="0,0,8,0">
           <TextBlock x:Name="Body" TextWrapping="Wrap" LineHeight="22" Foreground="#FF2B3640"/>
           <StackPanel x:Name="Rows" Margin="0,14,0,0"/>
@@ -137,12 +138,12 @@ $xaml = @'
             <TextBox x:Name="EmailBox" MaxLength="254" Padding="6,5" Margin="0,0,0,14"/>
             <TextBlock x:Name="PasswordLabel" FontWeight="SemiBold" Margin="0,0,0,4"/>
             <PasswordBox x:Name="PassBox" MaxLength="72" Padding="6,5" Margin="0,0,0,8"/>
-            <TextBlock x:Name="Rule0" Margin="0,1"/>
-            <TextBlock x:Name="Rule1" Margin="0,1"/>
-            <TextBlock x:Name="Rule2" Margin="0,1"/>
+            <TextBlock x:Name="Rule0" TextWrapping="Wrap" Margin="0,1"/>
+            <TextBlock x:Name="Rule1" TextWrapping="Wrap" Margin="0,1"/>
+            <TextBlock x:Name="Rule2" TextWrapping="Wrap" Margin="0,1"/>
             <TextBlock x:Name="AgainLabel" FontWeight="SemiBold" Margin="0,12,0,4"/>
             <PasswordBox x:Name="AgainBox" MaxLength="72" Padding="6,5" Margin="0,0,0,8"/>
-            <TextBlock x:Name="Rule3" Margin="0,1"/>
+            <TextBlock x:Name="Rule3" TextWrapping="Wrap" Margin="0,1"/>
             <TextBlock x:Name="KeepLine" TextWrapping="Wrap" Foreground="#FF55606A" Margin="0,12,0,0"/>
           </StackPanel>
           <StackPanel x:Name="OptionsPanel" Visibility="Collapsed" Margin="0,16,0,0">
@@ -153,9 +154,9 @@ $xaml = @'
             <TextBox x:Name="DetailsText" IsReadOnly="True" Height="150" Margin="0,6,0,0"
                      VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12"/>
           </Expander>
+          <TextBlock x:Name="Problem" Foreground="#FF9B241C" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,12,0,0"/>
         </StackPanel>
       </ScrollViewer>
-      <TextBlock x:Name="Problem" Grid.Row="2" Foreground="#FFB3261E" TextWrapping="Wrap" Margin="0,12,0,0"/>
       <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
         <Button x:Name="BackButton" MinWidth="96" Padding="14,7" Margin="0,0,10,0" Visibility="Collapsed"/>
         <Button x:Name="NextButton" MinWidth="124" Padding="14,7" IsDefault="True" Visibility="Collapsed"/>
@@ -167,7 +168,7 @@ $xaml = @'
 
 $window = [Windows.Markup.XamlReader]::Parse($xaml)
 $ui = @{}
-foreach ($name in @('Brand','Steps','Title','Body','Rows','AboutPanel','EmailLabel','EmailBox','PasswordLabel','PassBox','Rule0','Rule1','Rule2','Rule3','AgainLabel','AgainBox','KeepLine','OptionsPanel','PhoneYes','PhoneNo','Details','DetailsText','Problem','BackButton','NextButton')) {
+foreach ($name in @('Brand','Steps','Title','Body','ContentScroll','Rows','AboutPanel','EmailLabel','EmailBox','PasswordLabel','PassBox','Rule0','Rule1','Rule2','Rule3','AgainLabel','AgainBox','KeepLine','OptionsPanel','PhoneYes','PhoneNo','Details','DetailsText','Problem','BackButton','NextButton')) {
   $ui[$name] = $window.FindName($name)
 }
 
@@ -178,16 +179,25 @@ $markFailed = [string][char]0x2715
 $brushOk = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb(0x1E, 0x7D, 0x4F))
 $brushBad = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb(0xB3, 0x26, 0x1E))
 $brushPlain = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb(0x2B, 0x36, 0x40))
-$brushQuiet = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb(0x8A, 0x97, 0xA3))
+$brushQuiet = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb(0x61, 0x6D, 0x77))
+$brushRailQuiet = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb(0xB7, 0xC4, 0xCF))
 $brushWhite = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb(0xFF, 0xFF, 0xFF))
 $visible = [Windows.Visibility]::Visible
 $collapsed = [Windows.Visibility]::Collapsed
 
 function Set-Mark($block, [string]$label, [string]$mark) {
-  if ($mark -eq 'done') { $block.Text = $markDone + '  ' + $label; $block.Foreground = $brushOk }
-  elseif ($mark -eq 'failed') { $block.Text = $markFailed + '  ' + $label; $block.Foreground = $brushBad }
-  elseif ($mark -eq 'doing') { $block.Text = $markDoing + '  ' + $label; $block.Foreground = $brushPlain; $block.FontWeight = [Windows.FontWeights]::SemiBold; return }
-  else { $block.Text = $markTodo + '  ' + $label; $block.Foreground = $brushQuiet }
+  $index = 0
+  if ($mark -eq 'doing') { $index = 1 }
+  elseif ($mark -eq 'done') { $index = 2 }
+  elseif ($mark -eq 'failed') { $index = 3 }
+  if ($S.screen -eq 'review') { [Windows.Automation.AutomationProperties]::SetName($block, $label) }
+  else { [Windows.Automation.AutomationProperties]::SetName($block, ([string]$S.words['markLabels'][$index] + ': ' + $label)) }
+  $display = $label
+  if ($S.screen -eq 'check' -or $S.screen -eq 'install' -or $S.screen -eq 'stopped') { $display = [string]$S.words['markLabels'][$index] + ': ' + $label }
+  if ($mark -eq 'done') { $block.Text = $markDone + '  ' + $display; $block.Foreground = $brushOk }
+  elseif ($mark -eq 'failed') { $block.Text = $markFailed + '  ' + $display; $block.Foreground = $brushBad }
+  elseif ($mark -eq 'doing') { $block.Text = $markDoing + '  ' + $display; $block.Foreground = $brushPlain; $block.FontWeight = [Windows.FontWeights]::SemiBold; return }
+  else { $block.Text = $markTodo + '  ' + $display; $block.Foreground = $brushQuiet }
   $block.FontWeight = [Windows.FontWeights]::Normal
 }
 
@@ -198,9 +208,9 @@ function Show-Steps([int]$current) {
     $block = [Windows.Controls.TextBlock]::new()
     $block.Margin = [Windows.Thickness]::new(0, 0, 0, 12)
     $block.TextWrapping = [Windows.TextWrapping]::Wrap
-    if ($index -lt $current) { $block.Text = $markDone + '  ' + [string]$label; $block.Foreground = $brushQuiet }
+    if ($index -lt $current) { $block.Text = $markDone + '  ' + [string]$label; $block.Foreground = $brushRailQuiet }
     elseif ($index -eq $current) { $block.Text = $markDoing + '  ' + [string]$label; $block.Foreground = $brushWhite; $block.FontWeight = [Windows.FontWeights]::SemiBold }
-    else { $block.Text = $markTodo + '  ' + [string]$label; $block.Foreground = $brushQuiet }
+    else { $block.Text = $markTodo + '  ' + [string]$label; $block.Foreground = $brushRailQuiet }
     [void]$ui.Steps.Children.Add($block)
     $index = $index + 1
   }
@@ -248,10 +258,12 @@ function Clear-Passwords {
 function Show-Screen($m) {
   $S.confirmClose = [bool]$m['confirmClose']
   $S.panel = [string]$m['panel']
+  $S.screen = [string]$m['name']
   Show-Steps ([int]$m['step'])
   $ui.Title.Text = [string]$m['title']
   $ui.Body.Text = [string]::Join([Environment]::NewLine + [Environment]::NewLine, [string[]]@($m['lines']))
   $ui.Problem.Text = ''
+  $ui.ContentScroll.ScrollToTop()
   $ui.Rows.Children.Clear()
   $S.rows = @{}
   foreach ($row in $m['rows']) {
@@ -269,6 +281,8 @@ function Show-Screen($m) {
   if ($null -ne $m['next']) { $ui.NextButton.Content = [string]$m['next']; $ui.NextButton.Visibility = $visible; $ui.NextButton.IsEnabled = $true } else { $ui.NextButton.Visibility = $collapsed }
   if ($null -ne $m['back']) { $ui.BackButton.Content = [string]$m['back']; $ui.BackButton.Visibility = $visible; $ui.BackButton.IsEnabled = $true } else { $ui.BackButton.Visibility = $collapsed }
   if ($S.panel -eq 'about') { Update-Rules; [void]$ui.EmailBox.Focus() }
+  elseif ($S.panel -eq 'options') { if ($ui.PhoneYes.IsChecked) { [void]$ui.PhoneYes.Focus() } else { [void]$ui.PhoneNo.Focus() } }
+  elseif ($ui.NextButton.Visibility -eq $visible) { [void]$ui.NextButton.Focus() }
 }
 
 function Receive-Message($m) {
@@ -299,6 +313,7 @@ function Receive-Message($m) {
     $ui.DetailsText.ScrollToEnd()
   } elseif ($kind -eq 'problem') {
     $ui.Problem.Text = [string]$m['text']
+    $ui.Problem.BringIntoView()
   } elseif ($kind -eq 'buttons') {
     $ui.NextButton.IsEnabled = [bool]$m['next']
     $ui.BackButton.IsEnabled = [bool]$m['back']

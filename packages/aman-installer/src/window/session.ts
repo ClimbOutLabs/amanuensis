@@ -33,6 +33,7 @@ import {
   WINDOW_INSTALL_LINES,
   WINDOW_INSTALL_TITLE,
   WINDOW_KEEP_LINE,
+  WINDOW_MARK_LABELS,
   WINDOW_NEXT,
   WINDOW_OPTIONS_LINES,
   WINDOW_OPTIONS_TITLE,
@@ -40,6 +41,7 @@ import {
   WINDOW_PHONE_NO,
   WINDOW_PHONE_YES,
   WINDOW_REVIEW_LINES,
+  WINDOW_REVIEW_NO_PHONE_ROW,
   WINDOW_REVIEW_PHONE_ROW,
   WINDOW_REVIEW_ROWS,
   WINDOW_REVIEW_TITLE,
@@ -105,6 +107,7 @@ const WORDS: WindowWords = {
   phoneYes: WINDOW_PHONE_YES,
   phoneNo: WINDOW_PHONE_NO,
   detailsLabel: WINDOW_DETAILS,
+  markLabels: WINDOW_MARK_LABELS,
   closeTitle: WINDOW_TITLE,
   closeQuestion: WINDOW_CLOSE_QUESTION,
 };
@@ -434,7 +437,7 @@ export async function runWindowInstall(deps: InstallDeps, options: WindowSession
       const reviewLabels = [
         windowReviewEmailRow(email),
         ...WINDOW_REVIEW_ROWS,
-        ...(phone ? [WINDOW_REVIEW_PHONE_ROW] : []),
+        phone ? WINDOW_REVIEW_PHONE_ROW : WINDOW_REVIEW_NO_PHONE_ROW,
       ];
       show({
         name: 'review',

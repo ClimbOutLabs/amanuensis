@@ -119,6 +119,7 @@ test('what arrives from the setup program is only ever shown as plain text or re
     /^\s*foreach \(\$row in \$m\['rows'\]\) \{$/,
     /^\s*\$S\.confirmClose = \[bool\]\$m\['confirmClose'\]$/,
     /^\s*\$S\.panel = \[string\]\$m\['panel'\]$/,
+    /^\s*\$S\.screen = \[string\]\$m\['name'\]$/,
     /^\s*Show-Steps \(\[int\]\$m\['step'\]\)$/,
     /^\s*\$label = \[string\]\$row\['label'\]$/,
     /^\s*Set-Mark \$block \$label \(\[string\]\$row\['mark'\]\)$/,
@@ -144,7 +145,7 @@ test('what arrives from the setup program is only ever shown as plain text or re
   for (const line of kept) {
     assert.match(
       line,
-      /\[string\]\$S\.words\['\w+'\]|foreach \(\$label in \$S\.words\['steps'\]\)|\$labels = \$S\.words\['ruleLabels'\]/,
+      /\[string\]\$S\.words\['\w+'\]|foreach \(\$label in \$S\.words\['steps'\]\)|\$labels = \$S\.words\['ruleLabels'\]|\[string\]\$S\.words\['markLabels'\]/,
     );
   }
 });

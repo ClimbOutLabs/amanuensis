@@ -160,6 +160,8 @@ test('the window walks the screens in order, installs, and the password reaches 
   assert.equal(new TextDecoder().decode(run.stdin), `${PASSWORD}\n`);
   assert.ok(run.args.includes('friend@example.com'));
   assert.equal(world.jobs.firewallOpen, true);
+  const review = window.sent.find((message): message is Screen => message.t === 'screen' && message.name === 'review');
+  assert.ok(review?.rows.some(row => row.label.includes('firewall change')));
   // Nothing sent to the window, printed, or run as a command holds the password.
   assert.ok(!everythingShown(world, window).includes(PASSWORD));
   // Every copy the window handed over is wiped.
@@ -188,6 +190,8 @@ test('the install screen shows each stage as it runs, and the phone stage only w
     .map(message => `${message.id}:${message.mark}`);
   assert.deepEqual(marks.slice(-4), ['private:doing', 'private:done', 'open:doing', 'open:done']);
   assert.equal(world.jobs.firewallOpen, false);
+  const review = window.sent.find((message): message is Screen => message.t === 'screen' && message.name === 'review');
+  assert.ok(review?.rows.some(row => row.label === 'Use Amanuensis only on this computer'));
 });
 
 test('a window that is not Windows PowerShell in full language mode from the Windows folder is not used', async () => {

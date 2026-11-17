@@ -221,17 +221,21 @@ Install
 Try again
 Close
 Show details
+Not started
+In progress
+Done
+Needs attention
 Amanuensis is still installing. If you close this window, the setup screens close, but the install keeps going. Close it?
 Welcome to Amanuensis
-Setup will install Amanuensis, your personal assistant, on this computer.
-The first install may take a while, depending on your internet connection.
+Set up Amanuensis, your personal assistant, on this computer.
+Setup can take a while, depending on your internet connection.
 Checking this computer
-Setup installs Docker Desktop if it is missing. Windows may ask for permission first.
+Amanuensis needs Docker Desktop to run. If it is missing, setup will install it and Windows may ask for permission.
 This computer is ready for Amanuensis.
 Docker Desktop is installed and running
 Docker Desktop has what Amanuensis needs
 Create your sign-in
-You sign in to Amanuensis with this email and password.
+Use this email and password to sign in to Amanuensis.
 Your email
 Choose a password
 Type the password again
@@ -242,32 +246,33 @@ The two passwords match
 Keep this password somewhere safe. Aman does not show it again, and nobody else can look it up for you.
 Type your email address, like name@example.com.
 Use Amanuensis on your phone?
-Amanuensis can also open on your phone and other devices on your home Wi-Fi. If you choose yes, Windows asks once for permission.
+You can use Amanuensis on your phone and other devices on your home Wi-Fi. If you choose yes, Windows will ask for permission to change the firewall.
 Yes, on my home Wi-Fi
 No, only this computer
 Ready to install
-Choose Install to start. Windows may ask you to allow one or two steps.
+Check your choices below, then choose Install. Windows may ask for permission during setup.
 You sign in as friend@example.com
 Download and check the newest Amanuensis
 Build and set up Amanuensis, with a daily backup
 Add Amanuensis to the Start menu
 Open Amanuensis in your browser. Windows asks you to allow its security certificate.
 Open Amanuensis to your home Wi-Fi. Windows asks you to allow a firewall change.
+Use Amanuensis only on this computer
 Installing Amanuensis
-The first install may take a while, depending on your internet connection. You can keep using this computer meanwhile.
-Downloading the newest Amanuensis...
-Building and setting up Amanuensis. This takes the longest.
-Adding Amanuensis to the Start menu...
-Checking for a newer setup program...
-Making the Amanuensis folder private to you...
-Opening Amanuensis in your browser...
-Opening Amanuensis to your home Wi-Fi...
+Setup may take a while, depending on your internet connection. You can keep using this computer while you wait.
+Download the newest Amanuensis
+Build and set up Amanuensis. This takes the longest.
+Add Amanuensis to the Start menu
+Check for a newer setup program
+Make the Amanuensis folder private to you
+Open Amanuensis in your browser
+Open Amanuensis to your home Wi-Fi
 Amanuensis is ready
 Amanuensis is open in your browser, with a short getting started page beside it.
 To open it later, choose Amanuensis from the Start menu.
 Setup stopped
 Amanuensis isn't fully set up yet. The problem and the next step are below.
-Open Amanuensis Setup again and choose Try again. It picks up where it stopped.
+After following the next step, open Amanuensis Setup again. It picks up where it stopped.
 Amanuensis Setup is open in its own window. Leave this window open until setup is done.
 The setup window could not be opened on this computer, so setup asks its questions here.
 The setup window was closed. The install carries on here.
