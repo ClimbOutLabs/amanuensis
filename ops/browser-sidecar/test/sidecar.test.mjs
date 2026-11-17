@@ -1727,6 +1727,7 @@ async function withFakeSidecar(run) {
   const context = {
     on: () => undefined,
     route: async () => undefined,
+    newPage: async () => page,
     newCDPSession: async () => ({
       on: () => undefined,
       send: async (method, params) => {
@@ -1748,7 +1749,7 @@ async function withFakeSidecar(run) {
     profilesDir: '/tmp',
     navTimeoutMs: 1000,
     proxyServer: `http://127.0.0.1:${String(gateway.address().port)}`,
-    launch: async () => ({ context, page }),
+    launch: async () => ({ context, page: {} }),
   });
   try {
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
@@ -1938,7 +1939,7 @@ async function fakeSidecar() {
     proxyServer: `http://127.0.0.1:${gateway.address().port}`,
     launch: async () => {
       launches += 1;
-      return { context, page };
+      return { context, page: {} };
     },
   });
   return {
@@ -2262,6 +2263,22 @@ test('the live view puts a file into the picker the page opened, else its file f
     gateway.close();
     await sidecar.close();
   }
+});
+
+test('closing the last live tab keeps the browser available for a new open', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const where = { owner: 'owner-1', tab: 'chat-1' };
+    const url = 'http://site-a.test/';
+    const first = await sidecar.open({ ...where, url });
+    assert.equal(first.status, 'ok');
+    assert.match(first.text, /Streaming Account/);
+    assert.deepEqual(await sidecar.liveClose(where), { status: 'ok' });
+    assert.deepEqual(await sidecar.read(where), { status: 'closed' });
+    assert.deepEqual((await sidecar.liveTabs({ owner: where.owner })).tabs, []);
+    const reopened = await sidecar.open({ ...where, url });
+    assert.equal(reopened.status, 'ok');
+    assert.match(reopened.text, /Streaming Account/);
+  });
 });
 
 test("the person ends the session from the live view, which closes the chat's tab", async () => {

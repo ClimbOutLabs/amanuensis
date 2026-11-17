@@ -929,6 +929,7 @@ export class BrowserSidecar {
     });
     const profile = {
       context,
+      // Keep one blank window open so closing the last chat does not end the persistent browser.
       spare: page,
       tabs: new Map(),
       tabsByPage: new Map(),
@@ -963,8 +964,7 @@ export class BrowserSidecar {
       if (!create) {
         return undefined;
       }
-      const page = profile.spare ?? (await profile.context.newPage());
-      profile.spare = undefined;
+      const page = await profile.context.newPage();
       // A download never opens in the browser; refusing it keeps the tab from navigating to a file.
       page.on('download', download => {
         download.cancel().catch(() => undefined);
