@@ -55,10 +55,10 @@ const reply: SentinelApprovalCard['email'] = {
 };
 
 describe('approval copy', () => {
-  it('asks "Send this reply to Rui?" for a reply, with Allow and Not now', () => {
+  it('asks "Send this reply to Rui?" for a reply, with Send and Not now', () => {
     const card = cardWith({ email: reply });
     expect(approvalQuestion(card)).toBe('Send this reply to Rui?');
-    expect(approveVerb(card)).toBe('Allow');
+    expect(approveVerb(card)).toBe('Send');
     expect(declineVerb(card)).toBe('Not now');
   });
 
@@ -118,7 +118,7 @@ describe('approval copy', () => {
   it('asks "Send this email to a@x.com and 1 more?" for a new message, whatever the number of recipients', () => {
     const card = cardWith({ email: { ...reply, reply_in_thread: null, to: [bare('a@x.com'), bare('b@x.com')] } });
     expect(approvalQuestion(card)).toBe('Send this email to a@x.com and 1 more?');
-    expect(approveVerb(card)).toBe('Allow');
+    expect(approveVerb(card)).toBe('Send');
   });
 
   it('says "Add and send" for a send to a new address, since approving adds it', () => {
