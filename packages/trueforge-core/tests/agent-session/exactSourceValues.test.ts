@@ -234,13 +234,13 @@ describe('exact source values through the live and saved chat', () => {
     expect(visible).not.toContain('`LAX`');
     expect(visible).toContain('`2026-11-17T09:05:00-08:00`');
     expect(visible).toContain('`2026 Q3`');
-    expect(visible).toContain('`count` — `0`');
+    expect(visible).toContain('`count`: `0`');
     expect(visible).toContain('`0.00470`');
     expect(visible).toContain('`00018446744073709551617`');
     expect(visible).toContain('`percent`');
     expect(visible).toContain('`100.10`');
     expect(visible).toContain('`-0.010`');
-    expect(visible).toContain('**Total** — `100.090` `USD`');
+    expect(visible).toContain('**Total**: `100.090` `USD`');
     expect(visible).not.toContain(WRONG_GUESS);
     expect(visible).not.toContain('100.19');
     expect(result.turn.state).toMatchObject({ status: 'done', output: { content: visible } });

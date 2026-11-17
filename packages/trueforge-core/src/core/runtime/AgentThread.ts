@@ -3730,8 +3730,12 @@ export class AgentThread {
   ): ConvertToolsResult['tools'] {
     return tools.filter(tool => {
       const info = tool.type === 'function' ? toolMapping.get(tool.function.name) : undefined;
-      if (info === undefined) return true;
-      if (info.toolSet === this.exactSourceValues && !this.exactSourceValues.hasRows) return false;
+      if (info === undefined) {
+        return true;
+      }
+      if (info.toolSet === this.exactSourceValues && !this.exactSourceValues.hasRows) {
+        return false;
+      }
       return !this.tfyManagedServerNames.has(info.toolSet.name) || !this.withheldTools.includes(info.originalToolName);
     });
   }
@@ -4303,7 +4307,9 @@ export class AgentThread {
               id: modelMessageEventId,
               logger: this.logger,
             });
-            if (bufferSourceAnswer && event !== undefined) delete event.content;
+            if (bufferSourceAnswer && event !== undefined) {
+              delete event.content;
+            }
             if (event) {
               if (!firstDeltaTimestamped) {
                 firstDeltaTimestamped = true;

@@ -53,10 +53,16 @@ function safeText(value: string): boolean {
 }
 
 function scalar(value: unknown): ExactValue | undefined {
-  if (typeof value === 'string') return safeText(value) ? value : undefined;
-  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    return safeText(value) ? value : undefined;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
   // Numbers already parsed by the connector may have lost digits. Whole numbers are exact in this range.
-  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value)) {
+    return value;
+  }
   return undefined;
 }
 
@@ -64,22 +70,28 @@ function scalar(value: unknown): ExactValue | undefined {
 function fieldsOf(record: Record<string, unknown>): Map<string, ExactValue> {
   const fields = new Map<string, ExactValue>();
   function visit(value: unknown, path: string, depth: number): void {
-    if (fields.size >= MAX_FIELDS || depth > MAX_RECORD_DEPTH || path.length > MAX_FIELD_CHARS) return;
+    if (fields.size >= MAX_FIELDS || depth > MAX_RECORD_DEPTH || path.length > MAX_FIELD_CHARS) {
+      return;
+    }
     if (isRecord(value)) {
       for (const [key, child] of Object.entries(value)) {
-        if (safeText(key)) visit(child, childPath({ path, key }), depth + 1);
+        if (safeText(key)) {
+          visit(child, childPath({ path, key }), depth + 1);
+        }
       }
       return;
     }
     const valueToShow = scalar(value);
-    if (valueToShow !== undefined) fields.set(path, valueToShow);
+    if (valueToShow !== undefined) {
+      fields.set(path, valueToShow);
+    }
   }
   visit(record, '', 0);
   return fields;
 }
 
-function rowsOf(value: unknown): Array<{ path: string; fields: Map<string, ExactValue> }> {
-  const rows: Array<{ path: string; fields: Map<string, ExactValue> }> = [];
+function rowsOf(value: unknown): { path: string; fields: Map<string, ExactValue> }[] {
+  const rows: { path: string; fields: Map<string, ExactValue> }[] = [];
   let visitedNodes = 0;
   function add(fields: Map<string, ExactValue>, path: string): void {
     if (
@@ -96,24 +108,33 @@ function rowsOf(value: unknown): Array<{ path: string; fields: Map<string, Exact
       visitedNodes++ >= MAX_VISITED_NODES ||
       depth > MAX_RECORD_DEPTH ||
       path.length > MAX_FIELD_CHARS
-    )
+    ) {
       return;
+    }
     if (Array.isArray(value)) {
       for (const [index, member] of value.entries()) {
-        if (rows.length >= MAX_ROWS || visitedNodes >= MAX_VISITED_NODES) break;
+        if (rows.length >= MAX_ROWS || visitedNodes >= MAX_VISITED_NODES) {
+          break;
+        }
         const rowPath = childPath({ path, key: String(index) });
-        if (isRecord(member) && rowPath.length <= MAX_FIELD_CHARS) add(fieldsOf(member), rowPath);
+        if (isRecord(member) && rowPath.length <= MAX_FIELD_CHARS) {
+          add(fieldsOf(member), rowPath);
+        }
         visit(member, rowPath, depth + 1);
       }
     } else if (isRecord(value)) {
       for (const [key, child] of Object.entries(value)) {
-        if (safeText(key)) visit(child, childPath({ path, key }), depth + 1);
+        if (safeText(key)) {
+          visit(child, childPath({ path, key }), depth + 1);
+        }
       }
     }
   }
   visit(value, '', 0);
   // Direct structured records have no containing array.
-  if (rows.length === 0 && isRecord(value)) add(fieldsOf(value), '');
+  if (rows.length === 0 && isRecord(value)) {
+    add(fieldsOf(value), '');
+  }
   return rows;
 }
 
@@ -124,9 +145,13 @@ function inlineCode(text: string): string {
 }
 
 function decimal(value: ExactValue | undefined): { coefficient: bigint; scale: number } | undefined {
-  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return undefined;
+  }
   const text = String(value);
-  if (!DECIMAL.test(text)) return undefined;
+  if (!DECIMAL.test(text)) {
+    return undefined;
+  }
   const scale = text.includes('.') ? text.length - text.indexOf('.') - 1 : 0;
   return { coefficient: BigInt(text.replace('.', '')), scale };
 }
@@ -168,7 +193,9 @@ function totalOf(
       coefficient * 10n ** BigInt(nextScale - scale) + value.coefficient * 10n ** BigInt(nextScale - value.scale);
     scale = nextScale;
   }
-  if (unit === undefined) return undefined;
+  if (unit === undefined) {
+    return undefined;
+  }
   const sign = coefficient < 0n ? '-' : '';
   const magnitude = String(coefficient < 0n ? -coefficient : coefficient).padStart(scale + 1, '0');
   const total = scale === 0 ? magnitude : `${magnitude.slice(0, -scale)}.${magnitude.slice(-scale)}`;
@@ -176,23 +203,29 @@ function totalOf(
 }
 
 function answerFor(input: PresentExactValuesInput, rows: ReadonlyMap<string, ExactRow>): string | undefined {
-  if (input.rows.reduce((count, row) => count + row.fields.length, 0) > MAX_FIELDS_IN_ANSWER) return undefined;
+  if (input.rows.reduce((count, row) => count + row.fields.length, 0) > MAX_FIELDS_IN_ANSWER) {
+    return undefined;
+  }
   const sections: string[] = [];
   for (const selection of input.rows) {
     const row = rows.get(selection.ref);
-    if (row === undefined || new Set(selection.fields).size !== selection.fields.length) return undefined;
+    if (row === undefined || new Set(selection.fields).size !== selection.fields.length) {
+      return undefined;
+    }
     const source = [row.source.connector, row.source.tool, row.source.path || '/'].map(inlineCode).join(' · ');
-    const lines = [`Source — ${source}`];
+    const lines = [`Source: ${source}`];
     for (const path of selection.fields) {
       const value = row.fields.get(path);
-      if (value === undefined) return undefined;
+      if (value === undefined) {
+        return undefined;
+      }
       const label = path
         .slice(1)
         .replaceAll('/', ' › ')
         .replaceAll('~1', '/')
         .replaceAll('~0', '~')
         .replaceAll('_', ' ');
-      lines.push(`- ${inlineCode(label)} — ${inlineCode(String(value))}`);
+      lines.push(`- ${inlineCode(label)}: ${inlineCode(String(value))}`);
     }
     sections.push(lines.join('\n'));
   }
@@ -209,8 +242,10 @@ function answerFor(input: PresentExactValuesInput, rows: ReadonlyMap<string, Exa
       return undefined;
     }
     const computed = totalOf(sum, rows);
-    if (computed === undefined) return undefined;
-    sections.push(`**Total** — ${inlineCode(computed.total)} ${inlineCode(computed.unit)}`);
+    if (computed === undefined) {
+      return undefined;
+    }
+    sections.push(`**Total**: ${inlineCode(computed.total)} ${inlineCode(computed.unit)}`);
   }
   return sections.join('\n\n');
 }
@@ -317,7 +352,9 @@ export class ExactSourceValues extends LocalToolMCP {
         },
         fields,
       }));
-    if (rows.length === 0) return rows;
+    if (rows.length === 0) {
+      return rows;
+    }
     result.message.content = JSON.stringify({
       connector_result: original,
       exact_source_rows: rows.map(row => ({
@@ -333,6 +370,8 @@ export class ExactSourceValues extends LocalToolMCP {
   }
 
   commit(rows: readonly ExactRow[]): void {
-    for (const row of rows) this.rows.set(row.ref, row);
+    for (const row of rows) {
+      this.rows.set(row.ref, row);
+    }
   }
 }
