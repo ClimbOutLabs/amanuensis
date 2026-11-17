@@ -3,18 +3,23 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const threadRunning = vi.hoisted(() => ({ current: false }));
+let newestMessage: { role: string; content: { type: string; approval: { id: string } }[] } | undefined;
 
 vi.mock('@assistant-ui/react', async importOriginal => {
   const actual = await importOriginal<typeof import('@assistant-ui/react')>();
   return {
     ...actual,
     useAuiState: (selector: (state: unknown) => unknown) =>
-      selector({ threadListItem: { remoteId: 'ses_1' }, thread: { isRunning: threadRunning.current } }),
+      selector({
+        threadListItem: { remoteId: 'ses_1' },
+        thread: { isRunning: threadRunning.current, messages: newestMessage === undefined ? [] : [newestMessage] },
+      }),
   };
 });
 
 const reload = vi.fn();
-vi.mock('@truefoundry/assistant-ui-runtime', () => ({
+vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => ({
+  ...(await importOriginal<typeof import('@truefoundry/assistant-ui-runtime')>()),
   useTrueFoundryReload: () => reload,
 }));
 
@@ -65,6 +70,7 @@ describe('ForegroundEventSync lifecycle journeys', () => {
     vi.setSystemTime(new Date('2026-09-25T12:00:00.000Z'));
     hidden = false;
     threadRunning.current = false;
+    newestMessage = undefined;
     peekSessionTip = vi.fn(async () => tipWith());
     dismissPendingApprovals = vi.fn(async () => ({ dismissed: 0, alreadyResolved: true }));
     reload.mockClear();
@@ -123,6 +129,22 @@ describe('ForegroundEventSync lifecycle journeys', () => {
   it('skips the probe after a short hide (routine tab switch)', async () => {
     renderSync();
     await backgroundThenForeground(5_000);
+
+    expect(peekSessionTip).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('skips the probe after a short hide when focus arrives before visibilitychange', async () => {
+    renderSync();
+    hidden = true;
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await vi.advanceTimersByTimeAsync(1_000);
+    hidden = false;
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
 
     expect(peekSessionTip).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
@@ -226,6 +248,20 @@ describe('ForegroundEventSync lifecycle journeys', () => {
 
     expect(dismissPendingApprovals).not.toHaveBeenCalled();
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the chat in place when a pending approval is already visible', async () => {
+    newestMessage = {
+      role: 'assistant',
+      content: [{ type: 'tool-call', approval: { id: 'ev_1\u0000call_1' } }],
+    };
+    peekSessionTip.mockResolvedValue(tipWith({ pendingApprovals: [oldApproval(5)] }));
+    renderSync();
+    await backgroundThenForeground(60_000);
+
+    expect(peekSessionTip).toHaveBeenCalledTimes(1);
+    expect(dismissPendingApprovals).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
   });
 
   it('shows Reconnecting instead of an error when the probe fails, then resyncs once the server answers', async () => {

@@ -16,6 +16,8 @@ The **Help, I'm stuck** button opens Iris, the Aman guide. Her knowledge is a ge
 
 6. **Page-by-page refresh.** Each person's Iris keeps the pack's pages as knowledge documents, one per page, each labelled with a hash of that page's title and text. When the app starts, a page whose label is already in her library is left as it is. Only new or changed pages are added and indexed, and pages that are gone are removed. A change to one page re-indexes that page alone, and a change to her instructions re-indexes nothing. The person's own documents are never touched.
 
+7. **No source lines in her answers.** The label on her pages is refresh bookkeeping, and it never reaches an answer. The knowledge library's Sources footer belongs to a person's own documents, so a help answer drawn from her pages ends with its last sentence. Her pages are put in front of the model by title alone, and nothing in the turn announces a list of sources for them.
+
 CI runs the first, second and fourth checks in one always-on job.
 
 ## Not in this change

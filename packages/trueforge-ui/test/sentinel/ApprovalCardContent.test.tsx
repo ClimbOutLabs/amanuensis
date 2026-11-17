@@ -79,7 +79,7 @@ describe('approval card content', () => {
     expect(screen.getByText('Lease')).toBeInTheDocument();
     expect(screen.getByText('Thursday works.')).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/gmail_send|send_draft|exec_shell/);
     expect(container.querySelector('.uppercase')).toBeNull();

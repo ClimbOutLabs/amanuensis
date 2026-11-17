@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "memories": [
     {
       "text": "My dentist is Dr. Amara Okafor at Harbour Smiles in Kelvinton.",
@@ -731,6 +731,26 @@
           "journey": {
             "type": "skill_removed"
           }
+        }
+      ]
+    },
+    {
+      "id": "web-read-page",
+      "group": "web",
+      "prompt": "Read this page and summarise it for me: https://fixtures.aman.invalid/harbour-cafe",
+      "approval_policy": "approve",
+      "checks": [
+        {
+          "type": "tool_called",
+          "tools": ["web_fetch", "tavily_extract", "web_fetch_exa"]
+        },
+        {
+          "type": "no_tool",
+          "tools": ["browser_open"]
+        },
+        {
+          "type": "reply_includes",
+          "any": ["saffron"]
         }
       ]
     }

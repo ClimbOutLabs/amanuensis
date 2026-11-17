@@ -162,10 +162,8 @@ function calendarLine({
   return `${lead}: ${title}, ${whenText}`;
 }
 
-/** Who a message was for, from the call: a list reads "a, b and c", and a long one is counted past three. */
-function recipientsText(args: Record<string, unknown> | undefined): string | undefined {
-  if (args === undefined) return undefined;
-  const recipients = stringList(args.recipients ?? args.to);
+/** A list of recipients in words: "a, b and c", and a long one is counted past three. */
+function recipientListText(recipients: readonly string[]): string | undefined {
   if (recipients.length === 0) return undefined;
   if (recipients.length === 1) return recipients[0];
   if (recipients.length <= 3) {
@@ -175,15 +173,33 @@ function recipientsText(args: Record<string, unknown> | undefined): string | und
   return `${recipients.slice(0, 3).join(', ')} and ${String(recipients.length - 3)} more`;
 }
 
+/** Who a message was for, from the call: the people it was addressed to. */
+function recipientsText(args: Record<string, unknown> | undefined): string | undefined {
+  if (args === undefined) return undefined;
+  return recipientListText(stringList(args.recipients ?? args.to));
+}
+
+/** Who a sent message went to, from the call: everyone it reached, the copied and the hidden copied included. */
+function sentRecipientsText(args: Record<string, unknown> | undefined): string | undefined {
+  if (args === undefined) return undefined;
+  return recipientListText([
+    ...stringList(args.recipients ?? args.to),
+    ...stringList(args.cc),
+    ...stringList(args.bcc),
+  ]);
+}
+
 /**
- * An email outcome: a send names who it went to when the call carried the recipients (a Gmail send
- * names only its draft, so its line names the send alone), and a draft names who it is saved for.
+ * An email outcome: a send names everyone it went to when the call carried the recipients, copies
+ * included (a Gmail send names only its draft, so its line names the send alone), and a draft
+ * names who it is saved for.
  */
 function emailLine({ name, args }: { name: string; args: Record<string, unknown> | undefined }): string | undefined {
-  const who = recipientsText(args);
   if (isMailSendToolName(name) || name === SEND_DRAFT_TOOL_NAME) {
+    const who = sentRecipientsText(args);
     return who !== undefined ? `Email sent to ${who}` : 'Email sent';
   }
+  const who = recipientsText(args);
   if (name === SAVE_DRAFT_TOOL_NAME || name === DRAFT_EMAIL_TOOL_NAME) {
     return who !== undefined ? `Draft saved for ${who}` : 'Draft saved';
   }
