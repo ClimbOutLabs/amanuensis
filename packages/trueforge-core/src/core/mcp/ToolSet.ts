@@ -233,6 +233,9 @@ function autoDenyMessage(decision: TierDecision): string {
 export const SEARCH_TOO_SLOW_MESSAGE =
   'The search took too long and was stopped. Answer from what you already have, or try one shorter search.';
 
+/** What the model is told a page reader does, in place of whatever the provider says about its own tool. */
+export const PAGE_READ_TOOL_DESCRIPTION = "Read a web page's text. Use this first to read or summarise a page.";
+
 const SEARCH_TOO_SLOW = Symbol('search-too-slow');
 
 /**
@@ -392,9 +395,24 @@ export class ToolSet implements IToolSet {
     }
 
     return {
-      result: { tools: this.policy.filterAndAnnotate(tools) },
+      result: { tools: this.withPageReadDescriptions(this.policy.filterAndAnnotate(tools)) },
       wasInitialized: response.wasInitialized,
     };
+  }
+
+  /**
+   * The page readers the designated provider's record declares are described to the model in
+   * Aman's own words, not the provider's: plain reading goes to the reader, so its description
+   * says so wherever the tool list reaches the model. Every other tool keeps the description
+   * its server published.
+   */
+  private withPageReadDescriptions(tools: AgentToolSchema[]): AgentToolSchema[] {
+    if (this.pageReadTools.size === 0) {
+      return tools;
+    }
+    return tools.map(tool =>
+      this.pageReadTools.has(tool.name) ? { ...tool, description: PAGE_READ_TOOL_DESCRIPTION } : tool,
+    );
   }
 
   async callTool(
