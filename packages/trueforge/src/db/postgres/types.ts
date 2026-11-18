@@ -42,6 +42,16 @@ import type { SkillManifest } from '../../schemas/skill';
 import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
 import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
+import type {
+  GoalActionTable,
+  GoalClaimTable,
+  GoalCycleTable,
+  GoalEventTable,
+  GoalEvidenceTable,
+  GoalStepTable,
+  GoalTable,
+  GoalWakeupTable,
+} from '../goalStore';
 import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
@@ -1025,6 +1035,14 @@ export interface Database {
   recall_exclusion: RecallExclusionTable;
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
+  goal: GoalTable;
+  goal_step: GoalStepTable;
+  goal_evidence: GoalEvidenceTable;
+  goal_event: GoalEventTable;
+  goal_cycle: GoalCycleTable;
+  goal_action: GoalActionTable;
+  goal_claim: GoalClaimTable;
+  goal_wakeup: GoalWakeupTable;
   reach_settings: ReachSettingsTable;
   person_timezone: PersonTimezoneTable;
   text_contact: TextContactTable;
