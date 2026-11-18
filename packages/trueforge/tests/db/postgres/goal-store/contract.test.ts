@@ -22,7 +22,7 @@ describePg('GoalStore on Postgres (contract)', () => {
 
   beforeEach(async () => {
     if (env !== undefined) {
-      await sql`TRUNCATE TABLE goal, goal_step, goal_evidence, goal_event, goal_cycle, goal_action, goal_claim, goal_wakeup CASCADE`.execute(
+      await sql`TRUNCATE TABLE goal, goal_step, goal_evidence, goal_event, goal_cycle, goal_action, goal_claim, goal_wakeup, goal_fencing_counter CASCADE`.execute(
         env.db,
       );
     }

@@ -1,5 +1,5 @@
 import { decodePageToken, encodePageToken } from '@truefoundry/trueforge-core/agent-session/store/PageToken';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import { z } from 'zod';
 
 import {
@@ -133,6 +133,17 @@ export interface GoalClaimTable {
   updated_at: string | Date;
 }
 
+/**
+ * The highest fencing token ever issued for a goal id. A tombstone with no
+ * foreign key to `goal`: deleting a goal never removes it, so a goal
+ * recreated under the same id keeps issuing higher tokens and a stale claim
+ * from the earlier incarnation stays fenced out.
+ */
+export interface GoalFencingCounterTable {
+  goal_id: string;
+  fencing_token: number;
+}
+
 /** A persisted wake-up for a goal, claimed by a worker and marked delivered once handed off. */
 export interface GoalWakeupTable {
   wakeup_id: string;
@@ -157,6 +168,7 @@ export interface GoalDatabase {
   goal_cycle: GoalCycleTable;
   goal_action: GoalActionTable;
   goal_claim: GoalClaimTable;
+  goal_fencing_counter: GoalFencingCounterTable;
   goal_wakeup: GoalWakeupTable;
 }
 
@@ -281,6 +293,22 @@ export class GoalClaimFencedError extends Error {
     this.name = 'GoalClaimFencedError';
     this.goal_id = input.goal_id;
     this.fencing_token = input.fencing_token;
+  }
+}
+
+/** The record kinds an import bundle carries, named in import refusal errors. */
+export type GoalImportRecordKind = 'goal' | 'step' | 'evidence' | 'event' | 'cycle' | 'action';
+
+/** A record in an import bundle failed schema validation. The whole import was refused and nothing was stored. */
+export class GoalImportValidationError extends Error {
+  readonly record: GoalImportRecordKind;
+  readonly record_id: string;
+
+  constructor(input: { record: GoalImportRecordKind; record_id: string }, options?: ErrorOptions) {
+    super(`Import refused: the bundle's ${input.record} ${input.record_id} is not a valid record`, options);
+    this.name = 'GoalImportValidationError';
+    this.record = input.record;
+    this.record_id = input.record_id;
   }
 }
 
@@ -783,6 +811,57 @@ function batches<T>(rows: readonly T[]): T[][] {
     out.push(rows.slice(start, start + IMPORT_BATCH_SIZE));
   }
   return out;
+}
+
+function parseImportRecord<T>(input: {
+  record: GoalImportRecordKind;
+  record_id: string;
+  schema: z.ZodType<T>;
+  value: T;
+}): T {
+  const parsed = input.schema.safeParse(input.value);
+  if (!parsed.success) {
+    throw new GoalImportValidationError({ record: input.record, record_id: input.record_id }, { cause: parsed.error });
+  }
+  return parsed.data;
+}
+
+/**
+ * Validates every record in an import bundle before anything is stored, the
+ * same schema parse the other write paths run. One invalid record refuses
+ * the whole import, so what the store holds can always be read back.
+ */
+function parseImportBundle(bundle: GoalExportBundle): GoalExportBundle {
+  return {
+    goals: bundle.goals.map(goal =>
+      parseImportRecord({ record: 'goal', record_id: goal.goal_id, schema: GoalSchema, value: goal }),
+    ),
+    steps: bundle.steps.map(step =>
+      parseImportRecord({ record: 'step', record_id: step.step_id, schema: GoalPlanStepSchema, value: step }),
+    ),
+    evidence: bundle.evidence.map(evidence =>
+      parseImportRecord({
+        record: 'evidence',
+        record_id: evidence.evidence_id,
+        schema: GoalEvidenceSchema,
+        value: evidence,
+      }),
+    ),
+    events: bundle.events.map(event =>
+      parseImportRecord({ record: 'event', record_id: event.event_id, schema: GoalEventSchema, value: event }),
+    ),
+    cycles: bundle.cycles.map(cycle =>
+      parseImportRecord({ record: 'cycle', record_id: cycle.cycle_id, schema: GoalCycleSchema, value: cycle }),
+    ),
+    actions: bundle.actions.map(action =>
+      parseImportRecord({
+        record: 'action',
+        record_id: action.action_id,
+        schema: GoalActionSchema,
+        value: action,
+      }),
+    ),
+  };
 }
 
 /**
@@ -1531,6 +1610,25 @@ export class GoalStore implements IGoalStore {
     };
   }
 
+  /**
+   * Issues the goal's next fencing token from its tombstone counter. The
+   * counter row has no foreign key to the goal, so it survives the goal's
+   * deletion and tokens stay monotonic per goal id across a delete and
+   * recreate. A token burned by a claim that loses its race is harmless:
+   * tokens must rise, not be gapless.
+   */
+  async #nextFencingToken(db: Kysely<GoalDatabase>, goal_id: string): Promise<number> {
+    const row = await db
+      .insertInto('goal_fencing_counter')
+      .values({ goal_id, fencing_token: 1 })
+      .onConflict(conflict =>
+        conflict.column('goal_id').doUpdateSet({ fencing_token: sql<number>`goal_fencing_counter.fencing_token + 1` }),
+      )
+      .returning('fencing_token')
+      .executeTakeFirstOrThrow();
+    return row.fencing_token;
+  }
+
   async claimGoal(input: ClaimGoalInput, transaction?: Kysely<GoalDatabase>): Promise<GoalClaim | undefined> {
     const run = async (db: Kysely<GoalDatabase>): Promise<GoalClaim | undefined> => {
       await this.#requireGoal(db, input);
@@ -1543,13 +1641,14 @@ export class GoalStore implements IGoalStore {
         const now = new Date();
         const timestamp = now.toISOString();
         if (existing === undefined) {
+          const fencingToken = await this.#nextFencingToken(db, input.goal_id);
           const inserted = await db
             .insertInto('goal_claim')
             .values({
               goal_id: input.goal_id,
               tenant_id: input.tenant_id,
               created_by: input.created_by,
-              fencing_token: 1,
+              fencing_token: fencingToken,
               worker_id: input.worker_id,
               expires_at: new Date(now.getTime() + input.ttl_ms).toISOString(),
               updated_at: timestamp,
@@ -1568,10 +1667,11 @@ export class GoalStore implements IGoalStore {
         if (toIso(existing.expires_at) > timestamp) {
           return undefined;
         }
+        const fencingToken = await this.#nextFencingToken(db, input.goal_id);
         const updated = await db
           .updateTable('goal_claim')
           .set({
-            fencing_token: existing.fencing_token + 1,
+            fencing_token: fencingToken,
             worker_id: input.worker_id,
             expires_at: new Date(now.getTime() + input.ttl_ms).toISOString(),
             updated_at: timestamp,
@@ -1801,8 +1901,8 @@ export class GoalStore implements IGoalStore {
     input: PersonOwner & { bundle: GoalExportBundle },
     transaction?: Kysely<GoalDatabase>,
   ): Promise<{ goals_added: number }> {
+    const bundle = parseImportBundle(input.bundle);
     const run = async (db: Kysely<GoalDatabase>): Promise<{ goals_added: number }> => {
-      const bundle = input.bundle;
       const addedGoalIds = new Set<string>();
       for (const batch of batches(bundle.goals)) {
         if (batch.length === 0) {
@@ -1842,8 +1942,31 @@ export class GoalStore implements IGoalStore {
           addedGoalIds.add(row.goal_id);
         }
       }
-      const presentGoalIds = new Set(bundle.goals.map(goal => goal.goal_id));
-      for (const batch of batches(bundle.steps.filter(step => presentGoalIds.has(step.goal_id)))) {
+      // Children may only land under goals this owner actually holds. A
+      // bundle can name a goal that already exists under another owner: its
+      // goal insert above was skipped, and its children must be skipped too,
+      // never grafted onto the other owner's goal.
+      const ownedGoalIds = new Set<string>();
+      for (const batch of batches(bundle.goals)) {
+        if (batch.length === 0) {
+          continue;
+        }
+        const rows = await db
+          .selectFrom('goal')
+          .select('goal_id')
+          .where('tenant_id', '=', input.tenant_id)
+          .where('created_by', '=', input.created_by)
+          .where(
+            'goal_id',
+            'in',
+            batch.map(goal => goal.goal_id),
+          )
+          .execute();
+        for (const row of rows) {
+          ownedGoalIds.add(row.goal_id);
+        }
+      }
+      for (const batch of batches(bundle.steps.filter(step => ownedGoalIds.has(step.goal_id)))) {
         if (batch.length === 0) {
           continue;
         }
@@ -1867,7 +1990,7 @@ export class GoalStore implements IGoalStore {
           .onConflict(conflict => conflict.column('step_id').doNothing())
           .execute();
       }
-      for (const batch of batches(bundle.evidence.filter(evidence => presentGoalIds.has(evidence.goal_id)))) {
+      for (const batch of batches(bundle.evidence.filter(evidence => ownedGoalIds.has(evidence.goal_id)))) {
         if (batch.length === 0) {
           continue;
         }
@@ -1891,7 +2014,7 @@ export class GoalStore implements IGoalStore {
           .onConflict(conflict => conflict.column('evidence_id').doNothing())
           .execute();
       }
-      for (const batch of batches(bundle.events.filter(event => presentGoalIds.has(event.goal_id)))) {
+      for (const batch of batches(bundle.events.filter(event => ownedGoalIds.has(event.goal_id)))) {
         if (batch.length === 0) {
           continue;
         }
@@ -1911,7 +2034,7 @@ export class GoalStore implements IGoalStore {
           .onConflict(conflict => conflict.column('event_id').doNothing())
           .execute();
       }
-      for (const batch of batches(bundle.cycles.filter(cycle => presentGoalIds.has(cycle.goal_id)))) {
+      for (const batch of batches(bundle.cycles.filter(cycle => ownedGoalIds.has(cycle.goal_id)))) {
         if (batch.length === 0) {
           continue;
         }
@@ -1936,7 +2059,7 @@ export class GoalStore implements IGoalStore {
           .onConflict(conflict => conflict.column('cycle_id').doNothing())
           .execute();
       }
-      for (const batch of batches(bundle.actions.filter(action => presentGoalIds.has(action.goal_id)))) {
+      for (const batch of batches(bundle.actions.filter(action => ownedGoalIds.has(action.goal_id)))) {
         if (batch.length === 0) {
           continue;
         }

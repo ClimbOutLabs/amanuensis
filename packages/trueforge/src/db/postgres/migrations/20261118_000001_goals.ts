@@ -5,7 +5,10 @@ import { withMigrationTransaction } from '../migrationTransaction';
 /**
  * Goals and everything a goal owns: plan steps, evidence, events, cycles,
  * actions, the live cycle claim, and persisted wake-ups. Child rows cascade
- * from the goal. Mirrors db/sqlite/migrations/20261118_000001_goals.ts.
+ * from the goal. The one exception is goal_fencing_counter, the tombstone
+ * holding the highest fencing token issued per goal id: it has no foreign
+ * key and is never deleted, so tokens stay monotonic across a delete and
+ * recreate. Mirrors db/sqlite/migrations/20261118_000001_goals.ts.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await withMigrationTransaction(db, async trx => {
@@ -144,6 +147,13 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addCheckConstraint('goal_claim_fencing_token_check', sql`fencing_token >= 1`)
       .execute();
     await trx.schema
+      .createTable('goal_fencing_counter')
+      .addColumn('goal_id', 'text', col => col.notNull())
+      .addColumn('fencing_token', 'integer', col => col.notNull())
+      .addPrimaryKeyConstraint('goal_fencing_counter_pkey', ['goal_id'])
+      .addCheckConstraint('goal_fencing_counter_token_check', sql`fencing_token >= 1`)
+      .execute();
+    await trx.schema
       .createTable('goal_wakeup')
       .addColumn('wakeup_id', 'text', col => col.notNull())
       .addColumn('goal_id', 'text', col => col.notNull().references('goal.goal_id').onDelete('cascade'))
@@ -168,6 +178,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   await withMigrationTransaction(db, async trx => {
     await sql`SET LOCAL lock_timeout = '5s'`.execute(trx);
     await trx.schema.dropTable('goal_wakeup').execute();
+    await trx.schema.dropTable('goal_fencing_counter').execute();
     await trx.schema.dropTable('goal_claim').execute();
     await trx.schema.dropTable('goal_action').execute();
     await trx.schema.dropTable('goal_cycle').execute();

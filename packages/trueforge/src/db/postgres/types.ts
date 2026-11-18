@@ -48,6 +48,7 @@ import type {
   GoalCycleTable,
   GoalEventTable,
   GoalEvidenceTable,
+  GoalFencingCounterTable,
   GoalStepTable,
   GoalTable,
   GoalWakeupTable,
@@ -1042,6 +1043,7 @@ export interface Database {
   goal_cycle: GoalCycleTable;
   goal_action: GoalActionTable;
   goal_claim: GoalClaimTable;
+  goal_fencing_counter: GoalFencingCounterTable;
   goal_wakeup: GoalWakeupTable;
   reach_settings: ReachSettingsTable;
   person_timezone: PersonTimezoneTable;

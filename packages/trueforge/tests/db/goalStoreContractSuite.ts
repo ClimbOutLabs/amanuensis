@@ -1,5 +1,6 @@
 import {
   GoalClaimFencedError,
+  GoalImportValidationError,
   GoalLifecycleTransitionError,
   GoalNotFoundError,
   GoalRevisionConflictError,
@@ -7,7 +8,7 @@ import {
   type GoalStore,
   type IGoalStore,
 } from '../../src/db/goalStore';
-import type { Goal } from '../../src/schemas/goals';
+import type { Goal, GoalPlanStep } from '../../src/schemas/goals';
 
 const TENANT = 'default';
 const OWNER = 'fundraiser-organizer';
@@ -507,6 +508,78 @@ export function runGoalStoreContractSuite(getStore: () => IGoalStore | GoalStore
     expect(await restored.exportGoalData(owner)).toEqual(bundle);
   });
 
+  it('refuses to graft imported children onto a goal another owner holds', async () => {
+    const store = getStore();
+    const goal_id = 'fundraiser-shared-goal';
+    await store.createGoal(fundraiserGoal({ goal_id }));
+    const held = await store.getGoal({ tenant_id: TENANT, created_by: OWNER, goal_id });
+    if (held === undefined) {
+      throw new Error('Expected the created goal to be readable');
+    }
+    const grafted: GoalPlanStep = {
+      step_id: 'grafted-step',
+      goal_id,
+      description: 'A step planted by another owner',
+      depends_on: [],
+      status: 'ready',
+      acceptance_criteria: [],
+      evidence_ids: [],
+      action_id: null,
+      revision: 1,
+      created_at: '2027-05-02T09:00:00.000Z',
+      updated_at: '2027-05-02T09:00:00.000Z',
+    };
+    const result = await store.importGoalData({
+      tenant_id: TENANT,
+      created_by: OTHER_OWNER,
+      bundle: { goals: [held], steps: [grafted], evidence: [], events: [], cycles: [], actions: [] },
+    });
+    expect(result).toEqual({ goals_added: 0 });
+    expect(await store.listSteps({ tenant_id: TENANT, created_by: OWNER, goal_id })).toEqual([]);
+    expect(await store.exportGoalData({ tenant_id: TENANT, created_by: OTHER_OWNER })).toEqual({
+      goals: [],
+      steps: [],
+      evidence: [],
+      events: [],
+      cycles: [],
+      actions: [],
+    });
+  });
+
+  it('refuses an import bundle holding an invalid record and stores nothing', async () => {
+    const store = getStore();
+    const owner = { tenant_id: TENANT, created_by: OWNER };
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const step = await store.addStep({
+      tenant_id: TENANT,
+      created_by: OWNER,
+      goal_id: goal.goal_id,
+      description: 'Confirm the community hall for 15 June',
+      depends_on: [],
+      status: 'ready',
+      acceptance_criteria: ['The hall replies with the date held'],
+      evidence_ids: [],
+      action_id: null,
+    });
+    const bundle = await store.exportGoalData(owner);
+    await store.deleteGoal({ ...owner, goal_id: goal.goal_id });
+    // Import data reaches the store as parsed JSON, so a record can carry a
+    // value the types would never produce. Object.assign is the deliberate
+    // seam: it overwrites the status after the type check has passed.
+    const corrupted = Object.assign({}, step, { status: 'not_a_real_status' });
+    await expect(store.importGoalData({ ...owner, bundle: { ...bundle, steps: [corrupted] } })).rejects.toBeInstanceOf(
+      GoalImportValidationError,
+    );
+    expect(await store.exportGoalData(owner)).toEqual({
+      goals: [],
+      steps: [],
+      evidence: [],
+      events: [],
+      cycles: [],
+      actions: [],
+    });
+  });
+
   it('deleting a goal removes its steps, events, claim, and wake-ups with it', async () => {
     const store = getStore();
     const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
@@ -530,5 +603,41 @@ export function runGoalStoreContractSuite(getStore: () => IGoalStore | GoalStore
     expect(await store.listSteps(owner)).toEqual([]);
     expect(await store.getClaim(owner)).toBeUndefined();
     expect(await store.claimWakeups({ worker_id: 'worker-a', limit: 10, ttl_ms: 60_000 })).toEqual([]);
+  });
+
+  it('keeps fencing tokens rising across a delete and recreate under the same id', async () => {
+    const store = getStore();
+    const goal_id = 'fundraiser-recreated-goal';
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id };
+    await store.createGoal(fundraiserGoal({ goal_id, lifecycle: 'active' }));
+    const first = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 });
+    if (first === undefined) {
+      throw new Error('Expected the first claim to succeed');
+    }
+    expect(first.fencing_token).toBe(1);
+    await store.deleteGoal(owner);
+    expect(await store.getGoal(owner)).toBeUndefined();
+    await store.createGoal(fundraiserGoal({ goal_id, lifecycle: 'active' }));
+    const second = await store.claimGoal({ ...owner, worker_id: 'worker-b', ttl_ms: 60_000 });
+    if (second === undefined) {
+      throw new Error('Expected the recreated goal to be claimable');
+    }
+    expect(second.fencing_token).toBeGreaterThan(first.fencing_token);
+    await expect(
+      store.updateGoal({
+        ...owner,
+        expected_revision: 1,
+        fencing_token: first.fencing_token,
+        patch: { title: 'Written by the stale incarnation' },
+      }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    const committed = await store.updateGoal({
+      ...owner,
+      expected_revision: 1,
+      fencing_token: second.fencing_token,
+      patch: { title: 'Written by the new incarnation' },
+    });
+    expect(committed.revision).toBe(2);
+    expect(committed.title).toBe('Written by the new incarnation');
   });
 }

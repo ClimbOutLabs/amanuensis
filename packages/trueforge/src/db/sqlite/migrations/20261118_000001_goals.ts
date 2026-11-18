@@ -3,7 +3,10 @@ import { sql, type Kysely } from 'kysely';
 /**
  * Goals and everything a goal owns: plan steps, evidence, events, cycles,
  * actions, the live cycle claim, and persisted wake-ups. Child rows cascade
- * from the goal. Mirrors db/postgres/migrations/20261118_000001_goals.ts.
+ * from the goal. The one exception is goal_fencing_counter, the tombstone
+ * holding the highest fencing token issued per goal id: it has no foreign
+ * key and is never deleted, so tokens stay monotonic across a delete and
+ * recreate. Mirrors db/postgres/migrations/20261118_000001_goals.ts.
  *
  * SQLite differences: JSON documents are TEXT, timestamps are ISO TEXT,
  * tables are STRICT. The migration owns its own transaction because Kysely's
@@ -133,6 +136,13 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       ) STRICT
     `.execute(trx);
     await sql`
+      CREATE TABLE goal_fencing_counter (
+        goal_id TEXT NOT NULL,
+        fencing_token INTEGER NOT NULL CHECK (fencing_token >= 1),
+        PRIMARY KEY (goal_id)
+      ) STRICT
+    `.execute(trx);
+    await sql`
       CREATE TABLE goal_wakeup (
         wakeup_id TEXT NOT NULL,
         goal_id TEXT NOT NULL REFERENCES goal (goal_id) ON DELETE CASCADE,
@@ -157,6 +167,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 export async function down(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async trx => {
     await sql`DROP TABLE goal_wakeup`.execute(trx);
+    await sql`DROP TABLE goal_fencing_counter`.execute(trx);
     await sql`DROP TABLE goal_claim`.execute(trx);
     await sql`DROP TABLE goal_action`.execute(trx);
     await sql`DROP TABLE goal_cycle`.execute(trx);
