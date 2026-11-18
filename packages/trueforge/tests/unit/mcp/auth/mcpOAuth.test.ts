@@ -13,6 +13,7 @@ import {
   ensureMcpClientRegistered,
   isMcpAuthRequired,
   resolveMcpAuth,
+  revokeMcpTokens,
 } from '../../../../src/mcp/auth/mcpDcr';
 import { DEFAULT_MCP_ACCESS_TOKEN_TTL_SECONDS, mcpOAuthCallbackUrl } from '../../../../src/mcp/auth/mcpOAuthHelpers';
 import type { OAuthClientRecord } from '../../../../src/mcp/auth/types';
@@ -21,6 +22,11 @@ import type { OAuthClientRecord } from '../../../../src/mcp/auth/types';
 // address, blocked.example.com resolves to loopback, and every other name does not resolve.
 // The sign-in dials are judged by the address check, so the suite's answer cannot depend on
 // the DNS of the machine running it, and no real lookup leaves the suite.
+jest.mock('node:os', () => ({
+  ...jest.requireActual<typeof import('node:os')>('node:os'),
+  networkInterfaces: () => ({}),
+}));
+
 jest.mock('node:dns/promises', () => {
   const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
   return {
@@ -85,6 +91,11 @@ const AS_METADATA = {
 };
 
 function stubOauthFetch(options: {
+  resource?: string;
+  issuer?: string;
+  authorizationEndpoint?: string;
+  tokenAuthMethods?: string[];
+  malformedResourceMetadata?: boolean;
   registrationFailFirst?: boolean;
   registrationFailAlways?: boolean;
   /** Non-OAuth registration failure (e.g. 500) — must not trigger auth-method fallback. */
@@ -114,11 +125,21 @@ function stubOauthFetch(options: {
     const url = String(input);
 
     if (url.includes('oauth-protected-resource')) {
-      return json({ resource: SERVER_URL, authorization_servers: [AS_ORIGIN] });
+      return json(
+        options.malformedResourceMetadata
+          ? { resource: 5 }
+          : { resource: options.resource ?? SERVER_URL, authorization_servers: [AS_ORIGIN] },
+      );
     }
 
     if (url.includes('oauth-authorization-server') || url.includes('openid-configuration')) {
-      const metadata: Record<string, unknown> = { ...AS_METADATA };
+      const metadata: Record<string, unknown> = {
+        ...AS_METADATA,
+        issuer: options.issuer ?? AS_ORIGIN,
+        authorization_endpoint: options.authorizationEndpoint ?? AS_METADATA.authorization_endpoint,
+        token_endpoint_auth_methods_supported:
+          options.tokenAuthMethods ?? AS_METADATA.token_endpoint_auth_methods_supported,
+      };
       if (options.skipRegistrationEndpoint) {
         delete metadata['registration_endpoint'];
       }
@@ -173,6 +194,10 @@ function stubOauthFetch(options: {
 
 const sampleClient: OAuthClientRecord = {
   server: {
+    issuer: AS_ORIGIN,
+    issuerResponseRequired: false,
+    resource: null,
+    revocation: null,
     authorizationEndpoint: `${AS_ORIGIN}/authorize`,
     tokenEndpoint: `${AS_ORIGIN}/token`,
     codeChallengeMethodsSupported: ['S256'],
@@ -180,6 +205,7 @@ const sampleClient: OAuthClientRecord = {
   client: {
     clientId: 'cached-client',
     clientSecret: 'cached-secret',
+    tokenAuthMethod: 'client_secret_post',
   },
 };
 
@@ -192,6 +218,23 @@ describe('resourceUrlFromServerUrl (SDK)', () => {
 });
 
 describe('createMcpOAuthClient / ensureMcpClientRegistered', () => {
+  it.each([
+    { resource: 'https://auth.example.com/other' },
+    { issuer: 'https://auth.example.com/unexpected' },
+    { malformedResourceMetadata: true },
+  ])('rejects untrusted or malformed discovery metadata: %j', async options => {
+    const { registerCallCount } = stubOauthFetch(options);
+    await expect(
+      createMcpOAuthClient({
+        mcpServerUrl: SERVER_URL,
+        mcpServerName: SERVER_NAME,
+        redirectUris: [mcpOAuthCallbackUrl()],
+        clientName: CLIENT_NAME,
+      }),
+    ).rejects.toThrow();
+    expect(registerCallCount()).toBe(0);
+  });
+
   it('returns the cached client without discovery or registration', async () => {
     const { mcpServerStore } = newStores();
     await mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
@@ -230,7 +273,7 @@ describe('createMcpOAuthClient / ensureMcpClientRegistered', () => {
     expect(result.server.authorizationEndpoint).toBe(`${AS_ORIGIN}/authorize`);
     expect(result.server.tokenEndpoint).toBe(`${AS_ORIGIN}/token`);
     const stored = await mcpServerStore.getClient({ id: SERVER_ID });
-    expect(stored).toBeUndefined();
+    expect(stored).toEqual(result);
   });
 
   it('oauth_client: throws when credentials are missing', async () => {
@@ -366,6 +409,22 @@ describe('createMcpOAuthClient / ensureMcpClientRegistered', () => {
     ).rejects.toMatchObject({ name: 'McpConnectionError', statusCode: 424 });
     expect(registerCallCount()).toBe(2);
     expect(await mcpServerStore.getClient({ id: SERVER_ID })).toBeUndefined();
+  });
+});
+
+describe('resource indicators', () => {
+  it('uses the validated resource advertised by metadata throughout the grant', async () => {
+    const stores = newStores();
+    const { tokenBodies } = stubOauthFetch({ resource: 'https://mcp.example.com' });
+    const result = await resolveMcpAuth(resolveParams(stores));
+    if (!isMcpAuthRequired(result)) throw new Error('expected authorization');
+    expect(result.authUrl.searchParams.get('resource')).toBe('https://mcp.example.com');
+    const pending = await stores.tokenStore.consumePendingAuthorization({
+      state: result.authUrl.searchParams.get('state') ?? '',
+    });
+    if (!pending) throw new Error('missing grant');
+    await completeMcpAuthorization({ ...stores, pending, code: 'code' });
+    expect(new URLSearchParams(String(tokenBodies[0])).get('resource')).toBe('https://mcp.example.com');
   });
 });
 
@@ -684,6 +743,28 @@ describe('end-to-end DCR + authorize with normalised MCP URL', () => {
 });
 
 describe('completeMcpAuthorization', () => {
+  it('rejects a callback on a different redirect address before exchanging the code', async () => {
+    const stores = newStores();
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
+    const { tokenBodies } = stubOauthFetch({});
+    await expect(
+      completeMcpAuthorization({
+        ...stores,
+        pending: {
+          state: 'state',
+          id: SERVER_ID,
+          userRef: USER_REF,
+          mcpServerUrl: SERVER_URL,
+          codeVerifier: 'verifier',
+          redirectUri: 'https://other.example.com/callback',
+          returnTo: null,
+        },
+        code: 'code',
+      }),
+    ).rejects.toThrow('different address');
+    expect(tokenBodies).toHaveLength(0);
+  });
+
   it('exchanges the code and saves the token for the claimed pending row', async () => {
     const stores = newStores();
     await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
@@ -750,6 +831,7 @@ describe('completeMcpAuthorization', () => {
           id: SERVER_ID,
           userRef: USER_REF,
           mcpServerUrl: SERVER_URL,
+          redirectUri: null,
           codeVerifier: 'verifier-1',
           returnTo: null,
         },
@@ -818,32 +900,29 @@ describe('completeMcpAuthorization', () => {
     }
   });
 
+  it('uses HTTP Basic for a configured client when the service does not support form-body secrets', async () => {
+    const stores = newStores();
+    const { tokenAuthHeaders } = stubOauthFetch({ tokenAuthMethods: ['client_secret_basic'] });
+    const result = await resolveMcpAuth(resolveParams(stores, SERVER_URL, 'oauth_client', 'my-client', 'my-secret'));
+    if (!isMcpAuthRequired(result)) throw new Error('expected authorization');
+    const pending = await stores.tokenStore.consumePendingAuthorization({
+      state: result.authUrl.searchParams.get('state') ?? '',
+    });
+    if (!pending) throw new Error('missing grant');
+    await completeMcpAuthorization({ ...stores, pending, code: 'code' });
+    expect(tokenAuthHeaders[0]).toMatch(/^Basic /);
+  });
+
   it('oauth_client: token exchange uses configured client credentials', async () => {
     const stores = newStores();
-    const oauthClientRecord: OAuthClientRecord = {
-      server: {
-        authorizationEndpoint: `${AS_ORIGIN}/authorize`,
-        tokenEndpoint: `${AS_ORIGIN}/token`,
-        codeChallengeMethodsSupported: ['S256'],
-      },
-      client: {
-        clientId: 'manifest-client-id',
-        clientSecret: 'manifest-client-secret',
-      },
-    };
-    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: oauthClientRecord });
     const { tokenBodies } = stubOauthFetch({});
-
-    await stores.tokenStore.savePendingAuthorization({
-      state: 'test-state',
-      id: SERVER_ID,
-      userRef: USER_REF,
-      mcpServerUrl: SERVER_URL,
-      codeVerifier: 'test-verifier-123456789012345678901234567890',
-      returnTo: null,
+    const authorization = await resolveMcpAuth(
+      resolveParams(stores, SERVER_URL, 'oauth_client', 'manifest-client-id', 'manifest-client-secret'),
+    );
+    if (!isMcpAuthRequired(authorization)) throw new Error('expected authorization');
+    const pending = await stores.tokenStore.consumePendingAuthorization({
+      state: authorization.authUrl.searchParams.get('state') ?? '',
     });
-
-    const pending = await stores.tokenStore.consumePendingAuthorization({ state: 'test-state' });
     if (!pending) {
       throw new Error('expected consumePendingAuthorization to return pending');
     }
@@ -861,7 +940,68 @@ describe('completeMcpAuthorization', () => {
   });
 });
 
+describe('revoking service tokens', () => {
+  it('sends refresh and access tokens only to the checked revocation endpoint', async () => {
+    const bodies: URLSearchParams[] = [];
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(new URLSearchParams(String(init?.body)));
+      expect(new Headers(init?.headers).get('authorization')).toMatch(/^Basic /);
+      return new Response(null, { status: 200 });
+    };
+    await revokeMcpTokens({
+      client: {
+        ...sampleClient,
+        server: {
+          ...sampleClient.server,
+          revocation: { endpoint: `${AS_ORIGIN}/revoke`, authMethods: ['client_secret_basic'] },
+        },
+      },
+      accessToken: 'access-secret',
+      refreshToken: 'refresh-secret',
+    });
+    expect(bodies.map(body => body.get('token'))).toEqual(['refresh-secret', 'access-secret']);
+  });
+
+  it('does not expose a service error response when revocation fails', async () => {
+    globalThis.fetch = async () => new Response('echo: refresh-secret', { status: 400 });
+    await expect(
+      revokeMcpTokens({
+        client: {
+          ...sampleClient,
+          server: {
+            ...sampleClient.server,
+            revocation: { endpoint: `${AS_ORIGIN}/revoke`, authMethods: ['client_secret_basic'] },
+          },
+        },
+        accessToken: 'access-secret',
+        refreshToken: 'refresh-secret',
+      }),
+    ).rejects.toThrow('Remove access in the service settings');
+  });
+});
+
 describe('the address check on sign-in dials', () => {
+  it('refuses a sign-in page on an address the server may not reach', async () => {
+    stubOauthFetch({ authorizationEndpoint: 'https://blocked.example.com/authorize' });
+    await expect(
+      createMcpOAuthClient({
+        mcpServerUrl: SERVER_URL,
+        mcpServerName: SERVER_NAME,
+        redirectUris: [mcpOAuthCallbackUrl()],
+        clientName: CLIENT_NAME,
+      }),
+    ).rejects.toBeInstanceOf(McpOAuthAddressRefusedError);
+  });
+
+  it('refuses to send OAuth requests over plain HTTP', async () => {
+    const fetchSpy = jest.fn();
+    globalThis.fetch = fetchSpy;
+    await expect(dialMcpOAuthUrl('http://auth.example.com/token', { method: 'POST', body: 'secret' })).rejects.toThrow(
+      'secure service address',
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   /** A transport that records every URL it was asked to dial and serves the OAuth flow. */
   function stubRecordingFetch(options: { registrationEndpoint?: string; redirectMetadataTo?: string }): {
     dialed: string[];
@@ -946,58 +1086,34 @@ describe('the address check on sign-in dials', () => {
     expect(client.client.clientId).toBe('dyn-client-1');
   });
 
-  it('drops the credential headers when a sign-in redirect crosses origins, and keeps them within the origin', async () => {
-    const received: Array<{ url: string; headers: Headers }> = [];
-    const stubDial = (redirectTarget: string): void => {
-      received.length = 0;
-      globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-        const url = String(input);
-        received.push({ url, headers: new Headers(init?.headers) });
-        if (url === `${AS_ORIGIN}/token`) {
-          return new Response(null, { status: 307, headers: { location: redirectTarget } });
-        }
-        return json({ access_token: 'token-1', token_type: 'Bearer', expires_in: 3600 });
-      };
+  it('refuses redirects on token requests before sending credentials to another address', async () => {
+    const dialed: string[] = [];
+    globalThis.fetch = async (input: string | URL | Request): Promise<Response> => {
+      dialed.push(String(input));
+      return new Response(null, { status: 307, headers: { location: 'https://mcp.example.com/token' } });
     };
-    const sent = {
-      method: 'POST',
-      headers: {
-        Authorization: 'Basic Y2xpZW50OnNlY3JldA==',
-        Cookie: 'session=person-session',
-        'X-Api-Key': 'sign-in-key-header',
-        'Api-Key': 'sign-in-key-alt-header',
-      },
-      body: 'grant_type=refresh_token',
-    };
-
-    stubDial('https://mcp.example.com/token');
-    await dialMcpOAuthUrl(`${AS_ORIGIN}/token`, sent);
-    expect(received.map(entry => entry.url)).toEqual([`${AS_ORIGIN}/token`, 'https://mcp.example.com/token']);
-    // The first dial carries the credentials, as the caller sent them; the other origin sees none of them.
-    expect(received[0]?.headers.get('authorization')).toBe('Basic Y2xpZW50OnNlY3JldA==');
-    expect(received[1]?.headers.get('authorization')).toBeNull();
-    expect(received[1]?.headers.get('cookie')).toBeNull();
-    expect(received[1]?.headers.get('x-api-key')).toBeNull();
-    expect(received[1]?.headers.get('api-key')).toBeNull();
-
-    stubDial(`${AS_ORIGIN}/token-final`);
-    await dialMcpOAuthUrl(`${AS_ORIGIN}/token`, sent);
-    expect(received.map(entry => entry.url)).toEqual([`${AS_ORIGIN}/token`, `${AS_ORIGIN}/token-final`]);
-    expect(received[1]?.headers.get('authorization')).toBe('Basic Y2xpZW50OnNlY3JldA==');
-    expect(received[1]?.headers.get('cookie')).toBe('session=person-session');
-    expect(received[1]?.headers.get('x-api-key')).toBe('sign-in-key-header');
-    expect(received[1]?.headers.get('api-key')).toBe('sign-in-key-alt-header');
+    await expect(
+      dialMcpOAuthUrl(`${AS_ORIGIN}/token`, {
+        method: 'POST',
+        body: 'refresh_token=secret',
+      }),
+    ).rejects.toBeInstanceOf(McpOAuthAddressRefusedError);
+    expect(dialed).toEqual([`${AS_ORIGIN}/token`]);
   });
 
   it('refuses to dial a token endpoint whose name does not resolve', async () => {
     const stores = newStores();
     const goneClient: OAuthClientRecord = {
       server: {
+        issuer: AS_ORIGIN,
+        issuerResponseRequired: false,
+        resource: null,
+        revocation: null,
         authorizationEndpoint: `${AS_ORIGIN}/authorize`,
         tokenEndpoint: 'https://gone.example.com/token',
         codeChallengeMethodsSupported: ['S256'],
       },
-      client: { clientId: 'cached-client', clientSecret: 'cached-secret' },
+      client: { clientId: 'cached-client', clientSecret: 'cached-secret', tokenAuthMethod: 'client_secret_post' },
     };
     await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: goneClient });
     const { dialed } = stubRecordingFetch({});
@@ -1010,6 +1126,7 @@ describe('the address check on sign-in dials', () => {
         id: SERVER_ID,
         userRef: USER_REF,
         mcpServerUrl: SERVER_URL,
+        redirectUri: null,
         codeVerifier: 'verifier-1',
         returnTo: null,
       },

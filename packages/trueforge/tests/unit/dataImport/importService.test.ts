@@ -3206,11 +3206,15 @@ describe('runDataImport keeps the default web search connector a new instance is
         id: seeded.id,
         record: {
           server: {
+            issuer: null,
+            issuerResponseRequired: false,
+            resource: null,
+            revocation: null,
             authorizationEndpoint: 'https://auth.example.com/authorize',
             tokenEndpoint: 'https://auth.example.com/token',
             codeChallengeMethodsSupported: ['S256'],
           },
-          client: { clientId: 'owner-client', clientSecret: 'owner-secret' },
+          client: { clientId: 'owner-client', clientSecret: 'owner-secret', tokenAuthMethod: 'client_secret_post' },
         },
       });
       expect(await importError(withClient, archive)).toMatchObject({ status: 409 });

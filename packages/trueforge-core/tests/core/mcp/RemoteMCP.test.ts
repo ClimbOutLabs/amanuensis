@@ -2,7 +2,7 @@ import type { Logger } from 'winston';
 import { McpConnectionError } from '../../../src/core/errors';
 import type { RemoteMcpHeaders } from '../../../src/core/mcp/RemoteMCP';
 import { RemoteMCP } from '../../../src/core/mcp/RemoteMCP';
-import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
+import { connectRemoteMcp, McpAuthChallengeError } from '../../../src/core/mcp/remoteMcpClient';
 import { describeUnknownError } from '../../../src/core/util/errorLogFields';
 
 // RemoteMCP connects itself via connectRemoteMcp; mock it so the reconnect-on-header-change
@@ -93,6 +93,44 @@ function makeRemote(headers: RemoteMcpHeaders, sessionId?: string): RemoteMCP {
     signal: new AbortController().signal,
   });
 }
+
+describe('MCP sign-in challenges', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('surfaces consent when a connected operation is refused without replaying it', async () => {
+    const challenge = new McpAuthChallengeError({
+      resourceMetadataUrl: 'https://mcp.example.com/meta',
+      scope: undefined,
+    });
+    const state = installFakeConnection({ failListToolsWith: challenge });
+    const headers: RemoteMcpHeaders = request =>
+      Promise.resolve(
+        request
+          ? {
+              authRequired: {
+                servers: [
+                  { id: 'rotating-id-123', name: 'rotating-mcp', auth_url: 'https://auth.example.com/authorize' },
+                ],
+              },
+            }
+          : { headers: { Authorization: 'Bearer expired' } },
+      );
+    const result = await makeRemote(headers).listTools();
+    expect(result).toHaveProperty('authRequired');
+    expect(state.connectCalls).toBe(1);
+  });
+
+  it('does not replay a tool call when a rejected token was refreshed', async () => {
+    const challenge = new McpAuthChallengeError({ resourceMetadataUrl: undefined, scope: undefined });
+    const state = installFakeConnection({ failFirstCallToolWith: challenge });
+    const headers: RemoteMcpHeaders = request =>
+      Promise.resolve({ headers: { Authorization: request ? 'Bearer refreshed' : 'Bearer old' } });
+    await expect(makeRemote(headers).callTool({ name: 'write', arguments: {} })).rejects.toThrow(
+      'Try the action again',
+    );
+    expect(state.callToolCalls).toBe(1);
+  });
+});
 
 describe('RemoteMCP header rotation reaches the live transport', () => {
   beforeEach(() => {

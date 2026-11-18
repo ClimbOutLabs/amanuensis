@@ -1,5 +1,5 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import { extractErrorLogFields, McpConnectionError } from '@truefoundry/trueforge-core/core';
+import { McpConnectionError } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import type { RequestContext } from '../auth/identity';
@@ -68,7 +68,7 @@ function callbackFailure(params: {
 /** Shared OAuth callback (mounted at /api/v1/mcp-servers/oauth). */
 export function createMcpOAuthRouter<TTransaction>(deps: McpOAuthRouterDeps<TTransaction>) {
   const callbackHandler: RouteHandler<typeof mcpOAuthCallbackRoute> = async c => {
-    const { state, code, error, error_description: errorDescription } = c.req.valid('query');
+    const { state, code, error, iss } = c.req.valid('query');
 
     // Bind the grant to the session in this browser.
     const session = await deps.resolveSession(c);
@@ -80,13 +80,12 @@ export function createMcpOAuthRouter<TTransaction>(deps: McpOAuthRouterDeps<TTra
     // claiming it atomically means a duplicate callback loses the race.
     const pending = await deps.tokenStore.consumePendingAuthorization({ state });
     if (!pending) {
-      deps.logger.warn('MCP OAuth callback has no pending authorization', { state, error, errorDescription });
+      deps.logger.warn('MCP OAuth callback has no pending authorization');
       return callbackFailure({ c, pending, message: 'Unknown or expired OAuth state' });
     }
 
     if (session.subject.id !== pending.userRef) {
       deps.logger.warn('MCP OAuth callback session does not match pending user', {
-        state,
         sessionSubject: session.subject.id,
         pendingUserRef: pending.userRef,
       });
@@ -97,9 +96,17 @@ export function createMcpOAuthRouter<TTransaction>(deps: McpOAuthRouterDeps<TTra
       });
     }
 
+    const client = await deps.mcpServerStore.getClient({ id: pending.id });
+    if (
+      (client?.server.issuerResponseRequired === true && iss === undefined) ||
+      (iss !== undefined && (client?.server.issuer == null || client.server.issuer !== iss))
+    ) {
+      return callbackFailure({ c, pending, message: 'Sign-in could not be verified. Try connecting again.' });
+    }
+
     if (error) {
-      deps.logger.warn('MCP OAuth callback returned an error', { state, error, errorDescription });
-      return callbackFailure({ c, pending, message: error });
+      deps.logger.warn('MCP OAuth callback returned an error');
+      return callbackFailure({ c, pending, message: 'Sign-in was not completed. Try connecting again.' });
     }
 
     if (!code) {
@@ -116,10 +123,10 @@ export function createMcpOAuthRouter<TTransaction>(deps: McpOAuthRouterDeps<TTra
     } catch (err) {
       // Only a known MCP failure is safe to show the user; anything else gets a generic reason.
       if (err instanceof McpConnectionError) {
-        deps.logger.warn('MCP OAuth callback token exchange failed', extractErrorLogFields(err));
+        deps.logger.warn('MCP OAuth callback token exchange failed');
         return callbackFailure({ c, pending, message: err.message });
       }
-      deps.logger.error('MCP OAuth callback unexpected failure', extractErrorLogFields(err));
+      deps.logger.error('MCP OAuth callback unexpected failure');
       return callbackFailure({ c, pending, message: 'Internal server error', jsonStatus: 500 });
     }
 

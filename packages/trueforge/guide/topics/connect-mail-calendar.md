@@ -196,6 +196,14 @@ The same Connectors page has more connectors, such as your notes folder, Home As
 - Notion: click **Add**, open the notion connector, click **Connect**, and sign in to Notion in the window that opens. Aman can then reach any page or database you can open. Every Notion tool asks you first.
 - GitHub: make a fine-grained personal access token in your GitHub settings, under Developer settings. Give it only the repositories and permissions Aman needs. Then click **Connect** on github, paste the token, and click **Connect**. Every GitHub tool asks you first.
 
+Some connectors sign you in through a window from the service. You can add one of these without signing in. If the service later asks you to sign in, Aman can offer a sign-in window when the service supports automatic setup. The first time a chat needs a connector that is not signed in, the chat pauses and shows a **Connect** button. Sign in, then click Continue, and the chat carries on.
+
+To sign out of a connector that uses a sign-in window, open the connector and click **Disconnect**. Aman removes its saved sign-in and asks the service to revoke access when the service provides that option. If the service does not provide it, remove access in the service settings too.
+
+Note: Keys and sign-ins are stored with the connector in Aman's database. The database stores them unencrypted, so keep its data folder and backups private.
+
+Note: A sign-in window needs the service to use https for its sign-in addresses. Aman checks those addresses before it connects to them. Discovery redirects are checked too. A sign-in request that carries credentials is stopped if the service redirects it. If that happens, check the connector settings.
+
 [Other connectors](../../../../docs/mcp-servers.mdx) explains adding any connector, signing in and testing it.
 
 ## Related

@@ -414,5 +414,9 @@ export const deleteAuthorizationMcpServerRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'MCP server not found.',
     },
+    424: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The service did not confirm sign-out.',
+    },
   },
 });

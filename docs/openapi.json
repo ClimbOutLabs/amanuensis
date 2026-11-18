@@ -19518,6 +19518,16 @@
             }
           },
           {
+            "description": "Issuer of the authorization response, when supplied.",
+            "in": "query",
+            "name": "iss",
+            "required": false,
+            "schema": {
+              "description": "Issuer of the authorization response, when supplied.",
+              "type": "string"
+            }
+          },
+          {
             "description": "Opaque token; correlates this callback to its pending login. Always present, success or error.",
             "in": "query",
             "name": "state",
@@ -20147,6 +20157,16 @@
             }
           },
           {
+            "description": "Issuer of the authorization response, when supplied.",
+            "in": "query",
+            "name": "iss",
+            "required": false,
+            "schema": {
+              "description": "Issuer of the authorization response, when supplied.",
+              "type": "string"
+            }
+          },
+          {
             "description": "Opaque token; correlates this callback to its pending login. Always present, success or error.",
             "in": "query",
             "name": "state",
@@ -20327,6 +20347,16 @@
               }
             },
             "description": "MCP server not found."
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The service did not confirm sign-out."
           }
         },
         "summary": "Disconnect OAuth for an MCP server",
