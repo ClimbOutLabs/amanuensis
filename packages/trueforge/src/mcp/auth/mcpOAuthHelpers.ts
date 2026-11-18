@@ -48,7 +48,7 @@ export function mcpClientInformation(client: OAuthClientCredentials): OAuthClien
     ? {
         client_id: client.clientId,
         client_secret: client.clientSecret,
-        token_endpoint_auth_method: 'client_secret_post',
+        token_endpoint_auth_method: client.tokenAuthMethod,
       }
     : {
         client_id: client.clientId,
@@ -59,7 +59,7 @@ export function mcpClientInformation(client: OAuthClientCredentials): OAuthClien
 /** Reconstructs the metadata required by the MCP SDK authorization helpers. */
 export function mcpAuthorizationServerMetadata(server: OAuthServerMetadata): AuthorizationServerMetadata {
   return {
-    issuer: new URL(server.authorizationEndpoint).origin,
+    issuer: server.issuer ?? new URL(server.authorizationEndpoint).origin,
     authorization_endpoint: server.authorizationEndpoint,
     token_endpoint: server.tokenEndpoint,
     response_types_supported: ['code'],

@@ -8,7 +8,7 @@ function readyExec(): Promise<ExecResult> {
   return Promise.resolve({ success: true, response: { exitCode: 0, result: 'ok' } });
 }
 
-function makeProvider(): SandboxProvider {
+function makeProvider(workspaceDir: string | undefined = undefined): SandboxProvider {
   return {
     type: 'local',
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
@@ -19,7 +19,7 @@ function makeProvider(): SandboxProvider {
     executeVerifiedWorkspaceCommit: () =>
       Promise.resolve({ status: 'indeterminate', result: { success: false, error: 'not used by this fixture' } }),
     getAdditionalInstructions: () => undefined,
-    getWorkspaceDir: () => undefined,
+    getWorkspaceDir: () => workspaceDir,
     getToolResultDumpDir: sandboxId => `${sandboxId}/tool-results`,
     getGitCredentialsPath: sandboxId => `${sandboxId}/.git-credentials`,
     getFileUploadsDir: sandboxId => `${sandboxId}/uploads`,
@@ -31,9 +31,9 @@ function makeProvider(): SandboxProvider {
   };
 }
 
-function makeSandbox(fileDownloadEnabled: boolean): Sandbox {
+function makeSandbox(fileDownloadEnabled: boolean, workspaceDir: string | undefined = undefined): Sandbox {
   return new Sandbox({
-    provider: makeProvider(),
+    provider: makeProvider(workspaceDir),
     fileDownloadEnabled,
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
@@ -52,10 +52,21 @@ describe('Sandbox file-output guidance', () => {
 
     expect(prompt).toContain('[display name](/absolute/path)');
     expect(prompt).toContain('```sandbox_artifacts');
-    expect(prompt).toContain('[Lily James tribute video](/opt/tf/workspace/tribute.mp4)');
+    expect(prompt).toContain('[Lily James tribute video](/absolute/path/to/tribute.mp4)');
     expect(prompt).toContain(
       'Downloads reach the user via the sandbox_artifacts block below (for exec-sandbox outputs) or as run_code/<name> paths (for run_code outputs)',
     );
+  });
+
+  it("names a file in this sandbox's own workspace in the example, never another provider's folder", () => {
+    const sandbox = makeSandbox(true, '/workspace');
+    const builder = new InstructionBuilder('root');
+    sandbox.buildInstruction(builder);
+    const prompt = builder.build();
+
+    expect(prompt).toContain('[Lily James tribute video](/workspace/tribute.mp4)');
+    expect(prompt).toContain('unbound_workspace_cwd: /workspace');
+    expect(prompt).not.toContain('/opt/tf/');
   });
 
   it('tells the Agent to save fetched remote content to a file only where the shell can fetch', () => {

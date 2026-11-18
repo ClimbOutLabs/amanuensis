@@ -337,6 +337,25 @@ describe("McpServersClient", () => {
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
 
+    test("delete_authorization (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/mcp-servers/name/authorize")
+            .respondWith()
+            .statusCode(424)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.mcpServers.deleteAuthorization("name");
+        }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+    });
+
     test("home_assistant_check (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });

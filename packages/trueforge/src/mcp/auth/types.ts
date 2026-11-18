@@ -5,6 +5,7 @@ export interface OAuthPendingAuthorization {
   userRef: string;
   mcpServerUrl: string;
   codeVerifier: string | null;
+  redirectUri: string | null;
   returnTo: string | null;
 }
 
@@ -40,6 +41,10 @@ export interface IOAuthTokenStore<TTransaction = never> {
 
 /** Authorization-server endpoints discovered and cached at registration time. */
 export interface OAuthServerMetadata {
+  issuer: string | null;
+  issuerResponseRequired: boolean;
+  resource: string | null;
+  revocation: { endpoint: string; authMethods: string[] | null } | null;
   authorizationEndpoint: string;
   tokenEndpoint: string;
   codeChallengeMethodsSupported: string[] | null;
@@ -49,6 +54,7 @@ export interface OAuthServerMetadata {
 export interface OAuthClientCredentials {
   clientId: string;
   clientSecret: string | null;
+  tokenAuthMethod: 'none' | 'client_secret_basic' | 'client_secret_post';
 }
 
 export interface OAuthClientRecord {

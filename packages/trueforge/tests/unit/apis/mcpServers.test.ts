@@ -23,6 +23,11 @@ import { startInertMcpServer } from '../../fixtures/inertMcpServer';
 // resolve, localhost resolves to loopback, and every other name resolves to a public address.
 // The address checks judge names by what they resolve to, so the suite's answer cannot depend
 // on the DNS of the machine running it.
+jest.mock('node:os', () => ({
+  ...jest.requireActual<typeof import('node:os')>('node:os'),
+  networkInterfaces: () => ({}),
+}));
+
 jest.mock('node:dns/promises', () => {
   const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
   return {
@@ -175,6 +180,10 @@ describe('mcp-servers routers', () => {
       id: record.id,
       record: {
         server: {
+          issuer: null,
+          issuerResponseRequired: false,
+          resource: null,
+          revocation: null,
           authorizationEndpoint: 'https://auth.example.com/authorize',
           tokenEndpoint: 'https://auth.example.com/token',
           codeChallengeMethodsSupported: ['S256'],
@@ -182,6 +191,7 @@ describe('mcp-servers routers', () => {
         client: {
           clientId: 'seed-client',
           clientSecret: 'seed-secret',
+          tokenAuthMethod: 'client_secret_post',
         },
       },
     });
@@ -374,6 +384,7 @@ describe('mcp-servers routers', () => {
       id: record.id,
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       mcpServerUrl: putBodyWithDcr.url,
+      redirectUri: null,
       codeVerifier: 'stale-verifier',
       returnTo: null,
     });
@@ -456,6 +467,10 @@ describe('mcp-servers routers', () => {
         id: record.id,
         record: {
           server: {
+            issuer: null,
+            issuerResponseRequired: false,
+            resource: null,
+            revocation: null,
             authorizationEndpoint: 'https://auth.example.com/authorize',
             tokenEndpoint: 'https://auth.example.com/token',
             codeChallengeMethodsSupported: ['S256'],
@@ -463,6 +478,7 @@ describe('mcp-servers routers', () => {
           client: {
             clientId: 'seed-client',
             clientSecret: 'seed-secret',
+            tokenAuthMethod: 'client_secret_post',
           },
         },
       });
@@ -1001,6 +1017,10 @@ describe('mcp-servers routers', () => {
       id: record.id,
       record: {
         server: {
+          issuer: null,
+          issuerResponseRequired: false,
+          resource: null,
+          revocation: null,
           authorizationEndpoint: 'https://auth.example.com/authorize',
           tokenEndpoint: 'https://auth.example.com/token',
           codeChallengeMethodsSupported: ['S256'],
@@ -1008,6 +1028,7 @@ describe('mcp-servers routers', () => {
         client: {
           clientId: 'keep-me',
           clientSecret: 'keep-secret',
+          tokenAuthMethod: 'client_secret_post',
         },
       },
     });
@@ -1032,6 +1053,10 @@ describe('mcp-servers routers', () => {
     ).toBeUndefined();
     expect(await mcpServerStore.getClient({ id: record.id })).toEqual({
       server: {
+        issuer: null,
+        issuerResponseRequired: false,
+        resource: null,
+        revocation: null,
         authorizationEndpoint: 'https://auth.example.com/authorize',
         tokenEndpoint: 'https://auth.example.com/token',
         codeChallengeMethodsSupported: ['S256'],
@@ -1039,6 +1064,7 @@ describe('mcp-servers routers', () => {
       client: {
         clientId: 'keep-me',
         clientSecret: 'keep-secret',
+        tokenAuthMethod: 'client_secret_post',
       },
     });
   });
