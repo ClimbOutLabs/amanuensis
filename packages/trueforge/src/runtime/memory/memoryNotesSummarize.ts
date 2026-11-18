@@ -403,8 +403,159 @@ function selectedSentences({
 /** A restated fact shorter than this is too little to tell apart from a new short statement of the reply's own. */
 const RESTATED_MIN_CHARACTERS = 20;
 
-/** What may be left of a sentence around a whole recalled text before the sentence counts as carrying something of its own. */
-const RESTATED_MAX_LEFTOVER_CHARACTERS = 12;
+/**
+ * The closed class of framing words: the words that can stand around a fact without adding to it.
+ * Articles, pronouns, conjunctions, prepositions and auxiliary verbs carry the grammar of a sentence
+ * rather than its content, and the reporting words only point back at where the fact was read. A word
+ * outside this class is content, however short the piece it stands in, so one content word left around
+ * a recalled text is enough for the sentence to count as carrying something of its own.
+ */
+const FRAMING_WORDS: ReadonlySet<string> = new Set([
+  // Articles and determiners.
+  'a',
+  'an',
+  'the',
+  'this',
+  'that',
+  'these',
+  'those',
+  // Pronouns.
+  'i',
+  'you',
+  'he',
+  'she',
+  'it',
+  'we',
+  'they',
+  'me',
+  'him',
+  'her',
+  'us',
+  'them',
+  'my',
+  'your',
+  'his',
+  'hers',
+  'its',
+  'our',
+  'their',
+  'mine',
+  'yours',
+  'ours',
+  'theirs',
+  'who',
+  'whom',
+  'whose',
+  'which',
+  'what',
+  // Conjunctions.
+  'and',
+  'or',
+  'but',
+  'nor',
+  'so',
+  'yet',
+  'as',
+  'if',
+  'when',
+  'while',
+  'although',
+  'though',
+  'because',
+  'since',
+  'unless',
+  'until',
+  'than',
+  'whether',
+  // Prepositions.
+  'about',
+  'above',
+  'across',
+  'after',
+  'against',
+  'along',
+  'among',
+  'around',
+  'at',
+  'before',
+  'behind',
+  'below',
+  'beneath',
+  'beside',
+  'between',
+  'beyond',
+  'by',
+  'during',
+  'for',
+  'from',
+  'in',
+  'inside',
+  'into',
+  'of',
+  'off',
+  'on',
+  'onto',
+  'out',
+  'outside',
+  'over',
+  'per',
+  'through',
+  'to',
+  'toward',
+  'towards',
+  'under',
+  'up',
+  'upon',
+  'via',
+  'with',
+  'within',
+  'without',
+  // Auxiliary and modal verbs.
+  'am',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'have',
+  'has',
+  'had',
+  'do',
+  'does',
+  'did',
+  'will',
+  'would',
+  'shall',
+  'should',
+  'can',
+  'could',
+  'may',
+  'might',
+  'must',
+  // Reporting words, which point back at the source the fact came from.
+  'according',
+  'already',
+  'earlier',
+  'previously',
+  'noted',
+  'notes',
+  'mentioned',
+  'mentions',
+  'said',
+  'says',
+  'say',
+  'stated',
+  'states',
+  'reported',
+  'reports',
+]);
+
+/** Whether every word left around a recalled text is framing: grammar and pointers back at the source, nothing of the sentence's own. */
+function leftoverIsOnlyFraming(leftover: string): boolean {
+  return leftover.split(' ').every(word => word === '' || FRAMING_WORDS.has(word));
+}
 
 /**
  * Text compared by its words alone: any note label is taken off, and case, spacing and punctuation are
@@ -428,9 +579,9 @@ function comparisonText(text: string): string {
 /**
  * Whether a reply sentence only says again what the turn read out of its stored memory pages. The words
  * must match whole on one side or the other: the sentence inside the recalled text, or the recalled text
- * inside the sentence with at most twelve characters of the sentence left over around it. Either way the
- * matched words must reach the minimum length, so a short sentence is never dropped over a few shared
- * words. A sentence left carrying more than that leftover is not a restatement and is kept.
+ * inside the sentence with nothing but framing words left around it. Either way the matched words
+ * must reach the minimum length, so a short sentence is never dropped over a few shared words. A
+ * sentence carrying even one word of its own outside the match is not a restatement and is kept.
  */
 function restatesRecalledMemory({
   text,
@@ -456,7 +607,7 @@ function restatesRecalledMemory({
       return false;
     }
     const leftover = `${note.slice(0, at)} ${note.slice(at + stored.length)}`.replace(/ +/g, ' ').trim();
-    return leftover.length <= RESTATED_MAX_LEFTOVER_CHARACTERS;
+    return leftoverIsOnlyFraming(leftover);
   });
 }
 

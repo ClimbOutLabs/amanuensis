@@ -429,7 +429,7 @@ describe('parseNotesReply and what the turn recalled from its memory pages', () 
     expect(parse({ responses: [1], reply: shouted, recalledMemory: [PAGE] })).toEqual([]);
   });
 
-  it('keeps a sentence that wraps a recalled text whole when its own tail runs past the leftover allowance', () => {
+  it('keeps a sentence that wraps a recalled text whole when its tail carries words of its own', () => {
     expect(
       parse({
         responses: [1],
@@ -481,6 +481,48 @@ describe('parseNotesReply and what the turn recalled from its memory pages', () 
         recalledMemory: ['The ferry leaves from pier 4 on weekdays.'],
       }),
     ).toEqual([]);
+  });
+
+  it('keeps a sentence that narrows a recalled fact with a short qualifier of its own', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday after noon.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'The venue is available on Friday after noon.' }]);
+  });
+
+  it('keeps a sentence that adds a short time of its own to a recalled fact', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday at noon.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'The venue is available on Friday at noon.' }]);
+  });
+
+  it('drops a sentence whose only words around a recalled fact point back at where it was read', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'As noted, the venue is available on Friday.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('keeps a sentence that states a recalled fact twice over', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday, and the venue is available on Friday.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([
+      { source: 'assistant_response', text: 'The venue is available on Friday, and the venue is available on Friday.' },
+    ]);
   });
 
   it('keeps a short sentence even when its words appear in the recalled text', () => {
