@@ -403,23 +403,34 @@ function selectedSentences({
 /** A restated fact shorter than this is too little to tell apart from a new short statement of the reply's own. */
 const RESTATED_MIN_CHARACTERS = 20;
 
+/** What may be left of a sentence around a whole recalled text before the sentence counts as carrying something of its own. */
+const RESTATED_MAX_LEFTOVER_CHARACTERS = 12;
+
 /**
  * Text compared by its words alone: any note label is taken off, and case, spacing and punctuation are
- * flattened away, so two wordings of one fact compare by what they say.
+ * flattened away, so two wordings of one fact compare by what they say. A sign on a number is the one
+ * mark kept, spelled out as a word, because it changes the fact: minus eighteen is not eighteen.
  */
 function comparisonText(text: string): string {
-  return noteTextWithoutLabel(text)
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
+  return (
+    noteTextWithoutLabel(text)
+      // A minus sign (hyphen-minus, U+2212, en dash or non-breaking hyphen) or a plus sign directly
+      // before a digit becomes a word, so it survives the flattening below and every drawing of the
+      // same sign compares equal.
+      .replace(/[-\u2212\u2013\u2011](?=\d)/g, 'minus ')
+      .replace(/\+(?=\d)/g, 'plus ')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()
+  );
 }
 
 /**
  * Whether a reply sentence only says again what the turn read out of its stored memory pages. The words
- * must match whole on one side or the other: the sentence inside the recalled text, or, when the recalled
- * text is the shorter of the two, the recalled text inside the sentence. Either way the matched words
- * must reach the minimum length, so a short sentence is never dropped over a few shared words. A sentence
- * that adds anything of its own is not a restatement and is kept.
+ * must match whole on one side or the other: the sentence inside the recalled text, or the recalled text
+ * inside the sentence with at most twelve characters of the sentence left over around it. Either way the
+ * matched words must reach the minimum length, so a short sentence is never dropped over a few shared
+ * words. A sentence left carrying more than that leftover is not a restatement and is kept.
  */
 function restatesRecalledMemory({
   text,
@@ -434,7 +445,18 @@ function restatesRecalledMemory({
   }
   return recalledMemory.some(recalled => {
     const stored = comparisonText(recalled);
-    return stored.includes(note) || (stored.length >= RESTATED_MIN_CHARACTERS && note.includes(stored));
+    if (stored.includes(note)) {
+      return true;
+    }
+    if (stored.length < RESTATED_MIN_CHARACTERS) {
+      return false;
+    }
+    const at = note.indexOf(stored);
+    if (at === -1) {
+      return false;
+    }
+    const leftover = `${note.slice(0, at)} ${note.slice(at + stored.length)}`.replace(/ +/g, ' ').trim();
+    return leftover.length <= RESTATED_MAX_LEFTOVER_CHARACTERS;
   });
 }
 

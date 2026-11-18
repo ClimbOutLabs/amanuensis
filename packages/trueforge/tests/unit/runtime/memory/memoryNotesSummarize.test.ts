@@ -429,11 +429,55 @@ describe('parseNotesReply and what the turn recalled from its memory pages', () 
     expect(parse({ responses: [1], reply: shouted, recalledMemory: [PAGE] })).toEqual([]);
   });
 
-  it('drops a sentence that wraps a short recalled text whole, with only a tail of its own', () => {
+  it('keeps a sentence that wraps a recalled text whole when its own tail runs past the leftover allowance', () => {
     expect(
       parse({
         responses: [1],
         reply: 'The ferry leaves from pier 4 on weekdays, as the timetable page says.',
+        recalledMemory: ['The ferry leaves from pier 4 on weekdays.'],
+      }),
+    ).toEqual([
+      { source: 'assistant_response', text: 'The ferry leaves from pier 4 on weekdays, as the timetable page says.' },
+    ]);
+  });
+
+  it('keeps a reply sentence that corrects the sign of a number the recalled text stated without one', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The freezer target is −18 °C.',
+        recalledMemory: ['The freezer target is 18 °C.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'The freezer target is −18 °C.' }]);
+  });
+
+  it('drops the same signed fact however the minus sign is drawn', () => {
+    const page = 'The freezer target is −18 °C.';
+    expect(parse({ responses: [1], reply: 'The freezer target is -18 °C.', recalledMemory: [page] })).toEqual([]);
+    expect(parse({ responses: [1], reply: 'The freezer target is –18 °C.', recalledMemory: [page] })).toEqual([]);
+    expect(parse({ responses: [1], reply: 'The freezer target is ‑18 °C.', recalledMemory: [page] })).toEqual([]);
+  });
+
+  it('keeps a sentence that repeats a recalled fact whole and adds a clause of its own', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The ferry leaves from pier 4 on weekdays, and the last sailing now leaves at nine instead of eight.',
+        recalledMemory: ['The ferry leaves from pier 4 on weekdays.'],
+      }),
+    ).toEqual([
+      {
+        source: 'assistant_response',
+        text: 'The ferry leaves from pier 4 on weekdays, and the last sailing now leaves at nine instead of eight.',
+      },
+    ]);
+  });
+
+  it('drops a sentence that wraps a recalled fact whole with only a short lead-in of its own', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'As noted, the ferry leaves from pier 4 on weekdays.',
         recalledMemory: ['The ferry leaves from pier 4 on weekdays.'],
       }),
     ).toEqual([]);
