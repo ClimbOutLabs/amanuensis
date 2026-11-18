@@ -721,6 +721,57 @@ export function runGoalStoreContractSuite(getStore: () => IGoalStore | GoalStore
     expect(reclaimed.fencing_token).toBeGreaterThan(claim.fencing_token);
   });
 
+  it('fences the old token out after a pause, a resume, and a fresh claim by the same worker', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const step = await store.addStep({
+      ...owner,
+      description: 'Confirm the community hall for 15 June',
+      depends_on: [],
+      status: 'ready',
+      acceptance_criteria: ['The hall replies with the date held'],
+      evidence_ids: [],
+      action_id: null,
+    });
+    const first = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 });
+    if (first === undefined) {
+      throw new Error('Expected worker A to claim the goal');
+    }
+    const paused = await store.updateGoal({ ...owner, expected_revision: 1, patch: { lifecycle: 'paused' } });
+    expect(paused.lifecycle).toBe('paused');
+    const resumed = await store.updateGoal({ ...owner, expected_revision: 2, patch: { lifecycle: 'active' } });
+    expect(resumed.lifecycle).toBe('active');
+    const second = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 });
+    if (second === undefined) {
+      throw new Error('Expected worker A to claim the resumed goal');
+    }
+    expect(second.fencing_token).toBeGreaterThan(first.fencing_token);
+    await expect(
+      store.updateStep({
+        ...owner,
+        step_id: step.step_id,
+        expected_revision: 1,
+        fencing_token: first.fencing_token,
+        patch: { status: 'verified' },
+      }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect(await store.listSteps(owner)).toEqual([step]);
+    expect(await store.releaseClaim({ ...owner, fencing_token: first.fencing_token })).toBe(false);
+    const live = await store.getClaim(owner);
+    expect(live?.fencing_token).toBe(second.fencing_token);
+    expect(live !== undefined && live.expires_at > new Date().toISOString()).toBe(true);
+    const committed = await store.updateStep({
+      ...owner,
+      step_id: step.step_id,
+      expected_revision: 1,
+      fencing_token: second.fencing_token,
+      patch: { status: 'verified' },
+    });
+    expect(committed.status).toBe('verified');
+    expect(committed.revision).toBe(2);
+  });
+
   it('refuses a claim on an ended goal', async () => {
     const store = getStore();
     const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
