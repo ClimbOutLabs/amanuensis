@@ -578,6 +578,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const ThreadListEmptyState = useSlot('ThreadListEmptyState');
 
   const indices = useThreadListIndicesByRecency(variant);
+  const [showArchived, setShowArchived] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const openChatById = useOpenChatById();
@@ -695,15 +696,28 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     void Promise.resolve(aui.threads().switchToNewThread()).catch(() => undefined);
   };
 
-  const emptyMessage = isRecentHistory ? 'Your chats will show up here.' : undefined;
+  const emptyMessage = showArchived
+    ? 'No archived chats.'
+    : isRecentHistory
+      ? 'Your chats will show up here.'
+      : undefined;
   const loadedRemoteSessionIdSet = new Set(loadedRemoteSessionIds);
   const hasFolderOnlySessions = remoteSessionIds.some(sessionId => !loadedRemoteSessionIdSet.has(sessionId));
   const hasFolders = chatFolders !== null && (chatFolders.folders.length > 0 || hasFolderOnlySessions);
   const titleQuery = searchOpen ? searchQuery : '';
   // A private chat is shown while it is open, but a search never finds it.
-  const searchableEntries =
-    titleQuery.trim() === '' ? entries : entries.filter(entry => entry.remoteId !== openPrivateChatId);
-  const shownEntries = isRecentHistory ? filterChatsByTitle({ chats: searchableEntries, query: titleQuery }) : entries;
+  const searching = titleQuery.trim() !== '';
+  const visibleEntries = entries.filter(entry => {
+    if (searching) {
+      return entry.remoteId !== openPrivateChatId;
+    }
+    const archived = entry.remoteId !== undefined && chatFolders?.archivedSessionIds?.has(entry.remoteId) === true;
+    return archived === showArchived;
+  });
+  const searchableEntries = visibleEntries;
+  const shownEntries = isRecentHistory
+    ? filterChatsByTitle({ chats: searchableEntries, query: titleQuery })
+    : visibleEntries;
   const openKey = activeRemoteId == null ? undefined : entries.find(entry => entry.remoteId === activeRemoteId)?.key;
   const messageSearchActive = isRecentHistory && searchOpen && searchQuery.trim().length > 0;
   const titleMatchSessionIds = new Set(
@@ -784,6 +798,16 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
             : undefined
         }
       >
+        {chatFolders?.setArchived !== undefined ? (
+          <button
+            type="button"
+            aria-pressed={showArchived}
+            className="mx-2 mb-1 rounded-md px-2 py-1 text-left text-sm text-text-secondary hover:bg-ghost-button-hover"
+            onClick={() => setShowArchived(value => !value)}
+          >
+            {showArchived ? 'Back to chats' : 'Archived chats'}
+          </button>
+        ) : null}
         {chatFolders?.loadError != null ? (
           <p role="alert" className="mx-2 mb-2 rounded-md bg-failure-bg/12 px-2 py-1.5 text-sm text-failure-bg">
             {chatFolders.loadError}

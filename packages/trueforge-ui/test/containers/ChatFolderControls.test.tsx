@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ThreadListRowProps } from '@/atoms/ThreadListRow.js';
 import { CompactLayoutProvider } from '@/atoms/lib/CompactLayoutContext.js';
 import { ThreadListContainer } from '@/containers/ThreadListContainer.js';
+import { ChatFolderProvider, type ChatFolderStore } from '@/server/ChatFolderContext.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 import { createMockAgentUIServer } from '../server/mockServer.js';
@@ -28,8 +29,10 @@ function ThreadListRowOverride({ title, onSelect, actions }: ThreadListRowProps)
 function DeleteChatHarness({
   title,
   deleteSession,
+  archiveStore,
 }: {
   title: string;
+  archiveStore?: ChatFolderStore;
   deleteSession: (request: { sessionId: string }) => Promise<void>;
 }) {
   const runtime = useExternalStoreRuntime<ThreadMessageLike>({
@@ -52,7 +55,9 @@ function DeleteChatHarness({
       <SlotsProvider overrides={{ ThreadListRow: ThreadListRowOverride }}>
         <CompactLayoutProvider>
           <ServerProvider server={createMockAgentUIServer({ deleteSession })}>
-            <ThreadListContainer />
+            <ChatFolderProvider store={archiveStore}>
+              <ThreadListContainer variant="recent-history" />
+            </ChatFolderProvider>
           </ServerProvider>
         </CompactLayoutProvider>
       </SlotsProvider>
@@ -102,5 +107,66 @@ describe('ChatFolderControls delete confirmation', () => {
       expect(deleteSession).toHaveBeenCalledTimes(1);
     });
     expect(deleteSession).toHaveBeenCalledWith({ sessionId: 'session-1' });
+  });
+});
+
+describe('chat archive', () => {
+  function archiveStore(setSessionArchived: NonNullable<ChatFolderStore['setSessionArchived']>): ChatFolderStore {
+    return {
+      load: async () => ({ folders: [], assignments: [], folderSessions: [], unfiledSessions: [] }),
+      createFolder: vi.fn(),
+      renameFolder: vi.fn(),
+      deleteFolder: vi.fn(),
+      setSessionFolder: vi.fn(),
+      setSessionArchived,
+    };
+  }
+
+  it('archives, finds the chat in search and restores it from the archive', async () => {
+    const setSessionArchived = vi.fn(async () => {});
+    render(
+      <DeleteChatHarness
+        title="Quarterly plan"
+        deleteSession={vi.fn()}
+        archiveStore={archiveStore(setSessionArchived)}
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Archived chats' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive chat' }));
+    await waitFor(() => expect(screen.queryByTestId('thread-row-Quarterly plan')).toBeNull());
+    expect(setSessionArchived).toHaveBeenCalledWith({ sessionId: 'session-1', archived: true });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search chats' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search chats' }), { target: { value: 'Quarterly' } });
+    expect(screen.getByTestId('thread-row-Quarterly plan')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Search chats' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archived chats' }));
+    expect(screen.getByTestId('thread-row-Quarterly plan')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Restore chat' }));
+    await waitFor(() => expect(screen.queryByTestId('thread-row-Quarterly plan')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Back to chats' }));
+    expect(screen.getByTestId('thread-row-Quarterly plan')).toBeInTheDocument();
+    expect(setSessionArchived).toHaveBeenLastCalledWith({ sessionId: 'session-1', archived: false });
+  });
+
+  it('keeps a chat visible if the archive write fails', async () => {
+    render(
+      <DeleteChatHarness
+        title="Quarterly plan"
+        deleteSession={vi.fn()}
+        archiveStore={archiveStore(async () => {
+          throw new Error('offline');
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive chat' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('Could not change the archive. Try again.'),
+    );
+    expect(screen.getByTestId('thread-row-Quarterly plan')).toBeInTheDocument();
   });
 });

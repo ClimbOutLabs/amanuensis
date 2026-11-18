@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 export type ChatFolder = {
   id: string;
@@ -22,11 +22,13 @@ export type ChatFolderSnapshot = {
   folderSessions: Array<{ folderId: string; sessions: ChatFolderSession[] }>;
   /** Chats with no folder, loaded from the server like the folder chats. */
   unfiledSessions: ChatFolderSession[];
+  archivedSessionIds?: string[];
 };
 
 /** Host-owned persistence for organizing remote chats. */
 export interface ChatFolderStore {
   load(): Promise<ChatFolderSnapshot>;
+  setSessionArchived?(input: { sessionId: string; archived: boolean }): Promise<void>;
   createFolder(input: { name: string }): Promise<ChatFolder>;
   renameFolder(input: { folderId: string; name: string }): Promise<ChatFolder>;
   deleteFolder(input: { folderId: string }): Promise<void>;
@@ -34,6 +36,8 @@ export interface ChatFolderStore {
 }
 
 type ChatFolderContextValue = {
+  archivedSessionIds: ReadonlySet<string>;
+  setArchived: ((input: { sessionId: string; archived: boolean }) => Promise<void>) | undefined;
   folders: readonly ChatFolder[];
   assignments: ReadonlyMap<string, string>;
   folderSessions: ReadonlyMap<string, readonly ChatFolderSession[]>;
@@ -65,6 +69,8 @@ function sortFolders(folders: readonly ChatFolder[]): ChatFolder[] {
 }
 
 export function ChatFolderProvider({ store, children }: { store?: ChatFolderStore; children: ReactNode }) {
+  const archiveChanges = useRef(new Map<string, boolean>());
+  const [archivedSessionIds, setArchivedSessionIds] = useState<ReadonlySet<string>>(() => new Set());
   const [folders, setFolders] = useState<readonly ChatFolder[]>([]);
   const [assignments, setAssignments] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [folderSessions, setFolderSessions] = useState<ReadonlyMap<string, readonly ChatFolderSession[]>>(
@@ -75,6 +81,7 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
 
   useEffect(() => {
     if (store === undefined) {
+      setArchivedSessionIds(new Set());
       setFolders([]);
       setAssignments(new Map());
       setFolderSessions(new Map());
@@ -93,6 +100,15 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
       .then(snapshot => {
         if (cancelled) return;
         clearTimeout(timeout);
+        const archived = new Set(snapshot.archivedSessionIds ?? []);
+        for (const [sessionId, value] of archiveChanges.current) {
+          if (value) {
+            archived.add(sessionId);
+          } else {
+            archived.delete(sessionId);
+          }
+        }
+        setArchivedSessionIds(archived);
         setFolders(sortFolders(snapshot.folders));
         setAssignments(new Map(snapshot.assignments.map(row => [row.sessionId, row.folderId])));
         setFolderSessions(new Map(snapshot.folderSessions.map(row => [row.folderId, row.sessions])));
@@ -110,6 +126,26 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
       clearTimeout(timeout);
     };
   }, [store]);
+
+  const setArchived = useCallback(
+    async ({ sessionId, archived }: { sessionId: string; archived: boolean }) => {
+      if (store?.setSessionArchived === undefined) {
+        throw new Error('Archiving is unavailable. Refresh the page and try again.');
+      }
+      await store.setSessionArchived({ sessionId, archived });
+      archiveChanges.current.set(sessionId, archived);
+      setArchivedSessionIds(current => {
+        const next = new Set(current);
+        if (archived) {
+          next.add(sessionId);
+        } else {
+          next.delete(sessionId);
+        }
+        return next;
+      });
+    },
+    [store],
+  );
 
   const createFolder = useCallback(
     async ({ name }: { name: string }) => {
@@ -224,6 +260,8 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
   const value = useMemo<ChatFolderContextValue | null>(() => {
     if (store === undefined) return null;
     return {
+      archivedSessionIds,
+      setArchived: store.setSessionArchived === undefined ? undefined : setArchived,
       folders,
       assignments,
       folderSessions,
@@ -237,6 +275,8 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
       removeFolderSession,
     };
   }, [
+    archivedSessionIds,
+    setArchived,
     assignments,
     createFolder,
     deleteFolder,
