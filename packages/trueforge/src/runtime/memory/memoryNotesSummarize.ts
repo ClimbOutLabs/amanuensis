@@ -12,7 +12,7 @@ import { redactSecretShapes } from '../../dataExport/secretScrub';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { TurnModelUsage } from '../modelUsage';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
-import { ASSISTANT_RESPONSE_SOURCE, type MemoryNoteSource } from './memoryNotes';
+import { ASSISTANT_RESPONSE_SOURCE, noteTextWithoutLabel, type MemoryNoteSource } from './memoryNotes';
 import {
   askSummaryModel,
   boundedText,
@@ -400,11 +400,51 @@ function selectedSentences({
   return picked;
 }
 
+/** A restated fact shorter than this is too little to tell apart from a new short statement of the reply's own. */
+const RESTATED_MIN_CHARACTERS = 20;
+
+/**
+ * Text compared by its words alone: any note label is taken off, and case, spacing and punctuation are
+ * flattened away, so two wordings of one fact compare by what they say.
+ */
+function comparisonText(text: string): string {
+  return noteTextWithoutLabel(text)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * Whether a reply sentence only says again what the turn read out of its stored memory pages. The words
+ * must match whole on one side or the other: the sentence inside the recalled text, or, when the recalled
+ * text is the shorter of the two, the recalled text inside the sentence. Either way the matched words
+ * must reach the minimum length, so a short sentence is never dropped over a few shared words. A sentence
+ * that adds anything of its own is not a restatement and is kept.
+ */
+function restatesRecalledMemory({
+  text,
+  recalledMemory,
+}: {
+  text: string;
+  recalledMemory: readonly string[];
+}): boolean {
+  const note = comparisonText(text);
+  if (note.length < RESTATED_MIN_CHARACTERS) {
+    return false;
+  }
+  return recalledMemory.some(recalled => {
+    const stored = comparisonText(recalled);
+    return stored.includes(note) || (stored.length >= RESTATED_MIN_CHARACTERS && note.includes(stored));
+  });
+}
+
 /**
  * Turns the model's reply into notes. A finding must point at a real result, share its names, numbers or
  * words, and read as neither an instruction nor a statement about the person. A reply note is one of the
  * numbered reply sentences, stored as written, and must pass the same checks. Anything that reads as a
- * work plan or holds a secret is dropped. Exported for tests.
+ * work plan or holds a secret is dropped. A reply sentence that only repeats what the turn read out of
+ * its stored memory pages is dropped too: that fact is already kept, dated the day it was first saved.
+ * Exported for tests.
  */
 export function parseNotesReply({
   reply,
@@ -412,12 +452,15 @@ export function parseNotesReply({
   sentences,
   personName,
   assistantName,
+  recalledMemory,
 }: {
   reply: string;
   results: readonly TurnToolResult[];
   sentences: readonly string[];
   personName: string | undefined;
   assistantName?: string | undefined;
+  /** What the turn read out of its stored memory pages, kept apart from the findings. */
+  recalledMemory?: readonly string[] | undefined;
 }): TurnNote[] {
   const parsed = NotesReplySchema.safeParse(extractReplyJson(reply.trim()));
   if (!parsed.success) {
@@ -441,7 +484,12 @@ export function parseNotesReply({
   }
   const replies = selectedSentences({ responses: parsed.data.responses, sentences })
     .flatMap(sentence => usableNoteText({ text: sentence, assistantName }) ?? [])
-    .filter(text => !NEGATED_HEADER_ITEM.test(text) && !readsAsAboutThePerson({ text, personName }));
+    .filter(
+      text =>
+        !NEGATED_HEADER_ITEM.test(text) &&
+        !readsAsAboutThePerson({ text, personName }) &&
+        !restatesRecalledMemory({ text, recalledMemory: recalledMemory ?? [] }),
+    );
   for (const text of replies.slice(0, NOTES_MAX_REPLIES)) {
     notes.push({ source: ASSISTANT_RESPONSE_SOURCE, text });
   }
@@ -454,6 +502,8 @@ export function parseNotesReply({
  */
 export async function summarizeTurnNotes(params: {
   results: readonly TurnToolResult[];
+  /** What the turn read out of its stored memory pages, so a reply that only repeats it is not kept as a new note. */
+  recalledMemory?: readonly string[] | undefined;
   assistantText: string;
   turnDate: string;
   timeZone?: string | undefined;
@@ -506,5 +556,6 @@ export async function summarizeTurnNotes(params: {
     sentences,
     personName: params.personName,
     assistantName: params.assistantName,
+    recalledMemory: params.recalledMemory,
   });
 }

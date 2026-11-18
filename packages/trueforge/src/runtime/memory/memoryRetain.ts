@@ -211,6 +211,11 @@ export interface SubmitRetainParams {
   /** What the turn's tools returned, so concrete findings can be saved as labeled notes. */
   toolResults?: readonly TurnToolResult[] | undefined;
   /**
+   * What the turn read out of its own stored memory pages, kept apart from the findings: a reply that
+   * only repeats it is not saved as a new note, since the fact is already kept.
+   */
+  recalledMemory?: readonly string[] | undefined;
+  /**
    * Context for LLM summarization of the turn. Present only when turn summarization was
    * enabled for the turn (the Settings toggle's persisted override, else the
    * `MEMORY_SUMMARIZE` env default, resolved once per turn by `resolveTurnSummarizeContext`);
@@ -332,6 +337,7 @@ async function decideNotes({
 }): Promise<LabeledNote[]> {
   const notes = await summarizeTurnNotes({
     results: params.toolResults ?? [],
+    recalledMemory: params.recalledMemory,
     assistantText: params.assistantText,
     turnDate: params.completedAt,
     timeZone: params.timeZone,

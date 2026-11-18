@@ -26,6 +26,9 @@ const NOW = '2026-09-01T12:00:00.000Z';
 /** Every set of results the note pass was handed, one entry per call. */
 const mockNotePassResults: TurnToolResult[][] = [];
 
+/** What each note pass call was told the turn had recalled from its memory pages, one entry per call. */
+const mockNotePassRecalled: (readonly string[])[] = [];
+
 jest.mock('../../../src/runtime/memory/memoryNotesSummarize', () => {
   const actual = jest.requireActual<typeof import('../../../src/runtime/memory/memoryNotesSummarize')>(
     '../../../src/runtime/memory/memoryNotesSummarize',
@@ -34,6 +37,7 @@ jest.mock('../../../src/runtime/memory/memoryNotesSummarize', () => {
     ...actual,
     summarizeTurnNotes: jest.fn(params => {
       mockNotePassResults.push(params.results);
+      mockNotePassRecalled.push(params.recalledMemory ?? []);
       const [first] = params.results;
       return Promise.resolve(
         first === undefined ? [] : [{ source: first.source, text: 'A finding taken from the first result.' }],
@@ -190,6 +194,7 @@ function noteItems(items: readonly RetainItem[]): RetainItem[] {
 describe('drainTurnEvents and the note pass', () => {
   beforeEach(() => {
     mockNotePassResults.length = 0;
+    mockNotePassRecalled.length = 0;
   });
 
   it('never hands a result read out of the memory pages to the note pass, and stores no note from it', async () => {
@@ -199,6 +204,14 @@ describe('drainTurnEvents and the note pass', () => {
       expect(results).toEqual([]);
     }
     expect(noteItems(items)).toEqual([]);
+  });
+
+  it('tells the note pass what the turn recalled, apart from the findings', async () => {
+    await retainedItems(wrappedPageRead(MEMORY_PAGE));
+    expect(mockNotePassRecalled.length).toBeGreaterThan(0);
+    for (const recalled of mockNotePassRecalled) {
+      expect(recalled).toEqual([MEMORY_PAGE]);
+    }
   });
 
   it('still marks the turn as one that read outside content, so its own words keep the strict stamp', async () => {
@@ -213,7 +226,29 @@ describe('drainTurnEvents and the note pass', () => {
     for (const results of mockNotePassResults) {
       expect(results).toEqual([{ source: 'email', text: MAIL_TEXT }]);
     }
+    for (const recalled of mockNotePassRecalled) {
+      expect(recalled).toEqual([]);
+    }
     expect(noteItems(items).map(item => item.metadata[NOTE_SOURCE_METADATA_KEY])).toEqual(['email']);
+  });
+
+  it('hands a wrapped read_page on another connector to the note pass: only the memory pages server is memory', async () => {
+    const fieldPage = 'The harbour ferry leaves from pier 4 at 07:30 on weekdays.';
+    const items = await retainedItems(
+      toolRound({
+        id: 'c1',
+        name: 'call_tool',
+        args: JSON.stringify({ mcp_server: 'fieldnotes', tool_name: 'read_page', input: {} }),
+        result: fieldPage,
+      }),
+    );
+    for (const results of mockNotePassResults) {
+      expect(results).toEqual([{ source: 'other', text: fieldPage }]);
+    }
+    for (const recalled of mockNotePassRecalled) {
+      expect(recalled).toEqual([]);
+    }
+    expect(noteItems(items).map(item => item.metadata[NOTE_SOURCE_METADATA_KEY])).toEqual(['other']);
   });
 
   it('hands over only the outside result when a turn read both mail and a memory page', async () => {
