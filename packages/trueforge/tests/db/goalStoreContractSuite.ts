@@ -43,6 +43,41 @@ function fundraiserGoal(overrides: Partial<CreateGoalInput> = {}): CreateGoalInp
 
 const ZERO_USAGE = { model_calls: 0, tool_calls: 0, input_tokens: 0, output_tokens: 0 };
 
+const VENUE_EVIDENCE_INPUT = {
+  source_kind: 'document',
+  source_ref: 'venue-email-1',
+  source_revision: null,
+  content_hash: 'hash-venue-email-1',
+  observed_at: '2027-05-02T09:00:00.000Z',
+  claimed_event_at: null,
+  freshness: 'current',
+  admission: 'selected_source',
+  extraction_method: 'exact_source_values',
+};
+
+const STARTED_CYCLE_INPUT = {
+  input_revision: 1,
+  trigger_ids: ['manual-check'],
+  lease: null,
+  budgets: { max_tokens: 300000 },
+  usage: ZERO_USAGE,
+  started_at: '2027-05-02T08:00:00.000Z',
+  finished_at: null,
+  outcome: null,
+  outcome_detail: null,
+  next_check_at: null,
+};
+
+const VENUE_ACTION_INPUT = {
+  cycle_id: null,
+  expected_revision: 1,
+  preconditions: { step: 'venue' },
+  tool_call_ref: null,
+  approval_ref: null,
+  execution_state: 'proposed',
+  receipt_ref: null,
+};
+
 export function runGoalStoreContractSuite(getStore: () => IGoalStore | GoalStore): void {
   it('creates a goal at revision 1 and reads it back whole', async () => {
     const store = getStore();
@@ -396,6 +431,298 @@ export function runGoalStoreContractSuite(getStore: () => IGoalStore | GoalStore
     await expect(
       store.updateGoal({ ...owner, expected_revision: 1, fencing_token: 1, patch: { title: 'Too late' } }),
     ).rejects.toBeInstanceOf(GoalClaimFencedError);
+  });
+
+  /**
+   * The takeover interleaving the fencing tests below share: worker A claims
+   * with a lease that has already lapsed, then worker B takes the claim over
+   * with the higher token. A's token is stale from that moment on.
+   */
+  async function takenOverClaim(
+    store: IGoalStore | GoalStore,
+    owner: { tenant_id: string; created_by: string; goal_id: string },
+  ): Promise<{ staleToken: number; liveToken: number }> {
+    const stale = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 0 });
+    if (stale === undefined) {
+      throw new Error('Expected worker A to claim the goal');
+    }
+    const live = await store.claimGoal({ ...owner, worker_id: 'worker-b', ttl_ms: 60_000 });
+    if (live === undefined) {
+      throw new Error('Expected worker B to take over the claim');
+    }
+    return { staleToken: stale.fencing_token, liveToken: live.fencing_token };
+  }
+
+  it('fences a taken-over claim out of updateGoal, and the live claim still commits', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const { staleToken, liveToken } = await takenOverClaim(store, owner);
+    await expect(
+      store.updateGoal({ ...owner, expected_revision: 1, fencing_token: staleToken, patch: { title: 'Fenced write' } }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    const after = await store.getGoal(owner);
+    expect(after?.revision).toBe(1);
+    expect(after?.title).toBe('Community fundraiser');
+    const committed = await store.updateGoal({
+      ...owner,
+      expected_revision: 1,
+      fencing_token: liveToken,
+      patch: { title: 'Claimed write' },
+    });
+    expect(committed.revision).toBe(2);
+    expect(committed.title).toBe('Claimed write');
+  });
+
+  it('fences a taken-over claim out of updateStep, and the live claim still commits', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const step = await store.addStep({
+      ...owner,
+      description: 'Confirm the community hall for 15 June',
+      depends_on: [],
+      status: 'ready',
+      acceptance_criteria: ['The hall replies with the date held'],
+      evidence_ids: [],
+      action_id: null,
+    });
+    const { staleToken, liveToken } = await takenOverClaim(store, owner);
+    await expect(
+      store.updateStep({
+        ...owner,
+        step_id: step.step_id,
+        expected_revision: 1,
+        fencing_token: staleToken,
+        patch: { status: 'verified' },
+      }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect(await store.listSteps(owner)).toEqual([step]);
+    const committed = await store.updateStep({
+      ...owner,
+      step_id: step.step_id,
+      expected_revision: 1,
+      fencing_token: liveToken,
+      patch: { status: 'verified' },
+    });
+    expect(committed.status).toBe('verified');
+    expect(committed.revision).toBe(2);
+  });
+
+  it('fences a taken-over claim out of addEvidence, and the live claim still commits', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const { staleToken, liveToken } = await takenOverClaim(store, owner);
+    await expect(
+      store.addEvidence({ ...owner, ...VENUE_EVIDENCE_INPUT, fencing_token: staleToken }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect((await store.listEvidence({ ...owner, limit: 10 })).data).toEqual([]);
+    const committed = await store.addEvidence({ ...owner, ...VENUE_EVIDENCE_INPUT, fencing_token: liveToken });
+    expect(committed.source_ref).toBe('venue-email-1');
+    expect((await store.listEvidence({ ...owner, limit: 10 })).data).toEqual([committed]);
+  });
+
+  it('fences a taken-over claim out of appendEvent, and the live claim still commits', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const { staleToken, liveToken } = await takenOverClaim(store, owner);
+    await expect(
+      store.appendEvent({
+        ...owner,
+        event_type: 'observation_recorded',
+        actor: 'cycle',
+        payload: {},
+        fencing_token: staleToken,
+      }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect((await store.listEvents({ ...owner, limit: 10 })).data).toEqual([]);
+    const committed = await store.appendEvent({
+      ...owner,
+      event_type: 'observation_recorded',
+      actor: 'cycle',
+      payload: {},
+      fencing_token: liveToken,
+    });
+    expect(committed.sequence).toBe(1);
+  });
+
+  it('fences a taken-over claim out of recordCycle, and the live claim still commits', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const { staleToken, liveToken } = await takenOverClaim(store, owner);
+    await expect(
+      store.recordCycle({ ...owner, ...STARTED_CYCLE_INPUT, fencing_token: staleToken }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect((await store.listCycles({ ...owner, limit: 10 })).data).toEqual([]);
+    const committed = await store.recordCycle({ ...owner, ...STARTED_CYCLE_INPUT, fencing_token: liveToken });
+    expect(committed.input_revision).toBe(1);
+    expect((await store.listCycles({ ...owner, limit: 10 })).data).toEqual([committed]);
+  });
+
+  it('fences a taken-over claim out of updateCycle, and the live claim still commits', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const cycle = await store.recordCycle({ ...owner, ...STARTED_CYCLE_INPUT });
+    const { staleToken, liveToken } = await takenOverClaim(store, owner);
+    await expect(
+      store.updateCycle({
+        ...owner,
+        cycle_id: cycle.cycle_id,
+        fencing_token: staleToken,
+        patch: { outcome: 'completed' },
+      }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect((await store.listCycles({ ...owner, limit: 10 })).data).toEqual([cycle]);
+    const committed = await store.updateCycle({
+      ...owner,
+      cycle_id: cycle.cycle_id,
+      fencing_token: liveToken,
+      patch: { outcome: 'completed' },
+    });
+    expect(committed.outcome).toBe('completed');
+  });
+
+  it('fences a taken-over claim out of recordAction, and the live claim still commits', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const { staleToken, liveToken } = await takenOverClaim(store, owner);
+    await expect(
+      store.recordAction({ ...owner, ...VENUE_ACTION_INPUT, fencing_token: staleToken }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect((await store.listActions({ ...owner, limit: 10 })).data).toEqual([]);
+    const committed = await store.recordAction({ ...owner, ...VENUE_ACTION_INPUT, fencing_token: liveToken });
+    expect(committed.execution_state).toBe('proposed');
+    expect((await store.listActions({ ...owner, limit: 10 })).data).toEqual([committed]);
+  });
+
+  it('fences a taken-over claim out of updateAction, and the live claim still commits', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const action = await store.recordAction({ ...owner, ...VENUE_ACTION_INPUT });
+    const { staleToken, liveToken } = await takenOverClaim(store, owner);
+    await expect(
+      store.updateAction({
+        ...owner,
+        action_id: action.action_id,
+        fencing_token: staleToken,
+        patch: { execution_state: 'approved' },
+      }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect((await store.listActions({ ...owner, limit: 10 })).data).toEqual([action]);
+    const committed = await store.updateAction({
+      ...owner,
+      action_id: action.action_id,
+      fencing_token: liveToken,
+      patch: { execution_state: 'approved', approval_ref: 'approval-1' },
+    });
+    expect(committed.execution_state).toBe('approved');
+    expect(committed.approval_ref).toBe('approval-1');
+  });
+
+  it('an owner pause revokes the live claim, and the paused worker is fenced out', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const step = await store.addStep({
+      ...owner,
+      description: 'Confirm the community hall for 15 June',
+      depends_on: [],
+      status: 'ready',
+      acceptance_criteria: ['The hall replies with the date held'],
+      evidence_ids: [],
+      action_id: null,
+    });
+    const claim = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 });
+    if (claim === undefined) {
+      throw new Error('Expected worker A to claim the goal');
+    }
+    const paused = await store.updateGoal({ ...owner, expected_revision: 1, patch: { lifecycle: 'paused' } });
+    expect(paused.lifecycle).toBe('paused');
+    const after = await store.getClaim(owner);
+    expect(after?.fencing_token).toBe(claim.fencing_token);
+    expect(after !== undefined && after.expires_at <= new Date().toISOString()).toBe(true);
+    await expect(
+      store.updateStep({
+        ...owner,
+        step_id: step.step_id,
+        expected_revision: 1,
+        fencing_token: claim.fencing_token,
+        patch: { status: 'verified' },
+      }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect(await store.listSteps(owner)).toEqual([step]);
+  });
+
+  it('an owner end revokes the live claim, and the ended worker is fenced out', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const claim = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 });
+    if (claim === undefined) {
+      throw new Error('Expected worker A to claim the goal');
+    }
+    const ended = await store.updateGoal({ ...owner, expected_revision: 1, patch: { lifecycle: 'ended' } });
+    expect(ended.lifecycle).toBe('ended');
+    await expect(
+      store.appendEvent({
+        ...owner,
+        event_type: 'observation_recorded',
+        actor: 'cycle',
+        payload: {},
+        fencing_token: claim.fencing_token,
+      }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect((await store.listEvents({ ...owner, limit: 10 })).data).toEqual([]);
+  });
+
+  it('an owner completion revokes the live claim, and the worker is fenced out', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const claim = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 });
+    if (claim === undefined) {
+      throw new Error('Expected worker A to claim the goal');
+    }
+    const completed = await store.updateGoal({ ...owner, expected_revision: 1, patch: { lifecycle: 'completed' } });
+    expect(completed.lifecycle).toBe('completed');
+    await expect(
+      store.recordAction({ ...owner, ...VENUE_ACTION_INPUT, fencing_token: claim.fencing_token }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect((await store.listActions({ ...owner, limit: 10 })).data).toEqual([]);
+  });
+
+  it('refuses writes whose claim lease expired with no takeover', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const claim = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 0 });
+    if (claim === undefined) {
+      throw new Error('Expected the claim to succeed');
+    }
+    await expect(
+      store.addEvidence({ ...owner, ...VENUE_EVIDENCE_INPUT, fencing_token: claim.fencing_token }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    await expect(
+      store.appendEvent({
+        ...owner,
+        event_type: 'observation_recorded',
+        actor: 'cycle',
+        payload: {},
+        fencing_token: claim.fencing_token,
+      }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    await expect(
+      store.recordAction({ ...owner, ...VENUE_ACTION_INPUT, fencing_token: claim.fencing_token }),
+    ).rejects.toBeInstanceOf(GoalClaimFencedError);
+    expect((await store.listEvidence({ ...owner, limit: 10 })).data).toEqual([]);
+    expect((await store.listEvents({ ...owner, limit: 10 })).data).toEqual([]);
+    expect((await store.listActions({ ...owner, limit: 10 })).data).toEqual([]);
   });
 
   it('stores a wake-up with the update that caused it, once per event key', async () => {
