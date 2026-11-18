@@ -29,7 +29,11 @@ export class GoalSetupResolutionError extends Error {
 /** JSON with object keys sorted at every depth, so equal setups hash equally however they were built. */
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value) ?? 'null';
+    // JSON.stringify hands back undefined for undefined, functions, and symbols; those spell as null here.
+    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
+      return 'null';
+    }
+    return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
     return `[${value.map(item => canonicalJson(item)).join(',')}]`;
@@ -80,7 +84,7 @@ export async function resolvePinnedSetup(input: {
     if (record === undefined) {
       throw new GoalSetupResolutionError(ref.name);
     }
-    return { name: ref.name, preload: ref.preload ?? false, digest: sha256Hex(canonicalJson(record.manifest)) };
+    return { name: ref.name, preload: ref.preload, digest: sha256Hex(canonicalJson(record.manifest)) };
   });
   return {
     agent_id: input.agent.id,
