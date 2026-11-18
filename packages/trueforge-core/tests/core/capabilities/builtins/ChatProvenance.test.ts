@@ -229,6 +229,18 @@ describe('a call that read the stored memory pages', () => {
     expect(callReadsMemoryPages(call)).toBe(true);
   });
 
+  it.each(['read_page', 'list_pages'])(
+    'does not count a %s call wrapped for a server that is not the memory pages',
+    tool_name => {
+      const call = storedCall({
+        name: 'call_tool',
+        args: { mcp_server: 'fieldnotes', tool_name, input: {} },
+        stamp: CONNECTOR_TOOL,
+      });
+      expect(callReadsMemoryPages(call)).toBe(false);
+    },
+  );
+
   it('does not count a call that wrote to the pages', () => {
     expect(callReadsMemoryPages(storedCall({ name: 'remember_fact', stamp: OWN_TOOL }))).toBe(false);
     const wrapped = storedCall({

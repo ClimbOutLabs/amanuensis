@@ -10,6 +10,7 @@ import {
   isMemoryPagesReadToolName,
   isMemoryPagesToolName,
   isMemoryPagesWriteToolName,
+  MEMORY_PAGES_SERVER_ID,
 } from '../../memory/pagesToolContract';
 import { collectOutboundStrings } from '../../permissions/outboundGuard';
 import type { ReadSource } from '../../permissions/provenance';
@@ -37,10 +38,12 @@ import { HOST_SUMMARY_PREFACE } from './ContextCompaction';
 
 /**
  * The tool a call reached and the arguments it sent. A call the model made through the call_tool wrapper counts as
- * the tool the wrapper names, so wrapped and direct calls to the same tool count the same way.
+ * the tool the wrapper names, so wrapped and direct calls to the same tool count the same way. A wrapped call
+ * also carries the server the wrapper named, which is the only thing that tells whose tool it was.
  */
 function calledTool(call: RawToolCall): {
   tool_name: string;
+  mcp_server: string | undefined;
   stamp: HostToolStamp;
   argument_values: string[];
   wrapped: boolean;
@@ -53,6 +56,7 @@ function calledTool(call: RawToolCall): {
   const sent = collectOutboundStrings(wrapped?.input ?? args ?? {});
   return {
     tool_name: wrapped?.tool_name ?? call.function.name,
+    mcp_server: wrapped?.mcp_server,
     stamp: stampOf(call),
     argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
     wrapped: wrapped !== undefined,
@@ -117,13 +121,18 @@ export function callResultSource(call: RawToolCall | undefined): ToolResultSourc
  * Whether a call read the stored memory pages, directly or through the call_tool wrapper. What such a
  * result holds is memory itself, not something the turn found, so it is told apart here, where the call
  * is known, rather than by the coarse source a result is labeled with. A call that is not known reads
- * nothing that can be named, so it does not count.
+ * nothing that can be named, so it does not count. A wrapped call counts only when the wrapper names
+ * the memory pages server itself: a connector may offer a tool with the same name as a page read, and
+ * what that tool returns is a finding of the turn, not memory.
  */
 export function callReadsMemoryPages(call: RawToolCall | undefined): boolean {
   if (call === undefined) {
     return false;
   }
-  return isMemoryPagesReadToolName(calledTool(call).tool_name);
+  const called = calledTool(call);
+  return (
+    isMemoryPagesReadToolName(called.tool_name) && (!called.wrapped || called.mcp_server === MEMORY_PAGES_SERVER_ID)
+  );
 }
 
 /**
@@ -278,7 +287,7 @@ export function chatProvenanceCapability(input: { turn: WebSearchTurnState }): A
         }
         const called =
           call === undefined
-            ? { tool_name: '', stamp: NO_HOST_STAMP, argument_values: [], wrapped: false }
+            ? { tool_name: '', mcp_server: undefined, stamp: NO_HOST_STAMP, argument_values: [], wrapped: false }
             : calledTool(call);
         recordToolResultProvenance({ state: input.turn, ...called, texts: [message.content] });
       }
