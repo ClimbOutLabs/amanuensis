@@ -27,6 +27,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  callReadsMemoryPages,
   callResultSource,
   chatSawOutsideText,
   existingSandboxIdForProvider,
@@ -1537,13 +1538,18 @@ async function runTurnEventDrain(params: {
         }
       }
       if (readOutside && (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2)) {
-        // Kept for the note pass; a result that did not run cleanly holds no finding.
+        // Kept for the note pass; a result that did not run cleanly holds no finding. A result read out
+        // of the stored memory pages is not kept: it is memory itself, not a finding of this turn, so
+        // the note pass must not store it again as one. The turn still counts as having read outside
+        // content, exactly as the tracker above decided; only the note pass is kept from repeating it.
+        const call = outsideInput.callOf(event);
         if (
           (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') &&
-          toolResults.length < TURN_TOOL_RESULTS_KEPT
+          toolResults.length < TURN_TOOL_RESULTS_KEPT &&
+          !callReadsMemoryPages(call)
         ) {
           toolResults.push({
-            source: callResultSource(outsideInput.callOf(event)),
+            source: callResultSource(call),
             text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
           });
         }

@@ -6,7 +6,11 @@ import {
   type RawToolCall,
 } from '../../llm/LLMTypes';
 import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
-import { isMemoryPagesToolName, isMemoryPagesWriteToolName } from '../../memory/pagesToolContract';
+import {
+  isMemoryPagesReadToolName,
+  isMemoryPagesToolName,
+  isMemoryPagesWriteToolName,
+} from '../../memory/pagesToolContract';
 import { collectOutboundStrings } from '../../permissions/outboundGuard';
 import type { ReadSource } from '../../permissions/provenance';
 import { recordPersonText, recordReplyText, recordUntrustedText } from '../../permissions/provenance';
@@ -107,6 +111,19 @@ export function callResultSource(call: RawToolCall | undefined): ToolResultSourc
   }
   const called = calledTool(call);
   return TOOL_RESULT_SOURCE_OF_READ[readSourceOf(called.tool_name, called.stamp)];
+}
+
+/**
+ * Whether a call read the stored memory pages, directly or through the call_tool wrapper. What such a
+ * result holds is memory itself, not something the turn found, so it is told apart here, where the call
+ * is known, rather than by the coarse source a result is labeled with. A call that is not known reads
+ * nothing that can be named, so it does not count.
+ */
+export function callReadsMemoryPages(call: RawToolCall | undefined): boolean {
+  if (call === undefined) {
+    return false;
+  }
+  return isMemoryPagesReadToolName(calledTool(call).tool_name);
 }
 
 /**

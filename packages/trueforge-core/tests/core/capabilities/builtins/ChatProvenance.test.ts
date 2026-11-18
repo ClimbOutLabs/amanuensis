@@ -1,4 +1,5 @@
 import {
+  callReadsMemoryPages,
   callReturnsOutsideContent,
   chatProvenanceCapability,
   contextHasOutsideToolResult,
@@ -211,5 +212,44 @@ describe('an address in an earlier reply of the assistant', () => {
       { role: 'user', content: 'thanks' },
     ]);
     expect(hasReadContent(provenance)).toBe(false);
+  });
+});
+
+describe('a call that read the stored memory pages', () => {
+  it.each(['read_page', 'list_pages'])('counts a direct %s call', name => {
+    expect(callReadsMemoryPages(storedCall({ name, stamp: OWN_TOOL }))).toBe(true);
+  });
+
+  it.each(['read_page', 'list_pages'])('counts a %s call reached through the call_tool wrapper', tool_name => {
+    const call = storedCall({
+      name: 'call_tool',
+      args: { mcp_server: 'memory_pages', tool_name, input: {} },
+      stamp: OWN_TOOL,
+    });
+    expect(callReadsMemoryPages(call)).toBe(true);
+  });
+
+  it('does not count a call that wrote to the pages', () => {
+    expect(callReadsMemoryPages(storedCall({ name: 'remember_fact', stamp: OWN_TOOL }))).toBe(false);
+    const wrapped = storedCall({
+      name: 'call_tool',
+      args: { mcp_server: 'memory_pages', tool_name: 'remember_fact', input: {} },
+      stamp: OWN_TOOL,
+    });
+    expect(callReadsMemoryPages(wrapped)).toBe(false);
+  });
+
+  it('does not count a call to any other tool, direct or wrapped', () => {
+    expect(callReadsMemoryPages(storedCall({ name: 'gmail__read_email', stamp: CONNECTOR_TOOL }))).toBe(false);
+    const wrapped = storedCall({
+      name: 'call_tool',
+      args: { mcp_server: 'notes', tool_name: 'search_pages', input: {} },
+      stamp: CONNECTOR_TOOL,
+    });
+    expect(callReadsMemoryPages(wrapped)).toBe(false);
+  });
+
+  it('does not count a call that is not known', () => {
+    expect(callReadsMemoryPages(undefined)).toBe(false);
   });
 });

@@ -417,6 +417,22 @@ describe('buildNotesMessages', () => {
     expect(messages[1]?.content).toContain('[3] Leave by 08:55 for the GP visit so that parking is not a rush.');
     expect(messages[1]?.content).toContain('[4] Shall I set a reminder?');
   });
+
+  it('states the eligibility rule for both channels as durable knowledge, not as shapes to avoid', () => {
+    const messages = buildNotesMessages({
+      results: [EMAIL],
+      replySentences: replySentences(LONG_REPLY),
+      turnDate: '2026-10-29T12:00:00.000Z',
+      timeZone: undefined,
+    });
+    const system = messages[0]?.content ?? '';
+    expect(system).toContain('Keep a finding only when it is durable knowledge');
+    expect(system).toContain('An observation about the work in front of the assistant is not durable knowledge');
+    expect(system).toContain('not a version a tool bumped or reported');
+    expect(system).toContain('Pick a sentence only when it is a durable statement');
+    expect(system).toContain('A move in the conversation is never a note');
+    expect(system).toContain('not a request or an instruction for the task at hand');
+  });
 });
 
 describe('summarizeTurnNotes', () => {
