@@ -150,6 +150,7 @@ type SemanticTokens = {
   successText: string;
   failureBg: string;
   failureText: string;
+  failureInk: string;
   warningBg: string;
   warningText: string;
   // Kept internals
