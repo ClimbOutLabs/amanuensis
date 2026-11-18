@@ -18,18 +18,21 @@ import {
   FixtureSourceReader,
   fundraiserDraft,
   otherActor,
+  OWNER_SUBJECT_ID,
   ownerActor,
+  TENANT_ID,
 } from '../../../unit/runtime/goals/fundraiserFixture';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../testDatabase';
 
 function serviceOver(env: SqliteTestDatabase) {
   const store = createGoalStoreAdapter({ store: new GoalStore(env.db), db: env.db });
-  return createGoalService({
+  const service = createGoalService({
     store,
     agentStore: new FakeAgentStore(),
     skillStore: new FakeSkillStore(),
     now: () => FIXED_NOW,
   });
+  return { service, store };
 }
 
 describe('the fundraiser journey over the real SQLite goal store', () => {
@@ -43,8 +46,8 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
     await env.teardown();
   });
 
-  it('carries the fundraiser from draft to a check that verifies the venue and names the next step', async () => {
-    const service = serviceOver(env);
+  it('carries the fundraiser from draft to a check that records the venue evidence, then the confirmed venue names the next step', async () => {
+    const { service } = serviceOver(env);
     const actor = ownerActor();
     const draft = await service.createDraft(actor, fundraiserDraft());
 
@@ -81,7 +84,8 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
 
     // The restart leg: a fresh store and service over the same database see
     // the goal as it was left, pin and agent included.
-    const restarted = serviceOver(env);
+    const restartedParts = serviceOver(env);
+    const restarted = restartedParts.service;
     const reloaded = await restarted.getGoal(actor, draft.goal.goal_id);
     expect(reloaded.goal.lifecycle).toBe('active');
     expect(reloaded.goal.agent_id).toBe(AGENT_ID);
@@ -97,15 +101,33 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
       now: () => FIXED_NOW,
     });
     expect(check.cycle.outcome).toBe('completed');
+    expect(check.cycle.outcome_detail).toBe('Recorded 2 new sources.');
     expect(check.new_evidence).toHaveLength(2);
 
+    // The host check records the evidence and links it, and that is all it
+    // does to step state: the venue step keeps its ready status, and the
+    // equipment step stays blocked behind it.
     const checkedVenueStep = check.steps.find(step => step.description === 'Confirm the venue');
     const venueEvidence = check.new_evidence.find(evidence => evidence.source_ref === 'venue-letter');
     expect(venueEvidence).toBeDefined();
-    expect(checkedVenueStep?.status).toBe('verified');
+    expect(checkedVenueStep?.status).toBe('ready');
     expect(checkedVenueStep?.evidence_ids).toEqual([venueEvidence?.evidence_id]);
-    expect(check.next_step?.description).toBe('Book the equipment');
-    expect(check.steps.find(step => step.description === 'Book the equipment')?.status).toBe('ready');
+    expect(check.next_step?.description).toBe('Confirm the venue');
+    expect(check.steps.find(step => step.description === 'Book the equipment')?.status).toBe('planned');
+
+    // The owner confirms the venue step on the evidence the check recorded,
+    // through the store the service runs on. Confirmation is the owner's
+    // call; the host check itself never marks a step verified.
+    if (checkedVenueStep === undefined) {
+      throw new Error('The venue step is missing from the check result.');
+    }
+    await restartedParts.store.updateStep({
+      tenant_id: TENANT_ID,
+      created_by: OWNER_SUBJECT_ID,
+      goal_id: draft.goal.goal_id,
+      step_id: checkedVenueStep.step_id,
+      status: 'owner_confirmed',
+    });
 
     // Evidence read back afterwards still knows its cycle and shows what was read.
     const evidence = await restarted.listEvidence(actor, draft.goal.goal_id, {
@@ -125,7 +147,8 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
     const sequences = events.data.map(event => event.sequence);
     expect(sequences).toEqual([...sequences].sort((left, right) => left - right));
 
-    // A second check at the same source revisions finds nothing new.
+    // A second check at the same source revisions finds nothing new, and the
+    // confirmed venue unblocks the equipment step, which becomes the next step.
     const again = await runManualCheck({
       service: restarted,
       actor,
@@ -135,6 +158,9 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
     });
     expect(again.cycle.outcome).toBe('nothing_changed');
     expect(again.new_evidence).toHaveLength(0);
+    expect(again.steps.find(step => step.description === 'Confirm the venue')?.status).toBe('owner_confirmed');
+    expect(again.steps.find(step => step.description === 'Book the equipment')?.status).toBe('ready');
+    expect(again.next_step?.description).toBe('Book the equipment');
     const evidenceAfter = await restarted.listEvidence(actor, draft.goal.goal_id, {
       limit: undefined,
       page_token: undefined,
@@ -143,7 +169,7 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
   });
 
   it('keeps another owner from reading or listing the goal', async () => {
-    const service = serviceOver(env);
+    const { service } = serviceOver(env);
     const draft = await service.createDraft(ownerActor(), fundraiserDraft());
     await expect(service.getGoal(otherActor(), draft.goal.goal_id)).rejects.toBeInstanceOf(GoalNotFoundError);
     const list = await service.listGoals(otherActor(), { limit: undefined, page_token: undefined });
@@ -151,7 +177,7 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
   });
 
   it('lets a draft gain its agent through an update, and refuses that change once active', async () => {
-    const service = serviceOver(env);
+    const { service } = serviceOver(env);
     const actor = ownerActor();
     const draft = await service.createDraft(actor, { ...fundraiserDraft(), agent_id: null });
     expect(draft.goal.agent_id).toBeNull();

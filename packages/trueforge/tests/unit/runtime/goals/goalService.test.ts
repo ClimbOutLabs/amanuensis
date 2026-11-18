@@ -1,4 +1,4 @@
-import { runManualCheck } from '../../../../src/runtime/goals/goalCheck';
+import { runManualCheck, type GoalSourceRead, type GoalSourceReader } from '../../../../src/runtime/goals/goalCheck';
 import {
   createGoalService,
   GoalNotFoundError,
@@ -6,8 +6,10 @@ import {
   GoalStateError,
   type GoalService,
 } from '../../../../src/runtime/goals/goalService';
+import type { GoalRecord } from '../../../../src/runtime/goals/goalStorePort';
 import {
   AGENT_ID,
+  CATERING_QUOTE_READ,
   FakeAgentStore,
   FakeSkillStore,
   FIXED_NOW,
@@ -15,7 +17,9 @@ import {
   fundraiserDraft,
   fundraiserManifest,
   otherActor,
+  OWNER_SUBJECT_ID,
   ownerActor,
+  TENANT_ID,
 } from './fundraiserFixture';
 import { InMemoryGoalStore } from './inMemoryGoalStore';
 
@@ -38,8 +42,24 @@ async function activatedGoal(service: GoalService) {
   return { actor, draft, preview, activated };
 }
 
+/** A reader over a small invented document world a test defines for itself. */
+class MapSourceReader implements GoalSourceReader {
+  readonly askedFor: string[] = [];
+  readonly #world: Map<string, GoalSourceRead>;
+
+  constructor(world: Record<string, GoalSourceRead>) {
+    this.#world = new Map(Object.entries(world));
+  }
+
+  async read(input: { goal: GoalRecord; source: { source_ref: string } }): Promise<GoalSourceRead | undefined> {
+    await Promise.resolve();
+    this.askedFor.push(input.source.source_ref);
+    return this.#world.get(input.source.source_ref);
+  }
+}
+
 describe('goal service', () => {
-  it('carries the fundraiser from draft to a check that verifies the venue and names the next step', async () => {
+  it('carries the fundraiser from draft to a check that records the venue evidence, then the confirmed venue names the next step', async () => {
     const { store, service } = setup();
     const { actor, draft, preview, activated } = await activatedGoal(service);
 
@@ -64,7 +84,9 @@ describe('goal service', () => {
     expect(reloaded.goal.lifecycle).toBe('active');
     expect(reloaded.goal.pinned_setup?.digest).toBe(preview.setup.digest);
 
-    // Check now reads the selected sources and records what it found.
+    // Check now reads the selected sources and records what it found. The host
+    // records evidence only and never marks a step verified, so the venue step
+    // keeps its ready status and the equipment step stays blocked behind it.
     const reader = new FixtureSourceReader();
     const check = await runManualCheck({
       service: restarted,
@@ -73,23 +95,35 @@ describe('goal service', () => {
       sourceReader: reader,
     });
     expect(check.cycle.outcome).toBe('completed');
+    expect(check.cycle.outcome_detail).toBe('Recorded 2 new sources.');
     expect(check.new_evidence).toHaveLength(2);
 
     const venueStep = check.steps.find(step => step.description === 'Confirm the venue');
     const venueEvidence = check.new_evidence.find(evidence => evidence.source_ref === 'venue-letter');
     expect(venueEvidence).toBeDefined();
-    expect(venueStep?.status).toBe('verified');
+    expect(venueStep?.status).toBe('ready');
     expect(venueStep?.evidence_ids).toEqual([venueEvidence?.evidence_id]);
-
-    // The equipment step is unblocked by the venue and is the next step the plan shows.
-    expect(check.next_step?.description).toBe('Book the equipment');
-    expect(check.steps.find(step => step.description === 'Book the equipment')?.status).toBe('ready');
+    expect(check.steps.find(step => step.description === 'Book the equipment')?.status).toBe('planned');
+    expect(check.next_step?.description).toBe('Confirm the venue');
 
     // The check is on the goal's history.
     const events = await restarted.listEvents(actor, draft.goal.goal_id, { limit: undefined, page_token: undefined });
     expect(events.data.map(event => event.event_type)).toContain('goal_check_finished');
 
-    // A second check at the same source revisions finds nothing new.
+    // The owner confirms the venue step on the evidence the check recorded.
+    if (venueStep === undefined) {
+      throw new Error('The venue step is missing from the check result.');
+    }
+    await store.updateStep({
+      tenant_id: TENANT_ID,
+      created_by: OWNER_SUBJECT_ID,
+      goal_id: draft.goal.goal_id,
+      step_id: venueStep.step_id,
+      status: 'owner_confirmed',
+    });
+
+    // A second check at the same source revisions finds nothing new, and the
+    // confirmed venue unblocks the equipment step, which becomes the next step.
     const again = await runManualCheck({
       service: restarted,
       actor,
@@ -98,6 +132,92 @@ describe('goal service', () => {
     });
     expect(again.cycle.outcome).toBe('nothing_changed');
     expect(again.new_evidence).toHaveLength(0);
+    expect(again.steps.find(step => step.description === 'Confirm the venue')?.status).toBe('owner_confirmed');
+    expect(again.steps.find(step => step.description === 'Book the equipment')?.status).toBe('ready');
+    expect(again.next_step?.description).toBe('Book the equipment');
+  });
+
+  it('records a declined venue letter as evidence without verifying the step or unblocking its dependent', async () => {
+    const { service } = setup();
+    const { actor, draft } = await activatedGoal(service);
+    const reader = new MapSourceReader({
+      'venue-letter': {
+        content:
+          'Booking declined. The community hall cannot host the fundraiser on 15 June. The date is no longer available and the deposit is being returned.',
+        source_revision: 'space-revision:4',
+        claimed_event_at: '2026-11-18T09:00:00.000Z',
+      },
+      'catering-quote': CATERING_QUOTE_READ,
+    });
+    const check = await runManualCheck({ service, actor, goal_id: draft.goal.goal_id, sourceReader: reader });
+
+    // The declining text is recorded as evidence with its excerpt, and that is
+    // all the host does with it: the step keeps its status, the dependent step
+    // stays blocked, and the cycle reports evidence, never a confirmation.
+    const venueEvidence = check.new_evidence.find(evidence => evidence.source_ref === 'venue-letter');
+    expect(venueEvidence?.excerpt).toContain('Booking declined');
+    expect(check.cycle.outcome_detail).toBe('Recorded 2 new sources.');
+    const venueStep = check.steps.find(step => step.description === 'Confirm the venue');
+    expect(venueStep?.status).toBe('ready');
+    expect(venueStep?.evidence_ids).toEqual([venueEvidence?.evidence_id]);
+    expect(check.steps.find(step => step.description === 'Book the equipment')?.status).toBe('planned');
+    expect(check.next_step?.description).toBe('Confirm the venue');
+  });
+
+  it('keeps a step unverified while its prerequisite is unconfirmed, and keeps its own dependent blocked', async () => {
+    const { service } = setup();
+    const actor = ownerActor();
+    const draft = await service.createDraft(actor, {
+      ...fundraiserDraft(),
+      selected_sources: [
+        { source_kind: 'space', source_ref: 'venue-letter', label: 'Venue letter' },
+        { source_kind: 'space', source_ref: 'equipment-quote', label: 'Equipment quote' },
+      ],
+      steps: [
+        {
+          description: 'Confirm the venue',
+          acceptance_criteria: 'The venue letter confirms the hall for the fundraiser date.',
+          source_refs: ['venue-letter'],
+        },
+        {
+          description: 'Book the equipment',
+          depends_on_indexes: [0],
+          acceptance_criteria: 'The sound and lighting hire is booked.',
+          source_refs: ['equipment-quote'],
+        },
+        {
+          description: 'Print the programmes',
+          depends_on_indexes: [1],
+          acceptance_criteria: 'The programmes are printed and folded.',
+        },
+      ],
+    });
+    const preview = await service.previewActivation(actor, draft.goal.goal_id);
+    await service.activate(actor, draft.goal.goal_id, {
+      expected_revision: preview.goal.revision,
+      setup_digest: preview.setup.digest,
+    });
+
+    // The venue letter cannot be read, so the venue step stays unconfirmed.
+    // The equipment quote reads fine and its step gains the evidence, but the
+    // step stays unverified behind its prerequisite, and the programmes step
+    // stays blocked behind it.
+    const reader = new MapSourceReader({
+      'equipment-quote': {
+        content: 'Equipment quote: sound and lighting hire for the hall, 300 in total.',
+        source_revision: 'space-revision:2',
+        claimed_event_at: '2026-11-17T10:00:00.000Z',
+      },
+    });
+    const check = await runManualCheck({ service, actor, goal_id: draft.goal.goal_id, sourceReader: reader });
+
+    expect(check.unread_sources.map(source => source.source_ref)).toEqual(['venue-letter']);
+    expect(check.cycle.outcome_detail).toBe('Recorded 1 new source.');
+    const equipmentStep = check.steps.find(step => step.description === 'Book the equipment');
+    expect(equipmentStep?.evidence_ids).toHaveLength(1);
+    expect(equipmentStep?.status).toBe('planned');
+    expect(check.steps.find(step => step.description === 'Print the programmes')?.status).toBe('planned');
+    expect(check.next_step?.description).toBe('Confirm the venue');
   });
 
   it('never reads a document outside the goal selected sources into a check', async () => {

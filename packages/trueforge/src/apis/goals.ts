@@ -1,32 +1,13 @@
 /**
- * Goals API (mounted at /api/v1/goals), plus the session dispatch a goal check
- * uses. Handlers are thin: every rule lives in the goal service, so the API and
- * the goal tools cannot drift apart.
+ * Goals API (mounted at /api/v1/goals). Handlers are thin: every rule lives in
+ * the goal service, so the API and the goal tools cannot drift apart.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import type { Context } from 'hono';
-import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
-import type { McpCatalog } from '../catalog/McpCatalog';
-import configuration from '../config';
-import type { AgentRecord, IAgentStore } from '../db/agentStore';
-import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
-import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
-import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
-import type { IModelProviderStore } from '../db/modelProviderStore';
-import type { IPersonalizationStore } from '../db/personalizationStore';
-import type { IPersonaStore } from '../db/personaStore';
-import type { IRepositoryStore } from '../db/repositoryStore';
-import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
-import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
-import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+import type { IAgentStore } from '../db/agentStore';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
-import type { ITurnArtifactStore } from '../db/turnArtifactStore';
-import type { IOAuthTokenStore } from '../mcp/auth/types';
-import { buildPersonaContext } from '../personas/persona';
 import {
   activateGoalRoute,
   checkGoalRoute,
@@ -42,11 +23,7 @@ import {
   resumeGoalRoute,
   updateGoalRoute,
 } from '../routes/goalRoutes';
-import type { ActiveTurnRegistry } from '../runtime/activeTurns';
-import { chatAssistantAgentName, getOrCreateChatAssistantAgent } from '../runtime/chatAssistant';
-import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
-import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
-import { runManualCheck, type GoalSessionDispatcher } from '../runtime/goals/goalCheck';
+import { runManualCheck } from '../runtime/goals/goalCheck';
 import {
   createGoalService,
   GoalNotFoundError,
@@ -68,11 +45,6 @@ import {
   type PinnedAgentSetup,
 } from '../runtime/goals/goalStorePort';
 import { chainGoalSourceReaders, createSpaceGoalSourceReader } from '../runtime/goals/spaceGoalSourceReader';
-import { createMemoryClient } from '../runtime/memory/createMemoryClient';
-import { resolveSandboxProvider } from '../runtime/sessionResources';
-import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
-import type { TurnDrainRegistry } from '../runtime/turnDrains';
-import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import type {
   ActivationPreview,
   Goal,
@@ -83,39 +55,9 @@ import type {
   GoalEvidence,
   GoalStep,
 } from '../schemas/goal';
-import { startTurnInProcess } from './turns';
 
 /** The answer a revision conflict gets: the goal moved since it was read. */
 const GOAL_CHANGED_MESSAGE = 'The goal changed since it was read. Read it again, then try once more.';
-
-/** Stores and runtime a goal check session needs, resolved the same way a schedule run's are. */
-export interface GoalTurnExecutionDeps<TTransaction> {
-  mcpCatalog: McpCatalog;
-  sessions: Sessions<SessionCustom, TurnCustom>;
-  activeTurns: ActiveTurnRegistry;
-  turnDrains: TurnDrainRegistry;
-  eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
-  logger: Logger;
-  resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore<TTransaction>;
-  resolveMcpServerStore: (c: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore<TTransaction>;
-  resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
-  resolveSkillStore: (c: Context) => ISkillStore<TTransaction>;
-  agentStore: IAgentStore<TTransaction>;
-  personaStore: Pick<IPersonaStore<TTransaction>, 'getPersona'>;
-  personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
-  tokenStore: IOAuthTokenStore<TTransaction>;
-  repositoryStore: IRepositoryStore<TTransaction>;
-  sentinelSettingsStore?: ISentinelSettingsStore<TTransaction> | undefined;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
-  spaceStore: ISpaceStore<TTransaction>;
-  googleConnectionStore?: IGoogleConnectionStore | undefined;
-  turnArtifactStore: ITurnArtifactStore<TTransaction>;
-  sandboxProviderResolver?: typeof resolveSandboxProvider | undefined;
-  globalSettingsStore: IGlobalSettingsStore<TTransaction>;
-  tokenFactoryBudget: TokenFactoryBudget;
-  chatDeletionStore: DeletedChatUsageReader;
-  chatSearchIndexer?: ChatSearchIndexer | undefined;
-}
 
 export interface GoalsRouterDeps<TTransaction> {
   resolveGoalStore: (c: Context) => IGoalStore<TTransaction>;
@@ -123,8 +65,6 @@ export interface GoalsRouterDeps<TTransaction> {
   resolveSkillStore: (c: Context) => Pick<ISkillStore<TTransaction>, 'listSkills'>;
   resolveSpaceStore: (c: Context) => Pick<ISpaceStore<TTransaction>, 'getSpace'>;
   resolveRequestContext: ResolveRequestContext;
-  /** Present where sessions run; absent, a check completes on the host's record alone. */
-  turnExecution?: GoalTurnExecutionDeps<TTransaction> | undefined;
 }
 
 function toWireGoal(record: GoalRecord): Goal {
@@ -220,100 +160,6 @@ function toWireApproval(record: GoalActionRecord): GoalApproval {
 
 function toWireCycle(record: GoalCycleRecord): GoalCycle {
   return { ...record };
-}
-
-/**
- * Dispatch one goal check as a session, the way a schedule run is dispatched:
- * the pinned setup becomes the host-managed agent made for exactly that setup,
- * a session is got or created for this cycle, and a turn starts unattended with
- * the check's task. A retry finds the session's turn already there and starts
- * nothing twice.
- */
-export function createGoalSessionDispatcher<TTransaction>(
-  deps: GoalTurnExecutionDeps<TTransaction>,
-): (c: Context) => GoalSessionDispatcher {
-  return (c: Context) => ({
-    async dispatch({ goal, cycle, setup, task }) {
-      const agent = await getOrCreateChatAssistantAgent({
-        tenant_id: goal.tenant_id,
-        owner: goal.created_by,
-        name: chatAssistantAgentName({ owner: goal.created_by, spec: setup.spec }),
-        spec: setup.spec,
-        agentStore: deps.agentStore,
-      });
-      const { session } = await deps.sessions.getOrCreateByExternalId({
-        tenant_id: goal.tenant_id,
-        external_id: `goal-check:${cycle.cycle_id}`,
-        created_by_subject: goal.created_by,
-        agent: { type: 'reference', id: agent.id, name: agent.name },
-      });
-      const { data: turns } = await session.listTurns({ limit: 1 });
-      if (turns.length > 0) {
-        return { session_id: session.session_id };
-      }
-      const persona =
-        goal.persona_id === null
-          ? undefined
-          : await deps.personaStore.getPersona({
-              tenant_id: goal.tenant_id,
-              created_by: goal.created_by.subject_id,
-              id: goal.persona_id,
-            });
-      const personalizationProfile = await deps.personalizationStore.getProfile({
-        tenant_id: goal.tenant_id,
-        created_by: goal.created_by.subject_id,
-      });
-      const memoryClient = createMemoryClient({
-        markdownDir: configuration.MEMORY_MARKDOWN_DIR,
-        namespace: goal.tenant_id,
-        vaultScope: persona === undefined ? undefined : { personaName: persona.display_name, personaId: persona.id },
-        embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
-          ? {
-              modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-              batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
-              log: (message: string) => deps.logger.info(message),
-            }
-          : undefined,
-      });
-      await startTurnInProcess({
-        session,
-        input: [{ type: 'user.message', content: task }],
-        previous_turn_id: 'none',
-        userRef: goal.created_by.subject_id,
-        session_title: `Goal check: ${goal.title}`,
-        unattended: true,
-        deps: {
-          mcpCatalog: deps.mcpCatalog,
-          activeTurns: deps.activeTurns,
-          turnDrains: deps.turnDrains,
-          eventSubscriptions: deps.eventSubscriptions,
-          agentStore: deps.agentStore,
-          modelProviderStore: deps.resolveModelProviderStore(c, agent),
-          mcpServerStore: deps.resolveMcpServerStore(c, agent),
-          sandboxProviderStore: deps.resolveSandboxProviderStore(c),
-          skillStore: deps.resolveSkillStore(c),
-          tokenStore: deps.tokenStore,
-          repositoryStore: deps.repositoryStore,
-          sentinelSettingsStore: deps.sentinelSettingsStore,
-          sessionStore: deps.sessionStore,
-          spaceStore: deps.spaceStore,
-          googleConnectionStore: deps.googleConnectionStore,
-          turnArtifactStore: deps.turnArtifactStore,
-          sandboxProviderResolver: deps.sandboxProviderResolver,
-          globalSettingsStore: deps.globalSettingsStore,
-          tokenFactoryBudget: deps.tokenFactoryBudget,
-          chatDeletionStore: deps.chatDeletionStore,
-          chatSearchIndexer: deps.chatSearchIndexer,
-          personalizationProfile,
-          personaContext: persona === undefined ? undefined : buildPersonaContext(persona),
-          memoryClient,
-          logger: deps.logger,
-          clientTimezone: goal.timezone,
-        },
-      });
-      return { session_id: session.session_id };
-    },
-  });
 }
 
 export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransaction>) {
@@ -563,15 +409,12 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
     const sourceReader = chainGoalSourceReaders([
       createSpaceGoalSourceReader({ spaceStore: deps.resolveSpaceStore(c) }),
     ]);
-    const sessionDispatcher =
-      deps.turnExecution === undefined ? undefined : createGoalSessionDispatcher(deps.turnExecution)(c);
     try {
       const result = await runManualCheck({
         service,
         actor,
         goal_id: goalId,
         sourceReader,
-        ...(sessionDispatcher === undefined ? {} : { sessionDispatcher }),
       });
       return c.json(
         {

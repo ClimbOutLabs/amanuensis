@@ -32,7 +32,7 @@ import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
 import { createDeliveriesRouter, createPushRouter } from './apis/deliveries';
 import { createEmailAccountRouter, EMAIL_SETTINGS_BASE_PATH } from './apis/emailAccount';
-import { createGoalsRouter, type GoalTurnExecutionDeps } from './apis/goals';
+import { createGoalsRouter } from './apis/goals';
 import { createGoogleRouter } from './apis/google';
 import { createHelpRouter } from './apis/help';
 import { createMapsRouter } from './apis/maps';
@@ -598,34 +598,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     chatSearchIndexer: deps.chatSearchIndexer,
     audit: deps.sentinelAuditStore,
   };
-  // A goal check dispatches its session with the same resolved stores a schedule run uses.
-  const goalTurnDeps: GoalTurnExecutionDeps<TTransaction> = {
-    mcpCatalog: deps.mcpCatalog,
-    sessions: deps.sessions,
-    activeTurns: deps.activeTurns,
-    turnDrains: deps.turnDrains,
-    eventSubscriptions: deps.eventSubscriptions,
-    logger: deps.logger,
-    resolveModelProviderStore: deps.resolveModelProviderStore,
-    resolveMcpServerStore: deps.resolveMcpServerStore,
-    resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
-    resolveSkillStore: deps.resolveSkillStore,
-    agentStore: deps.agentStore,
-    personaStore: deps.personaStore,
-    personalizationStore: deps.personalizationStore,
-    tokenStore: deps.tokenStore,
-    repositoryStore: deps.repositoryStore,
-    sentinelSettingsStore: deps.sentinelSettingsStore,
-    sessionStore: deps.sessionStore,
-    spaceStore: deps.spaceStore,
-    googleConnectionStore: deps.googleConnectionStore,
-    turnArtifactStore: deps.turnArtifactStore,
-    sandboxProviderResolver: deps.sandboxProviderResolver,
-    globalSettingsStore: deps.globalSettingsStore,
-    tokenFactoryBudget: deps.tokenFactoryBudget,
-    chatDeletionStore: deps.chatDeletionStore,
-    chatSearchIndexer: deps.chatSearchIndexer,
-  };
   const telegramTurnDeps: TelegramTurnExecutionDeps<TTransaction> = {
     turnTimezone: deps.turnTimezone,
     mcpCatalog: deps.mcpCatalog,
@@ -915,7 +887,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           resolveSkillStore: deps.resolveSkillStore,
           resolveSpaceStore: () => deps.spaceStore,
           resolveRequestContext,
-          turnExecution: goalTurnDeps,
         }),
         authMiddleware,
       ),
