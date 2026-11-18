@@ -106,7 +106,7 @@ export function GoalActivationCard({
         ) : null}
         <p className="text-text-secondary">
           {goal.targetAt !== null
-            ? `By ${formatGoalDateTime(goal.targetAt, goal.timezone)} (${goal.timezone})`
+            ? `By ${formatGoalDateTime({ iso: goal.targetAt, timezone: goal.timezone })} (${goal.timezone})`
             : 'No target date.'}
         </p>
       </CardSection>

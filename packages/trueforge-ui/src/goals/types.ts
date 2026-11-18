@@ -231,6 +231,8 @@ export type CreateGoalInput = {
 /** An edit to a goal, checked against the revision the person read. */
 export type UpdateGoalInput = {
   expectedRevision: number;
+  /** The agent who will do the work, or null to clear it. A draft may gain or change its agent here. */
+  agentId?: string | null;
   title?: string;
   outcome?: string;
   successCriteria?: string[];

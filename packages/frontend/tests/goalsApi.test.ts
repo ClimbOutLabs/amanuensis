@@ -222,6 +222,23 @@ test('goals API sends the revision and digest on activate, and maps a changed se
   );
 });
 
+test('goals API sends agent_id on update only when the edit carries one', async () => {
+  const bodies: unknown[] = [];
+  const api = createGoalsApi({
+    fetcher: async (_input, init) => {
+      bodies.push(init?.body !== undefined ? JSON.parse(String(init.body)) : null);
+      return Response.json({ data: detailWire({}) });
+    },
+    client: unusedClient,
+  });
+
+  await api.updateGoal('goal-1', { expectedRevision: 3, agentId: 'agent-2' });
+  assert.deepEqual(bodies[0], { expected_revision: 3, agent_id: 'agent-2' });
+
+  await api.updateGoal('goal-1', { expectedRevision: 3, title: 'A new title' });
+  assert.deepEqual(bodies[1], { expected_revision: 3, title: 'A new title' });
+});
+
 test('goals API surfaces the server message and rejects a malformed single read', async () => {
   const failing = createGoalsApi({
     fetcher: async () => Response.json({ error: { message: 'That goal is not yours.' } }, { status: 404 }),

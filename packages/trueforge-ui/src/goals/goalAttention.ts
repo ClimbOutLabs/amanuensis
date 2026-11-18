@@ -87,7 +87,7 @@ export function deriveGoalAttention(input: {
       state: 'work_limit_reached',
       reason:
         goal.nextCheckAt !== null
-          ? `The last check used up its work limit. Work can resume at the next check, due ${formatGoalDateTime(goal.nextCheckAt, goal.timezone)}.`
+          ? `The last check used up its work limit. Work can resume at the next check, due ${formatGoalDateTime({ iso: goal.nextCheckAt, timezone: goal.timezone })}.`
           : 'The last check used up its work limit.',
     };
   }
@@ -277,7 +277,7 @@ export function goalEventLine(event: GoalEvent): string {
 }
 
 /** A date and time read in the goal's own time zone, such as "June 15, 2026, 9:00 AM". */
-export function formatGoalDateTime(iso: string, timezone: string): string {
+export function formatGoalDateTime({ iso, timezone }: { iso: string; timezone: string }): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   try {
@@ -295,7 +295,7 @@ export function formatGoalDateTime(iso: string, timezone: string): string {
 }
 
 /** A date read in the goal's own time zone, such as "June 15, 2026". */
-export function formatGoalDate(iso: string, timezone: string): string {
+export function formatGoalDate({ iso, timezone }: { iso: string; timezone: string }): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   try {

@@ -85,7 +85,9 @@ function StepRow({
       {evidence.map(entry => (
         <span key={entry.evidenceId} className="rounded-lg bg-primary-bg px-3 py-2 text-xs leading-5 text-text-primary">
           {entry.excerpt}
-          <span className="block text-text-secondary">Seen {formatGoalDateTime(entry.observedAt, timezone)}</span>
+          <span className="block text-text-secondary">
+            Seen {formatGoalDateTime({ iso: entry.observedAt, timezone })}
+          </span>
         </span>
       ))}
     </li>
@@ -108,7 +110,7 @@ function DecisionRow({
       <span className="min-w-0 flex-1">
         <span className="block text-sm leading-5 font-medium text-text-primary">A decision is waiting for you</span>
         <span className="block text-xs leading-5 text-text-secondary">
-          Waiting since {formatGoalDateTime(approval.createdAt, timezone)}.
+          Waiting since {formatGoalDateTime({ iso: approval.createdAt, timezone })}.
         </span>
       </span>
       {sessionId !== null ? (
@@ -140,7 +142,7 @@ function checkOutcomeLine(result: GoalCheckResult, timezone: string): string {
     case 'failed':
       return `That check failed. ${cycle.outcomeDetail ?? 'Try again in a moment.'}`;
     default:
-      return `Check finished at ${formatGoalDateTime(cycle.finishedAt ?? cycle.startedAt, timezone)}.${evidenceLine}${unreadLine}`;
+      return `Check finished at ${formatGoalDateTime({ iso: cycle.finishedAt ?? cycle.startedAt, timezone })}.${evidenceLine}${unreadLine}`;
   }
 }
 
@@ -400,7 +402,7 @@ export function GoalDetailPage({ goalId }: { goalId: string }) {
         {summary.reason !== null ? <p className="text-sm text-text-secondary">{summary.reason}</p> : null}
         <p className="text-xs text-text-secondary">
           {goal.targetAt !== null
-            ? `Target: ${formatGoalDateTime(goal.targetAt, goal.timezone)} (${goal.timezone}). `
+            ? `Target: ${formatGoalDateTime({ iso: goal.targetAt, timezone: goal.timezone })} (${goal.timezone}). `
             : ''}
           {counts.total > 0
             ? `${String(counts.confirmed)} of ${String(counts.total)} steps confirmed.`
@@ -496,7 +498,7 @@ export function GoalDetailPage({ goalId }: { goalId: string }) {
           <p className="text-sm text-text-secondary">
             {nextStep !== null ? `The next step is saved: ${nextStep.description}. ` : ''}
             {goal.nextCheckAt !== null
-              ? `Work can resume at the next check, due ${formatGoalDateTime(goal.nextCheckAt, goal.timezone)}.`
+              ? `Work can resume at the next check, due ${formatGoalDateTime({ iso: goal.nextCheckAt, timezone: goal.timezone })}.`
               : ''}
           </p>
         </section>
@@ -547,14 +549,14 @@ export function GoalDetailPage({ goalId }: { goalId: string }) {
           <p>
             Last successful check:{' '}
             {lastSuccessfulCheck !== undefined
-              ? formatGoalDateTime(lastSuccessfulCheck.createdAt, goal.timezone)
+              ? formatGoalDateTime({ iso: lastSuccessfulCheck.createdAt, timezone: goal.timezone })
               : 'none yet'}
             .
           </p>
           <p>
             Next check:{' '}
             {goal.lifecycle === 'active' && goal.nextCheckAt !== null
-              ? formatGoalDateTime(goal.nextCheckAt, goal.timezone)
+              ? formatGoalDateTime({ iso: goal.nextCheckAt, timezone: goal.timezone })
               : 'none scheduled'}
             .
           </p>
@@ -597,7 +599,7 @@ export function GoalDetailPage({ goalId }: { goalId: string }) {
               <li key={event.eventId} className="flex flex-col px-4 py-2.5">
                 <span className="text-sm leading-5 text-text-primary">{goalEventLine(event)}</span>
                 <span className="text-xs leading-5 text-text-secondary">
-                  {formatGoalDateTime(event.createdAt, goal.timezone)}
+                  {formatGoalDateTime({ iso: event.createdAt, timezone: goal.timezone })}
                 </span>
               </li>
             ))}

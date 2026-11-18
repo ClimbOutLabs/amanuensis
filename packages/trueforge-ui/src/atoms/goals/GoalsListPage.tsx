@@ -136,9 +136,11 @@ export function GoalsListPage() {
                   <span className="text-xs leading-5 text-text-secondary">{summary.reason}</span>
                 ) : null}
                 <span className="text-xs leading-5 text-text-secondary">
-                  {goal.targetAt !== null ? `Target ${formatGoalDate(goal.targetAt, goal.timezone)}. ` : ''}
+                  {goal.targetAt !== null
+                    ? `Target ${formatGoalDate({ iso: goal.targetAt, timezone: goal.timezone })}. `
+                    : ''}
                   {goal.lifecycle === 'active' && goal.nextCheckAt !== null
-                    ? `Next check ${formatGoalDate(goal.nextCheckAt, goal.timezone)}.`
+                    ? `Next check ${formatGoalDate({ iso: goal.nextCheckAt, timezone: goal.timezone })}.`
                     : ''}
                 </span>
               </button>

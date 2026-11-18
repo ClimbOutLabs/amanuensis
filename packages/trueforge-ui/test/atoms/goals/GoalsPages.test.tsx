@@ -279,6 +279,59 @@ describe('Goal page, running goal', () => {
     expect(screen.getByText(/It recorded 1 new piece of evidence/)).toBeDefined();
   });
 
+  it('sends only the changed limit when a running goal\u2019s daily allowance is raised', async () => {
+    const active = fundraiserGoal({
+      lifecycle: 'active',
+      revision: 2,
+      pinnedSetup: { ...SETUP },
+      nextCheckAt: '2026-06-16T16:00:00.000Z',
+    });
+    const steps = [venueStep({}), equipmentStep({})];
+    const updateGoal = vi.fn<GoalsApi['updateGoal']>(() =>
+      Promise.resolve({ goal: active, steps, nextStepId: 'step-venue' }),
+    );
+    const api = makeApi({
+      getGoal: () => Promise.resolve({ goal: active, steps, nextStepId: 'step-venue' }),
+      updateGoal,
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    const outcomeField = await screen.findByLabelText('Outcome');
+    if (!(outcomeField instanceof HTMLTextAreaElement)) throw new Error('The outcome field is not a text area.');
+    expect(outcomeField.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Tokens per day'), { target: { value: '2000000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(updateGoal).toHaveBeenCalledTimes(1));
+    expect(updateGoal).toHaveBeenCalledWith('goal-1', {
+      expectedRevision: 2,
+      executionPolicy: { ...POLICY, dailyTokenAllowance: 2_000_000 },
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull());
+  });
+
+  it('closes the edit dialog without sending anything when nothing was changed', async () => {
+    const active = fundraiserGoal({
+      lifecycle: 'active',
+      revision: 2,
+      pinnedSetup: { ...SETUP },
+      nextCheckAt: '2026-06-16T16:00:00.000Z',
+    });
+    const steps = [venueStep({}), equipmentStep({})];
+    const updateGoal = vi.fn<GoalsApi['updateGoal']>();
+    const api = makeApi({
+      getGoal: () => Promise.resolve({ goal: active, steps, nextStepId: 'step-venue' }),
+      updateGoal,
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull());
+    expect(updateGoal).not.toHaveBeenCalled();
+  });
+
   it('shows Work limit reached with the saved next step and the resume time', async () => {
     const active = fundraiserGoal({
       lifecycle: 'active',
@@ -306,5 +359,89 @@ describe('Goal page, running goal', () => {
     expect(await screen.findByRole('heading', { name: 'Work limit reached' })).toBeDefined();
     expect(screen.getByText(/The next step is saved: Confirm the venue/)).toBeDefined();
     expect(screen.getAllByText(/Work can resume at the next check/).length).toBeGreaterThan(0);
+  });
+});
+
+describe('Goal page, editing a draft', () => {
+  it('sends a changed outcome on a draft, and nothing else', async () => {
+    const draft = fundraiserGoal({});
+    const steps = [venueStep({}), equipmentStep({})];
+    const updateGoal = vi.fn<GoalsApi['updateGoal']>(() =>
+      Promise.resolve({
+        goal: { ...draft, outcome: 'Hold the fundraiser in the park instead' },
+        steps,
+        nextStepId: null,
+      }),
+    );
+    const api = makeApi({
+      getGoal: () => Promise.resolve({ goal: draft, steps, nextStepId: null }),
+      getActivationPreview: () => Promise.resolve({ goal: draft, steps, setup: { ...SETUP } }),
+      updateGoal,
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(await screen.findByLabelText('Outcome'), {
+      target: { value: 'Hold the fundraiser in the park instead' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(updateGoal).toHaveBeenCalledTimes(1));
+    expect(updateGoal).toHaveBeenCalledWith('goal-1', {
+      expectedRevision: 1,
+      outcome: 'Hold the fundraiser in the park instead',
+    });
+  });
+
+  it('lets an agent-less draft gain an agent in the edit dialog, then activate', async () => {
+    const steps = [venueStep({}), equipmentStep({})];
+    let current: GoalDetail = { goal: fundraiserGoal({ agentId: null }), steps, nextStepId: null };
+    const updateGoal = vi.fn<GoalsApi['updateGoal']>(() => {
+      current = { goal: fundraiserGoal({ agentId: 'agent-2', revision: 2 }), steps, nextStepId: null };
+      return Promise.resolve(current);
+    });
+    const activateGoal = vi.fn<GoalsApi['activateGoal']>(() =>
+      Promise.resolve({
+        goal: fundraiserGoal({
+          agentId: 'agent-2',
+          revision: 3,
+          lifecycle: 'active',
+          pinnedSetup: { ...SETUP },
+          nextCheckAt: '2026-06-16T16:00:00.000Z',
+        }),
+        steps,
+        nextStepId: 'step-venue',
+      }),
+    );
+    const api = makeApi({
+      getGoal: () => Promise.resolve(current),
+      getActivationPreview: () =>
+        current.goal.agentId === null
+          ? Promise.reject(
+              new Error('This goal has no agent yet. Pick the agent that will do the work, then activate.'),
+            )
+          : Promise.resolve({ goal: current.goal, steps, setup: { ...SETUP } }),
+      updateGoal,
+      activateGoal,
+      listAgents: () =>
+        Promise.resolve([
+          { id: 'agent-1', name: 'Fundraiser helper' },
+          { id: 'agent-2', name: 'Weekend planner' },
+        ]),
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    expect(await screen.findByText(/This goal has no agent yet/)).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(await screen.findByLabelText('Agent'), { target: { value: 'agent-2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(updateGoal).toHaveBeenCalledTimes(1));
+    expect(updateGoal).toHaveBeenCalledWith('goal-1', { expectedRevision: 1, agentId: 'agent-2' });
+
+    expect(await screen.findByText('Review and activate')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Activate goal' }));
+    await waitFor(() => expect(activateGoal).toHaveBeenCalledTimes(1));
+    expect(activateGoal).toHaveBeenCalledWith('goal-1', { expectedRevision: 2, setupDigest: 'digest-1' });
   });
 });

@@ -86,7 +86,9 @@ function isGoalCycleOutcome(value: string): value is GoalCycleOutcome {
 }
 
 function parseSourceRef(value: unknown): GoalSourceRef | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const { source_kind: sourceKind, source_ref: sourceRef, label } = value;
   if (
     typeof sourceKind !== 'string' ||
@@ -100,13 +102,17 @@ function parseSourceRef(value: unknown): GoalSourceRef | null {
 }
 
 function parseSourceRefs(value: unknown): GoalSourceRef[] | null {
-  if (!Array.isArray(value)) return null;
+  if (!Array.isArray(value)) {
+    return null;
+  }
   const refs = value.map(parseSourceRef);
   return refs.every(ref => ref !== null) ? refs : null;
 }
 
 function parseExecutionPolicy(value: unknown): GoalExecutionPolicy | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const {
     checks_per_day: checksPerDay,
     cycle_minutes: cycleMinutes,
@@ -129,13 +135,17 @@ function parseExecutionPolicy(value: unknown): GoalExecutionPolicy | null {
 }
 
 function parseNotificationPolicy(value: unknown): GoalNotificationPolicy | null {
-  if (!isRecord(value) || typeof value.digest !== 'boolean') return null;
+  if (!isRecord(value) || typeof value.digest !== 'boolean') {
+    return null;
+  }
   return { digest: value.digest };
 }
 
 /** The pinned setup as the card shows it: names and the model, never the full spec or any credential. */
 function parseSetupSummary(value: unknown): GoalSetupSummary | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const {
     agent_id: agentId,
     agent_name: agentName,
@@ -158,7 +168,9 @@ function parseSetupSummary(value: unknown): GoalSetupSummary | null {
   }
   const model = isRecord(spec.model) ? spec.model : null;
   const modelName = model !== null && typeof model.name === 'string' ? model.name : null;
-  if (modelName === null) return null;
+  if (modelName === null) {
+    return null;
+  }
   const servers = Array.isArray(spec.mcp_servers) ? spec.mcp_servers : [];
   const mcpServerNames = servers
     .map(server => (isRecord(server) && typeof server.name === 'string' ? server.name : null))
@@ -170,7 +182,9 @@ function parseSetupSummary(value: unknown): GoalSetupSummary | null {
 }
 
 function parseGoal(value: unknown): GoalItem | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const {
     goal_id: goalId,
     title,
@@ -238,7 +252,9 @@ function parseGoal(value: unknown): GoalItem | null {
 }
 
 function parseStep(value: unknown): GoalStep | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const {
     step_id: stepId,
     goal_id: goalId,
@@ -278,31 +294,43 @@ function parseStep(value: unknown): GoalStep | null {
 }
 
 function parseSteps(value: unknown): GoalStep[] | null {
-  if (!Array.isArray(value)) return null;
+  if (!Array.isArray(value)) {
+    return null;
+  }
   const steps = value.map(parseStep);
   return steps.every(step => step !== null) ? steps : null;
 }
 
 function parseDetail(value: unknown): GoalDetail | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const goal = parseGoal(value.goal);
   const steps = parseSteps(value.steps);
   const nextStepId = value.next_step_id;
-  if (goal === null || steps === null || !isNullableString(nextStepId)) return null;
+  if (goal === null || steps === null || !isNullableString(nextStepId)) {
+    return null;
+  }
   return { goal, steps, nextStepId };
 }
 
 function parsePreview(value: unknown): GoalActivationPreview | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const goal = parseGoal(value.goal);
   const steps = parseSteps(value.steps);
   const setup = parseSetupSummary(value.setup);
-  if (goal === null || steps === null || setup === null) return null;
+  if (goal === null || steps === null || setup === null) {
+    return null;
+  }
   return { goal, steps, setup };
 }
 
 function parseEvidence(value: unknown): GoalEvidence | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const {
     evidence_id: evidenceId,
     goal_id: goalId,
@@ -351,7 +379,9 @@ function parseEvidence(value: unknown): GoalEvidence | null {
 }
 
 function parseEvent(value: unknown): GoalEvent | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const {
     event_id: eventId,
     goal_id: goalId,
@@ -376,7 +406,9 @@ function parseEvent(value: unknown): GoalEvent | null {
 }
 
 function parseApproval(value: unknown): GoalApproval | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const {
     action_id: actionId,
     goal_id: goalId,
@@ -415,7 +447,9 @@ function parseApproval(value: unknown): GoalApproval | null {
 }
 
 function parseCycle(value: unknown): GoalCycle | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const {
     cycle_id: cycleId,
     goal_id: goalId,
@@ -463,7 +497,9 @@ function parseCycle(value: unknown): GoalCycle | null {
 }
 
 function parseCheckResult(value: unknown): GoalCheckResult | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value)) {
+    return null;
+  }
   const cycle = parseCycle(value.cycle);
   const goal = parseGoal(value.goal);
   const steps = parseSteps(value.steps);
@@ -544,7 +580,9 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
     let pageToken: string | undefined;
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const query = new URLSearchParams({ limit: String(PAGE_LIMIT) });
-      if (pageToken !== undefined) query.set('page_token', pageToken);
+      if (pageToken !== undefined) {
+        query.set('page_token', pageToken);
+      }
       const body = await request(`${path}?${query.toString()}`);
       const rows: unknown = dataOf(body);
       if (Array.isArray(rows)) {
@@ -552,7 +590,9 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
       }
       const pagination = isRecord(body) ? body.pagination : undefined;
       const next: unknown = isRecord(pagination) ? pagination.next_page_token : undefined;
-      if (typeof next !== 'string' || next === '') break;
+      if (typeof next !== 'string' || next === '') {
+        break;
+      }
       pageToken = next;
     }
     return items;
@@ -561,7 +601,9 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
   async function readDetail(goalId: string): Promise<GoalDetail> {
     const body = await request(`${GOALS_URL}/${encodeURIComponent(goalId)}`);
     const detail = parseDetail(dataOf(body));
-    if (detail === null) throw new Error('That goal came back in a shape this version does not recognise.');
+    if (detail === null) {
+      throw new Error('That goal came back in a shape this version does not recognise.');
+    }
     return detail;
   }
 
@@ -572,7 +614,9 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
       body: JSON.stringify(payload),
     });
     const detail = parseDetail(dataOf(body));
-    if (detail === null) throw new Error('That goal came back in a shape this version does not recognise.');
+    if (detail === null) {
+      throw new Error('That goal came back in a shape this version does not recognise.');
+    }
     return detail;
   }
 
@@ -609,35 +653,60 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
         }),
       });
       const detail = parseDetail(dataOf(body));
-      if (detail === null) throw new Error('That goal came back in a shape this version does not recognise.');
+      if (detail === null) {
+        throw new Error('That goal came back in a shape this version does not recognise.');
+      }
       return detail;
     },
     async updateGoal(goalId: string, input: UpdateGoalInput) {
       const payload: Record<string, unknown> = { expected_revision: input.expectedRevision };
-      if (input.title !== undefined) payload.title = input.title;
-      if (input.outcome !== undefined) payload.outcome = input.outcome;
-      if (input.successCriteria !== undefined) payload.success_criteria = input.successCriteria;
-      if (input.targetAt !== undefined) payload.target_at = input.targetAt;
-      if (input.timezone !== undefined) payload.timezone = input.timezone;
-      if (input.selectedSources !== undefined) payload.selected_sources = input.selectedSources.map(sourceRefBody);
-      if (input.executionPolicy !== undefined) payload.execution_policy = executionPolicyBody(input.executionPolicy);
-      if (input.notificationPolicy !== undefined)
+      if (input.agentId !== undefined) {
+        payload.agent_id = input.agentId;
+      }
+      if (input.title !== undefined) {
+        payload.title = input.title;
+      }
+      if (input.outcome !== undefined) {
+        payload.outcome = input.outcome;
+      }
+      if (input.successCriteria !== undefined) {
+        payload.success_criteria = input.successCriteria;
+      }
+      if (input.targetAt !== undefined) {
+        payload.target_at = input.targetAt;
+      }
+      if (input.timezone !== undefined) {
+        payload.timezone = input.timezone;
+      }
+      if (input.selectedSources !== undefined) {
+        payload.selected_sources = input.selectedSources.map(sourceRefBody);
+      }
+      if (input.executionPolicy !== undefined) {
+        payload.execution_policy = executionPolicyBody(input.executionPolicy);
+      }
+      if (input.notificationPolicy !== undefined) {
         payload.notification_policy = { digest: input.notificationPolicy.digest };
-      if (input.linkedSpaceId !== undefined) payload.linked_space_id = input.linkedSpaceId;
+      }
+      if (input.linkedSpaceId !== undefined) {
+        payload.linked_space_id = input.linkedSpaceId;
+      }
       const body = await request(`${GOALS_URL}/${encodeURIComponent(goalId)}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const detail = parseDetail(dataOf(body));
-      if (detail === null) throw new Error('That goal came back in a shape this version does not recognise.');
+      if (detail === null) {
+        throw new Error('That goal came back in a shape this version does not recognise.');
+      }
       return detail;
     },
     async getActivationPreview(goalId: string) {
       const body = await request(`${GOALS_URL}/${encodeURIComponent(goalId)}/activation-preview`);
       const preview = parsePreview(dataOf(body));
-      if (preview === null)
+      if (preview === null) {
         throw new Error('The activation card came back in a shape this version does not recognise.');
+      }
       return preview;
     },
     activateGoal(goalId, input) {
@@ -658,7 +727,9 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
     async checkGoal(goalId: string) {
       const body = await request(`${GOALS_URL}/${encodeURIComponent(goalId)}/check`, { method: 'POST' });
       const result = parseCheckResult(dataOf(body));
-      if (result === null) throw new Error('That check came back in a shape this version does not recognise.');
+      if (result === null) {
+        throw new Error('That check came back in a shape this version does not recognise.');
+      }
       return result;
     },
     listEvidence(goalId) {
@@ -677,7 +748,9 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
         for (const agent of page.data) {
           agents.push({ id: agent.id, name: agent.name });
         }
-        if (!page.hasNextPage()) break;
+        if (!page.hasNextPage()) {
+          break;
+        }
         await page.getNextPage();
       }
       return agents;

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useGoals } from '../../goals/GoalsContext.js';
-import type { GoalDetail } from '../../goals/types.js';
+import type { GoalAgentOption, GoalDetail, UpdateGoalInput } from '../../goals/types.js';
 import { Button } from '../primitives/Button.js';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../primitives/Dialog.js';
 
@@ -11,9 +11,12 @@ const inputClass = 'w-full rounded-md border border-border bg-primary-bg px-2 py
 const labelClass = 'flex flex-col gap-1 text-sm text-text-primary';
 
 /**
- * Edits a goal's own words and limits. On an active goal the service refuses
- * changes that alter what the goal is or how it works, because those need a
- * new activation card; the refusal message is shown as it comes back.
+ * Edits a goal, sending only the fields the owner actually changed. On a goal
+ * that has started, the service refuses an edit that merely names what the
+ * goal is working toward, even when the words are unchanged, so those fields
+ * (the outcome, the done-when list, the target date, and the agent) are shown
+ * read only here and never sent. The title, time zone, and work limits can
+ * change on any goal, and a draft can still gain or change its agent here.
  */
 export function GoalEditDialog({
   detail,
@@ -26,6 +29,10 @@ export function GoalEditDialog({
 }) {
   const { api } = useGoals();
   const { goal } = detail;
+  const started = goal.lifecycle !== 'draft';
+  const [agents, setAgents] = useState<GoalAgentOption[] | null>(null);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState(goal.agentId ?? '');
   const [title, setTitle] = useState(goal.title);
   const [outcome, setOutcome] = useState(goal.outcome);
   const [criteriaText, setCriteriaText] = useState(goal.successCriteria.join('\n'));
@@ -36,6 +43,21 @@ export function GoalEditDialog({
   const [digest, setDigest] = useState(goal.notificationPolicy.digest);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api.listAgents().then(
+      list => {
+        if (alive) setAgents(list);
+      },
+      () => {
+        if (alive) setAgentsError('Your agents could not be loaded. Check your connection, then try again.');
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [api]);
 
   const parsedChecks = Number.parseInt(checksPerDay, 10);
   const parsedAllowance = Number.parseInt(dailyAllowance, 10);
@@ -48,43 +70,66 @@ export function GoalEditDialog({
     Number.isInteger(parsedAllowance) &&
     parsedAllowance > 0;
 
+  // The edit is diffed against the goal as loaded, field by field, so an
+  // untouched field is never sent. On a started goal the fields that say what
+  // the goal is working toward are not offered for editing at all.
+  const patch: Omit<UpdateGoalInput, 'expectedRevision'> = {};
+  if (title.trim() !== goal.title) patch.title = title.trim();
+  if (!started) {
+    if (outcome.trim() !== goal.outcome) patch.outcome = outcome.trim();
+    const criteria = criteriaText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line !== '');
+    if (JSON.stringify(criteria) !== JSON.stringify(goal.successCriteria)) patch.successCriteria = criteria;
+    if (targetDate !== (goal.targetAt === null ? '' : goal.targetAt.slice(0, 16))) {
+      patch.targetAt = targetDate === '' ? null : new Date(targetDate).toISOString();
+    }
+    if ((agentId === '' ? null : agentId) !== goal.agentId) patch.agentId = agentId === '' ? null : agentId;
+  }
+  const nextTimezone = timezone.trim() === '' ? goal.timezone : timezone.trim();
+  if (nextTimezone !== goal.timezone) patch.timezone = nextTimezone;
+  if (
+    parsedChecks !== goal.executionPolicy.checksPerDay ||
+    parsedAllowance !== goal.executionPolicy.dailyTokenAllowance
+  ) {
+    patch.executionPolicy = {
+      ...goal.executionPolicy,
+      checksPerDay: parsedChecks,
+      dailyTokenAllowance: parsedAllowance,
+    };
+  }
+  if (digest !== goal.notificationPolicy.digest) patch.notificationPolicy = { digest };
+  const hasChanges = Object.keys(patch).length > 0;
+
   const save = () => {
     if (!valid) return;
+    if (!hasChanges) {
+      onClose();
+      return;
+    }
     setSaving(true);
     setError(null);
-    api
-      .updateGoal(goal.goalId, {
-        expectedRevision: goal.revision,
-        title: title.trim(),
-        outcome: outcome.trim(),
-        successCriteria: criteriaText
-          .split('\n')
-          .map(line => line.trim())
-          .filter(line => line !== ''),
-        targetAt: targetDate === '' ? null : new Date(targetDate).toISOString(),
-        timezone: timezone.trim() === '' ? goal.timezone : timezone.trim(),
-        executionPolicy: {
-          ...goal.executionPolicy,
-          checksPerDay: parsedChecks,
-          dailyTokenAllowance: parsedAllowance,
-        },
-        notificationPolicy: { digest },
-      })
-      .then(
-        next => {
-          setSaving(false);
-          onSaved(next);
-        },
-        (caught: unknown) => {
-          setSaving(false);
-          setError(
-            caught instanceof Error && caught.message !== ''
-              ? caught.message
-              : 'That change could not be saved. Try again in a moment.',
-          );
-        },
-      );
+    api.updateGoal(goal.goalId, { expectedRevision: goal.revision, ...patch }).then(
+      next => {
+        setSaving(false);
+        onSaved(next);
+      },
+      (caught: unknown) => {
+        setSaving(false);
+        setError(
+          caught instanceof Error && caught.message !== ''
+            ? caught.message
+            : 'That change could not be saved. Try again in a moment.',
+        );
+      },
+    );
   };
+
+  const currentAgentName =
+    goal.agentId === null
+      ? null
+      : (goal.pinnedSetup?.agentName ?? agents?.find(agent => agent.id === goal.agentId)?.name ?? null);
 
   return (
     <Dialog
@@ -98,14 +143,54 @@ export function GoalEditDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit goal</DialogTitle>
-          {goal.lifecycle === 'active' ? (
+          {started ? (
             <p className="text-sm text-text-secondary">
-              On a running goal, wording and limits can change here. Changing what the goal is, its sources, or its
-              agent needs a new activation card instead.
+              On a goal that has started, the title, time zone, and work limits can change here. What the goal is
+              working toward is fixed once it starts: its outcome, its done-when list, its sources, its target date, and
+              its agent. To change any of those, end this goal and start a new one.
             </p>
-          ) : null}
+          ) : (
+            <p className="text-sm text-text-secondary">
+              Everything here can change while the goal is a draft. It starts only when you activate it from the goal
+              page.
+            </p>
+          )}
         </DialogHeader>
         <div className="flex max-h-[60dvh] flex-col gap-4 overflow-y-auto px-4 py-3">
+          <label className={labelClass}>
+            <span>Agent who will do the work</span>
+            {started ? (
+              <span className="text-text-secondary">
+                {goal.agentId === null
+                  ? 'No agent picked yet.'
+                  : (currentAgentName ?? 'The agent picked when this goal started.')}
+              </span>
+            ) : agentsError !== null ? (
+              <span role="alert" className="text-sm text-failure-bg">
+                {agentsError}
+              </span>
+            ) : agents === null ? (
+              <span className="text-text-secondary">Loading your agents…</span>
+            ) : agents.length === 0 ? (
+              <span className="text-text-secondary">
+                You have no saved agents yet. Save an agent first, then give it this goal.
+              </span>
+            ) : (
+              <select
+                aria-label="Agent"
+                className={inputClass}
+                value={agentId}
+                onChange={event => setAgentId(event.target.value)}
+              >
+                {agentId === '' ? <option value="">Choose an agent</option> : null}
+                {agents.map(agent => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
           <label className={labelClass}>
             <span>Title</span>
             <input
@@ -122,6 +207,7 @@ export function GoalEditDialog({
               className={inputClass}
               rows={2}
               value={outcome}
+              disabled={started}
               onChange={event => setOutcome(event.target.value)}
             />
           </label>
@@ -132,6 +218,7 @@ export function GoalEditDialog({
               className={inputClass}
               rows={3}
               value={criteriaText}
+              disabled={started}
               onChange={event => setCriteriaText(event.target.value)}
             />
           </label>
@@ -143,6 +230,7 @@ export function GoalEditDialog({
                 type="datetime-local"
                 className={inputClass}
                 value={targetDate}
+                disabled={started}
                 onChange={event => setTargetDate(event.target.value)}
               />
             </label>
