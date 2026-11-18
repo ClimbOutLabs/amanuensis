@@ -18,7 +18,7 @@ To make a goal, do the following:
 4. Pick the sources Aman may read for this goal, such as one document. A check reads only the sources you picked for that goal, and nothing else.
 5. Pick the agent that will do the checking.
 
-The goal is saved as a draft. A draft is never checked, and nothing runs until you activate it.
+The goal is saved as a draft. A draft is never checked, and nothing runs until you activate it. You can pick the agent on the draft, or change the one you picked, any time before you activate it.
 
 ## Activate a goal
 

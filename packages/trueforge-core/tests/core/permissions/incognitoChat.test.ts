@@ -1,3 +1,4 @@
+import { GOALS_SERVER_ID } from '../../../src/core/goals/toolContract';
 import { MEMORY_PAGES_SERVER_ID } from '../../../src/core/memory/pagesToolContract';
 import { NOTES_FOLDER_SERVER_ID } from '../../../src/core/notes/toolContract';
 import { classifyTier } from '../../../src/core/permissions/classifier';
@@ -73,6 +74,8 @@ describe('an incognito chat makes or changes nothing that outlives it', () => {
       'a fact on a memory page',
       ownTool(MEMORY_PAGES_SERVER_ID, 'remember_fact', { about: 'Nora', text: 'Likes tulips.' }),
     ],
+    ['a new goal', ownTool(GOALS_SERVER_ID, 'create_goal', { title: 'Community fundraiser' })],
+    ['a check on a goal', ownTool(GOALS_SERVER_ID, 'request_goal_check', { goal: 'Community fundraiser' })],
     ['a tool these sets do not have', ownTool(SPACE_SERVER_ID, 'purge_spaces')],
   ])('refuses %s without a card', async (_label, action) => {
     const decision = await classifyTier(action, incognitoChat());

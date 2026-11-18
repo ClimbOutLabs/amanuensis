@@ -1,10 +1,12 @@
 /**
  * The store contract the goal service runs on, in the shape of spec section 10.
  *
- * The goal store layer (db/goalStore.ts, SQLite and Postgres) implements this port.
- * The service depends only on this file, so the store can land and be swapped
- * without the service, API, or tools changing. Records use the repository's
- * snake_case wire convention.
+ * The canonical store (db/goalStore.ts, SQLite and Postgres) is scoped by the
+ * owner's tenant and person together, and keeps a few service-owned details
+ * inside its policy documents. The adapter in goalStoreAdapter.ts bridges that
+ * store to this port, so the service depends only on this file and the store
+ * can be swapped without the service, API, or tools changing. Records use the
+ * repository's snake_case wire convention.
  */
 import type { AgentSpec, CreatedBySubject, TokenPagination } from '@truefoundry/trueforge-core/agent-session';
 
@@ -186,7 +188,7 @@ export class GoalRevisionConflictError extends Error {
   }
 }
 
-/** One step of a new goal's plan. Dependencies name plan positions; the store resolves them to the ids it assigns. */
+/** One step of a new goal's plan. Dependencies name plan positions; the adapter resolves them to the step ids it assigns. */
 export interface CreateGoalStepInput {
   description: string;
   depends_on_indexes: readonly number[];
@@ -209,7 +211,7 @@ export interface CreateGoalInput {
   execution_policy: GoalExecutionPolicy;
   notification_policy: GoalNotificationPolicy;
   linked_space_id: string | null;
-  /** The plan the draft starts with; the store assigns each step its id. */
+  /** The plan the draft starts with; the adapter assigns each step its id. */
   steps: readonly CreateGoalStepInput[];
 }
 
@@ -220,6 +222,8 @@ export interface GoalPatch {
   success_criteria?: readonly string[];
   target_at?: string | null;
   timezone?: string;
+  /** The saved agent this goal runs as; activation pins its setup. */
+  agent_id?: string | null;
   selected_sources?: readonly GoalSourceRef[];
   execution_policy?: GoalExecutionPolicy;
   notification_policy?: GoalNotificationPolicy;
@@ -229,6 +233,8 @@ export interface GoalPatch {
 
 export interface UpdateGoalInput {
   tenant_id: string;
+  /** The goal's owner, as the subject id the canonical store scopes rows by. */
+  created_by: string;
   goal_id: string;
   expected_revision: number;
   lifecycle?: GoalLifecycle;
@@ -238,11 +244,14 @@ export interface UpdateGoalInput {
 
 export interface IGoalStore<TTransaction = never> {
   createGoal(input: CreateGoalInput, transaction?: TTransaction): Promise<GoalRecord>;
-  getGoal(input: { tenant_id: string; goal_id: string }, transaction?: TTransaction): Promise<GoalRecord | undefined>;
+  getGoal(
+    input: { tenant_id: string; created_by: string; goal_id: string },
+    transaction?: TTransaction,
+  ): Promise<GoalRecord | undefined>;
   listGoals(
     input: {
       tenant_id: string;
-      created_by_subject_id?: string;
+      created_by: string;
       lifecycle?: GoalLifecycle;
       limit: number | undefined;
       page_token: string | undefined;
@@ -251,10 +260,14 @@ export interface IGoalStore<TTransaction = never> {
   ): Promise<{ data: GoalRecord[]; pagination: TokenPagination }>;
   /** Revision-checked update. Throws GoalRevisionConflictError when the goal moved on. */
   updateGoal(input: UpdateGoalInput, transaction?: TTransaction): Promise<GoalRecord | undefined>;
-  listSteps(input: { tenant_id: string; goal_id: string }, transaction?: TTransaction): Promise<GoalStepRecord[]>;
+  listSteps(
+    input: { tenant_id: string; created_by: string; goal_id: string },
+    transaction?: TTransaction,
+  ): Promise<GoalStepRecord[]>;
   updateStep(
     input: {
       tenant_id: string;
+      created_by: string;
       goal_id: string;
       step_id: string;
       status?: GoalStepStatus;
@@ -264,17 +277,24 @@ export interface IGoalStore<TTransaction = never> {
     transaction?: TTransaction,
   ): Promise<GoalStepRecord | undefined>;
   addEvidence(
-    input: Omit<GoalEvidenceRecord, 'evidence_id'> & { tenant_id: string },
+    input: Omit<GoalEvidenceRecord, 'evidence_id'> & { tenant_id: string; created_by: string },
     transaction?: TTransaction,
   ): Promise<GoalEvidenceRecord>;
   /** Newest first, so the first row per source is its latest recorded state. */
   listEvidence(
-    input: { tenant_id: string; goal_id: string; limit: number | undefined; page_token: string | undefined },
+    input: {
+      tenant_id: string;
+      created_by: string;
+      goal_id: string;
+      limit: number | undefined;
+      page_token: string | undefined;
+    },
     transaction?: TTransaction,
   ): Promise<{ data: GoalEvidenceRecord[]; pagination: TokenPagination }>;
   startCycle(
     input: {
       tenant_id: string;
+      created_by: string;
       goal_id: string;
       input_revision: number;
       trigger: string;
@@ -285,6 +305,7 @@ export interface IGoalStore<TTransaction = never> {
   finishCycle(
     input: {
       tenant_id: string;
+      created_by: string;
       goal_id: string;
       cycle_id: string;
       finished_at: string;
@@ -297,13 +318,20 @@ export interface IGoalStore<TTransaction = never> {
   ): Promise<GoalCycleRecord | undefined>;
   /** Actions still waiting for the owner's decision, oldest first. */
   listWaitingActions(
-    input: { tenant_id: string; goal_id: string; limit: number | undefined; page_token: string | undefined },
+    input: {
+      tenant_id: string;
+      created_by: string;
+      goal_id: string;
+      limit: number | undefined;
+      page_token: string | undefined;
+    },
     transaction?: TTransaction,
   ): Promise<{ data: GoalActionRecord[]; pagination: TokenPagination }>;
   /** Appends one event; the store assigns its sequence within the goal. */
   appendEvent(
     input: {
       tenant_id: string;
+      created_by: string;
       goal_id: string;
       event_type: string;
       actor: string;
@@ -314,7 +342,13 @@ export interface IGoalStore<TTransaction = never> {
   ): Promise<GoalEventRecord>;
   /** In the order they happened: sequence ascending. */
   listEvents(
-    input: { tenant_id: string; goal_id: string; limit: number | undefined; page_token: string | undefined },
+    input: {
+      tenant_id: string;
+      created_by: string;
+      goal_id: string;
+      limit: number | undefined;
+      page_token: string | undefined;
+    },
     transaction?: TTransaction,
   ): Promise<{ data: GoalEventRecord[]; pagination: TokenPagination }>;
 }

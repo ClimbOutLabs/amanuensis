@@ -176,6 +176,13 @@ export const UpdateGoalRequestSchema = z
     success_criteria: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
     target_at: z.string().nullable().optional(),
     timezone: z.string().trim().min(1).max(100).optional(),
+    agent_id: z
+      .string()
+      .min(1)
+      .max(64)
+      .nullable()
+      .optional()
+      .describe('The saved agent this goal runs as. Changing it on an active goal needs a new activation card.'),
     selected_sources: z.array(GoalSourceRefSchema).max(50).optional(),
     execution_policy: GoalExecutionPolicySchema.optional(),
     notification_policy: GoalNotificationPolicySchema.optional(),

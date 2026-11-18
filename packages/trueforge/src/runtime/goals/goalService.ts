@@ -67,6 +67,7 @@ export class GoalStateError extends Error {
  * the fresh resolution, so the caller can show the updated card and ask again.
  */
 export class GoalSetupChangedError extends Error {
+  readonly goal_id: string;
   readonly goal: GoalRecord;
   readonly current_setup: PinnedAgentSetup;
 
@@ -151,7 +152,7 @@ export function createGoalService(deps: GoalServiceDeps) {
   }
 
   async function loadGoal(actor: GoalActor, goal_id: string): Promise<GoalRecord> {
-    const goal = await store.getGoal({ tenant_id: actor.tenant_id, goal_id });
+    const goal = await store.getGoal({ tenant_id: actor.tenant_id, created_by: actor.subject_id, goal_id });
     if (goal === undefined) {
       throw new GoalNotFoundError(goal_id);
     }
@@ -161,7 +162,7 @@ export function createGoalService(deps: GoalServiceDeps) {
 
   async function loadGoalWithSteps(actor: GoalActor, goal_id: string): Promise<GoalWithSteps> {
     const goal = await loadGoal(actor, goal_id);
-    const steps = await store.listSteps({ tenant_id: actor.tenant_id, goal_id });
+    const steps = await store.listSteps({ tenant_id: actor.tenant_id, created_by: actor.subject_id, goal_id });
     return { goal, steps };
   }
 
@@ -173,6 +174,7 @@ export function createGoalService(deps: GoalServiceDeps) {
   }): Promise<void> {
     await store.appendEvent({
       tenant_id: input.actor.tenant_id,
+      created_by: input.actor.subject_id,
       goal_id: input.goal_id,
       event_type: input.event_type,
       actor: input.actor.subject_id,
@@ -193,6 +195,7 @@ export function createGoalService(deps: GoalServiceDeps) {
   }): Promise<GoalRecord> {
     const updated = await store.updateGoal({
       tenant_id: input.actor.tenant_id,
+      created_by: input.actor.subject_id,
       goal_id: input.goal.goal_id,
       expected_revision: input.goal.revision,
       lifecycle: input.lifecycle,
@@ -256,7 +259,11 @@ export function createGoalService(deps: GoalServiceDeps) {
         event_type: 'goal_created',
         payload: { title: goal.title, revision: goal.revision },
       });
-      const storedSteps = await store.listSteps({ tenant_id: actor.tenant_id, goal_id: goal.goal_id });
+      const storedSteps = await store.listSteps({
+        tenant_id: actor.tenant_id,
+        created_by: actor.subject_id,
+        goal_id: goal.goal_id,
+      });
       return { goal, steps: storedSteps };
     },
 
@@ -270,7 +277,7 @@ export function createGoalService(deps: GoalServiceDeps) {
     ) {
       return store.listGoals({
         tenant_id: actor.tenant_id,
-        created_by_subject_id: actor.subject_id,
+        created_by: actor.subject_id,
         ...(input.lifecycle === undefined ? {} : { lifecycle: input.lifecycle }),
         limit: input.limit,
         page_token: input.page_token,
@@ -295,7 +302,8 @@ export function createGoalService(deps: GoalServiceDeps) {
           input.patch.outcome !== undefined ||
           input.patch.success_criteria !== undefined ||
           input.patch.selected_sources !== undefined ||
-          input.patch.target_at !== undefined;
+          input.patch.target_at !== undefined ||
+          input.patch.agent_id !== undefined;
         if (material) {
           throw new GoalStateError(
             'This goal is already active, and that change alters what it is working toward. ' +
@@ -305,6 +313,7 @@ export function createGoalService(deps: GoalServiceDeps) {
       }
       const updated = await store.updateGoal({
         tenant_id: actor.tenant_id,
+        created_by: actor.subject_id,
         goal_id,
         expected_revision: input.expected_revision,
         patch: input.patch,
@@ -463,6 +472,7 @@ export function createGoalService(deps: GoalServiceDeps) {
       await loadGoal(actor, goal_id);
       return store.listEvidence({
         tenant_id: actor.tenant_id,
+        created_by: actor.subject_id,
         goal_id,
         limit: input.limit,
         page_token: input.page_token,
@@ -477,6 +487,7 @@ export function createGoalService(deps: GoalServiceDeps) {
       await loadGoal(actor, goal_id);
       return store.listEvents({
         tenant_id: actor.tenant_id,
+        created_by: actor.subject_id,
         goal_id,
         limit: input.limit,
         page_token: input.page_token,
@@ -491,6 +502,7 @@ export function createGoalService(deps: GoalServiceDeps) {
       await loadGoal(actor, goal_id);
       return store.listWaitingActions({
         tenant_id: actor.tenant_id,
+        created_by: actor.subject_id,
         goal_id,
         limit: input.limit,
         page_token: input.page_token,

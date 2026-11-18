@@ -442,6 +442,7 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
           ...(body.success_criteria === undefined ? {} : { success_criteria: body.success_criteria }),
           ...(body.target_at === undefined ? {} : { target_at: body.target_at }),
           ...(body.timezone === undefined ? {} : { timezone: body.timezone }),
+          ...(body.agent_id === undefined ? {} : { agent_id: body.agent_id }),
           ...(body.selected_sources === undefined ? {} : { selected_sources: body.selected_sources }),
           ...(body.execution_policy === undefined ? {} : { execution_policy: body.execution_policy }),
           ...(body.notification_policy === undefined ? {} : { notification_policy: body.notification_policy }),

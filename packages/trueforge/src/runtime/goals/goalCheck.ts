@@ -76,6 +76,7 @@ export async function runManualCheck(input: {
   const startedAt = now();
   const cycle = await store.startCycle({
     tenant_id: actor.tenant_id,
+    created_by: actor.subject_id,
     goal_id,
     input_revision: goal.revision,
     trigger: 'manual',
@@ -83,6 +84,7 @@ export async function runManualCheck(input: {
   });
   await store.appendEvent({
     tenant_id: actor.tenant_id,
+    created_by: actor.subject_id,
     goal_id,
     event_type: 'goal_check_started',
     actor: actor.subject_id,
@@ -94,6 +96,7 @@ export async function runManualCheck(input: {
   // same revision is not news, and records no second evidence row.
   const { data: priorEvidence } = await store.listEvidence({
     tenant_id: actor.tenant_id,
+    created_by: actor.subject_id,
     goal_id,
     limit: undefined,
     page_token: undefined,
@@ -121,6 +124,7 @@ export async function runManualCheck(input: {
     }
     const evidence = await store.addEvidence({
       tenant_id: actor.tenant_id,
+      created_by: actor.subject_id,
       goal_id,
       cycle_id: cycle.cycle_id,
       source_kind: source.source_kind,
@@ -146,6 +150,7 @@ export async function runManualCheck(input: {
       const advance = step.status === 'planned' || step.status === 'ready' || step.status === 'in_progress';
       const updated = await store.updateStep({
         tenant_id: actor.tenant_id,
+        created_by: actor.subject_id,
         goal_id,
         step_id: step.step_id,
         evidence_ids: evidenceIds,
@@ -155,14 +160,20 @@ export async function runManualCheck(input: {
         advancedSteps.set(updated.step_id, updated);
       }
     }
-    currentSteps = await store.listSteps({ tenant_id: actor.tenant_id, goal_id });
+    currentSteps = await store.listSteps({ tenant_id: actor.tenant_id, created_by: actor.subject_id, goal_id });
   }
 
   // Steps whose dependencies are now all met become ready; the first is the next step.
   for (const step of unblockedSteps(currentSteps)) {
-    await store.updateStep({ tenant_id: actor.tenant_id, goal_id, step_id: step.step_id, status: 'ready' });
+    await store.updateStep({
+      tenant_id: actor.tenant_id,
+      created_by: actor.subject_id,
+      goal_id,
+      step_id: step.step_id,
+      status: 'ready',
+    });
   }
-  currentSteps = await store.listSteps({ tenant_id: actor.tenant_id, goal_id });
+  currentSteps = await store.listSteps({ tenant_id: actor.tenant_id, created_by: actor.subject_id, goal_id });
   const nextStep = nextStepOf(currentSteps);
 
   const changed = newEvidence.length > 0;
@@ -192,6 +203,7 @@ export async function runManualCheck(input: {
       // to start is noted on the goal's history, not hidden and not fatal.
       await store.appendEvent({
         tenant_id: actor.tenant_id,
+        created_by: actor.subject_id,
         goal_id,
         event_type: 'goal_check_session_failed',
         actor: actor.subject_id,
@@ -205,6 +217,7 @@ export async function runManualCheck(input: {
   const nextCheckAt = new Date(finishedAt.getTime() + (24 * 60 * 60 * 1000) / goal.execution_policy.checks_per_day);
   const finished = await store.finishCycle({
     tenant_id: actor.tenant_id,
+    created_by: actor.subject_id,
     goal_id,
     cycle_id: cycle.cycle_id,
     finished_at: finishedAt.toISOString(),
@@ -215,12 +228,14 @@ export async function runManualCheck(input: {
   });
   await store.updateGoal({
     tenant_id: actor.tenant_id,
+    created_by: actor.subject_id,
     goal_id,
     expected_revision: goal.revision,
     patch: { next_check_at: nextCheckAt.toISOString() },
   });
   await store.appendEvent({
     tenant_id: actor.tenant_id,
+    created_by: actor.subject_id,
     goal_id,
     event_type: 'goal_check_finished',
     actor: actor.subject_id,
@@ -228,13 +243,18 @@ export async function runManualCheck(input: {
       cycle_id: cycle.cycle_id,
       outcome,
       new_evidence: newEvidence.map(evidence => evidence.evidence_id),
+      // The evidence rows themselves carry no excerpt or cycle link in the
+      // canonical store, so the excerpts ride here, keyed by evidence id, and
+      // the store adapter joins them back onto the rows it reads out.
+      evidence_excerpts: Object.fromEntries(newEvidence.map(evidence => [evidence.evidence_id, evidence.excerpt])),
       next_step_id: nextStep?.step_id ?? null,
       unread_sources: unreadSources.map(source => source.source_ref),
     },
     created_at: finishedAt.toISOString(),
   });
 
-  const finalGoal = (await store.getGoal({ tenant_id: actor.tenant_id, goal_id })) ?? goal;
+  const finalGoal =
+    (await store.getGoal({ tenant_id: actor.tenant_id, created_by: actor.subject_id, goal_id })) ?? goal;
   return {
     cycle: finished ?? cycle,
     goal: finalGoal,
