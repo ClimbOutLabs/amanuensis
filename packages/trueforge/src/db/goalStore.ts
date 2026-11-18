@@ -296,6 +296,19 @@ export class GoalClaimFencedError extends Error {
   }
 }
 
+/** The goal is not active, so no worker may claim it. The claim was refused and nothing changed. */
+export class GoalClaimLifecycleError extends Error {
+  readonly goal_id: string;
+  readonly lifecycle: GoalLifecycle;
+
+  constructor(input: { goal_id: string; lifecycle: GoalLifecycle }, options?: ErrorOptions) {
+    super(`Goal ${input.goal_id} cannot be claimed while it is ${input.lifecycle}`, options);
+    this.name = 'GoalClaimLifecycleError';
+    this.goal_id = input.goal_id;
+    this.lifecycle = input.lifecycle;
+  }
+}
+
 /** The record kinds an import bundle carries, named in import refusal errors. */
 export type GoalImportRecordKind = 'goal' | 'step' | 'evidence' | 'event' | 'cycle' | 'action';
 
@@ -619,9 +632,12 @@ export interface IGoalStore {
   listActions(input: ListGoalActionsInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPage<GoalAction>>;
 
   /**
-   * Claims the goal for one worker. Resolves to the claim, or undefined while
-   * another claim is live. An expired claim is taken over with a higher
-   * fencing token, which fences the old holder's commits out.
+   * Claims the goal for one worker. Only an active goal can be claimed;
+   * claiming a goal in any other lifecycle state is refused, so a worker
+   * whose claim was revoked by a pause cannot take a fresh one until the
+   * goal is active again. Resolves to the claim, or undefined while another
+   * claim is live. An expired claim is taken over with a higher fencing
+   * token, which fences the old holder's commits out.
    */
   claimGoal(input: ClaimGoalInput, transaction?: Kysely<GoalDatabase>): Promise<GoalClaim | undefined>;
   /** Extends the caller's live claim. Resolves to the claim, or undefined when the token is not the live claim. */
@@ -1745,7 +1761,10 @@ export class GoalStore implements IGoalStore {
 
   async claimGoal(input: ClaimGoalInput, transaction?: Kysely<GoalDatabase>): Promise<GoalClaim | undefined> {
     const run = async (db: Kysely<GoalDatabase>): Promise<GoalClaim | undefined> => {
-      await this.#requireGoal(db, input);
+      const goal = toGoal(await this.#requireGoal(db, input));
+      if (goal.lifecycle !== 'active') {
+        throw new GoalClaimLifecycleError({ goal_id: input.goal_id, lifecycle: goal.lifecycle });
+      }
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const existing = await db
           .selectFrom('goal_claim')

@@ -1,5 +1,6 @@
 import {
   GoalClaimFencedError,
+  GoalClaimLifecycleError,
   GoalImportValidationError,
   GoalLifecycleTransitionError,
   GoalNotFoundError,
@@ -695,6 +696,52 @@ export function runGoalStoreContractSuite(getStore: () => IGoalStore | GoalStore
       store.recordAction({ ...owner, ...VENUE_ACTION_INPUT, fencing_token: claim.fencing_token }),
     ).rejects.toBeInstanceOf(GoalClaimFencedError);
     expect((await store.listActions({ ...owner, limit: 10 })).data).toEqual([]);
+  });
+
+  it('refuses a fresh claim on a paused goal, and claims again after a resume with a higher token', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const claim = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 });
+    if (claim === undefined) {
+      throw new Error('Expected worker A to claim the goal');
+    }
+    const paused = await store.updateGoal({ ...owner, expected_revision: 1, patch: { lifecycle: 'paused' } });
+    expect(paused.lifecycle).toBe('paused');
+    await expect(store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 })).rejects.toBeInstanceOf(
+      GoalClaimLifecycleError,
+    );
+    expect((await store.getGoal(owner))?.lifecycle).toBe('paused');
+    const resumed = await store.updateGoal({ ...owner, expected_revision: 2, patch: { lifecycle: 'active' } });
+    expect(resumed.lifecycle).toBe('active');
+    const reclaimed = await store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 });
+    if (reclaimed === undefined) {
+      throw new Error('Expected worker A to claim the resumed goal');
+    }
+    expect(reclaimed.fencing_token).toBeGreaterThan(claim.fencing_token);
+  });
+
+  it('refuses a claim on an ended goal', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal({ lifecycle: 'active' }));
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    const ended = await store.updateGoal({ ...owner, expected_revision: 1, patch: { lifecycle: 'ended' } });
+    expect(ended.lifecycle).toBe('ended');
+    await expect(store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 })).rejects.toBeInstanceOf(
+      GoalClaimLifecycleError,
+    );
+    expect(await store.getClaim(owner)).toBeUndefined();
+  });
+
+  it('refuses a claim on a goal that was never activated', async () => {
+    const store = getStore();
+    const goal = await store.createGoal(fundraiserGoal());
+    const owner = { tenant_id: TENANT, created_by: OWNER, goal_id: goal.goal_id };
+    expect(goal.lifecycle).toBe('draft');
+    await expect(store.claimGoal({ ...owner, worker_id: 'worker-a', ttl_ms: 60_000 })).rejects.toBeInstanceOf(
+      GoalClaimLifecycleError,
+    );
+    expect(await store.getClaim(owner)).toBeUndefined();
   });
 
   it('refuses writes whose claim lease expired with no takeover', async () => {
