@@ -1,10 +1,17 @@
 import type { ShellModeContextValue } from '../server/ShellModeContext.js';
 
-export type RailEntry = 'chats' | 'spaces' | 'schedules' | 'reminders' | 'more';
+export type RailEntry = 'chats' | 'spaces' | 'schedules' | 'reminders' | 'goals' | 'more';
 
 type RailShellState = Pick<
   ShellModeContextValue,
-  'settingsOpen' | 'sessionsOpen' | 'libraryOpen' | 'schedulesOpen' | 'remindersOpen' | 'spacesOpen' | 'mode'
+  | 'settingsOpen'
+  | 'sessionsOpen'
+  | 'libraryOpen'
+  | 'schedulesOpen'
+  | 'remindersOpen'
+  | 'spacesOpen'
+  | 'goalsOpen'
+  | 'mode'
 >;
 
 /**
@@ -18,6 +25,7 @@ export function railEntryFor(shell: RailShellState | null): RailEntry {
   if (shell.schedulesOpen) return 'schedules';
   if (shell.remindersOpen) return 'reminders';
   if (shell.spacesOpen) return 'spaces';
+  if (shell.goalsOpen) return 'goals';
   // Build agent lives under More, so the agent builder lights More.
   if (shell.mode.status === 'active' && shell.mode.isCreateAgent) return 'more';
   // Only the agent-library modes have no chat open; their landing page picks an agent, and Agents lives under More.

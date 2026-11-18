@@ -341,6 +341,11 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'reminderWhenLine',
   'useOptionalReminderList',
   'useReminderList',
+  'GoalSetupChangedError',
+  'GoalsButton',
+  'GoalsProvider',
+  'useGoals',
+  'useOptionalGoals',
 ];
 
 describe('public runtime exports', () => {

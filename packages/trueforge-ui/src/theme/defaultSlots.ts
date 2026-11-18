@@ -64,6 +64,7 @@ import { DraftComposerLeftSection, DraftComposerRightSection } from '../atoms/dr
 import { DraftCompositeSelector } from '../atoms/draft/DraftCompositeSelector.js';
 import { DraftModelSelector } from '../atoms/draft/DraftModelSelector.js';
 import { CatalogRow, ConnectorConnectButton } from '../atoms/draft/DraftToolPicker.js';
+import { GoalsButton } from '../atoms/GoalsButton.js';
 import { HistoryLoader } from '../atoms/HistoryLoader.js';
 import { HtmlArtifactPreview } from '../atoms/HtmlArtifactPreview.js';
 import { Markdown } from '../atoms/Markdown.js';
@@ -254,6 +255,7 @@ export const defaultSlots = {
   SchedulesButton,
   RemindersPage,
   RemindersButton,
+  GoalsButton,
   SpacesButton,
   SaveAgentButton,
   SaveAgentForm,

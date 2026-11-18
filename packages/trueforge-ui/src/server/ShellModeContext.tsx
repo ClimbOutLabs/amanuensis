@@ -152,6 +152,14 @@ export type ShellModeContextValue = {
   openSpaces: (spaceId?: string | null) => void;
   /** Leaves the spaces view and returns to chat. */
   closeSpaces: () => void;
+  /** True while the Goals full-page view (list or a single goal) is showing instead of chat. */
+  goalsOpen: boolean;
+  /** The goal currently open, or null when showing the goals list. */
+  selectedGoalId: string | null;
+  /** Opens the goals view. Pass a `goalId` to open a goal directly, or omit/null for the list. */
+  openGoals: (goalId?: string | null) => void;
+  /** Leaves the goals view and returns to chat. */
+  closeGoals: () => void;
   /** True when the user has hidden the recent-chats history panel. Persisted per browser. */
   historyCollapsed: boolean;
   setHistoryCollapsed: (collapsed: boolean) => void;
@@ -326,6 +334,8 @@ export function ShellModeProvider({
   const [pendingSessionEpoch, setPendingSessionEpoch] = useState(0);
   const [spacesOpen, setSpacesOpenState] = useState(false);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  const [goalsOpen, setGoalsOpenState] = useState(false);
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   const [historyCollapsed, setHistoryCollapsedState] = useState(() => readStoredHistoryCollapsed());
   const settingsEnabled = isSettingsChromeEnabled({ catalog, capabilities });
   const settingsOpen = settingsEnabled && settingsOpenState;
@@ -341,6 +351,13 @@ export function ShellModeProvider({
   const closeSpaces = useCallback(() => {
     setSpacesOpenState(false);
     setSelectedSpaceId(null);
+  }, []);
+
+  // The only place goalsOpen is cleared, so selectedGoalId always clears with it, the same
+  // discipline as Spaces.
+  const closeGoals = useCallback(() => {
+    setGoalsOpenState(false);
+    setSelectedGoalId(null);
   }, []);
 
   const setHistoryCollapsed = useCallback((collapsed: boolean) => {
@@ -362,12 +379,13 @@ export function ShellModeProvider({
         setSchedulesOpenState(false);
         setRemindersOpenState(false);
         closeSpaces();
+        closeGoals();
       } else {
         replaceSessionShareSearch({ view: null });
       }
       setSessionsOpenState(sessionsEnabled && open);
     },
-    [sessionsEnabled, closeSpaces],
+    [sessionsEnabled, closeSpaces, closeGoals],
   );
   const setLibraryOpen = useCallback(
     (open: boolean) => {
@@ -379,11 +397,12 @@ export function ShellModeProvider({
         setSchedulesOpenState(false);
         setRemindersOpenState(false);
         closeSpaces();
+        closeGoals();
       }
       setLibraryAgentId(null);
       setLibraryOpenState(open);
     },
-    [isLibraryEnabled, setSessionsOpen, closeSpaces],
+    [isLibraryEnabled, setSessionsOpen, closeSpaces, closeGoals],
   );
   const openLibraryAgent = useCallback(
     (agentId: string) => {
@@ -394,10 +413,11 @@ export function ShellModeProvider({
       setSchedulesOpenState(false);
       setRemindersOpenState(false);
       closeSpaces();
+      closeGoals();
       setLibraryOpenState(true);
       setLibraryAgentId(agentId);
     },
-    [isLibraryEnabled, sessionsEnabled, setSessionsOpen, closeSpaces],
+    [isLibraryEnabled, sessionsEnabled, setSessionsOpen, closeSpaces, closeGoals],
   );
   const closeLibraryAgent = useCallback(() => {
     setLibraryAgentId(null);
@@ -415,10 +435,11 @@ export function ShellModeProvider({
         setSchedulesOpenState(false);
         setRemindersOpenState(false);
         closeSpaces();
+        closeGoals();
       }
       setSettingsOpenState(settingsEnabled && open);
     },
-    [setSessionsOpen, settingsEnabled, closeSpaces],
+    [setSessionsOpen, settingsEnabled, closeSpaces, closeGoals],
   );
   // A host request answers through the same path as the Settings button, so the chrome gate
   // inside setSettingsOpen still decides. The first nonce seen is the mount value and is
@@ -445,10 +466,11 @@ export function ShellModeProvider({
         setSchedulesOpenState(false);
         setRemindersOpenState(false);
         closeSpaces();
+        closeGoals();
       }
       setAgentConfigOpenState(open);
     },
-    [setSessionsOpen, closeSpaces],
+    [setSessionsOpen, closeSpaces, closeGoals],
   );
   const setSchedulesOpen = useCallback(
     (open: boolean) => {
@@ -459,13 +481,14 @@ export function ShellModeProvider({
         setLibraryAgentId(null);
         setSessionsOpen(false);
         closeSpaces();
+        closeGoals();
       }
       // Every path that closes schedules on the way somewhere else closes reminders too,
       // so no transition can leave the reminders view standing over a chat.
       setRemindersOpenState(false);
       setSchedulesOpenState(schedulesEnabled && open);
     },
-    [schedulesEnabled, setSessionsOpen, closeSpaces],
+    [schedulesEnabled, setSessionsOpen, closeSpaces, closeGoals],
   );
 
   const setRemindersOpen = useCallback(
@@ -478,10 +501,11 @@ export function ShellModeProvider({
         setSessionsOpen(false);
         setSchedulesOpenState(false);
         closeSpaces();
+        closeGoals();
       }
       setRemindersOpenState(open);
     },
-    [setSessionsOpen, closeSpaces],
+    [setSessionsOpen, closeSpaces, closeGoals],
   );
 
   useEffect(() => {
@@ -515,8 +539,26 @@ export function ShellModeProvider({
       setSessionsOpen(false);
       setSchedulesOpenState(false);
       setRemindersOpenState(false);
+      closeGoals();
     },
-    [setSessionsOpen],
+    [setSessionsOpen, closeGoals],
+  );
+
+  // Goals follows the same discipline as Spaces: opening it closes whatever page was open.
+  const openGoals = useCallback(
+    (goalId?: string | null) => {
+      setSelectedGoalId(goalId ?? null);
+      setGoalsOpenState(true);
+      setSettingsOpenState(false);
+      setAgentConfigOpenState(false);
+      setLibraryOpenState(false);
+      setLibraryAgentId(null);
+      setSessionsOpen(false);
+      setSchedulesOpenState(false);
+      setRemindersOpenState(false);
+      closeSpaces();
+    },
+    [setSessionsOpen, closeSpaces],
   );
 
   const invalidateAgentsList = useCallback(() => {
@@ -565,6 +607,7 @@ export function ShellModeProvider({
         setSessionsOpen(false);
         setSchedulesOpen(false);
         closeSpaces();
+        closeGoals();
         setPendingSessionId(undefined);
         const isCreateAgent = resolveMutableIsCreateAgent(req);
         const kind: DraftPreferenceKind = isCreateAgent ? 'agent' : 'chat';
@@ -591,6 +634,7 @@ export function ShellModeProvider({
       setSessionsOpen(false);
       setSchedulesOpen(false);
       closeSpaces();
+      closeGoals();
       setPendingSessionId(undefined);
       setAgentConfigOpenState(false);
       setMode({
@@ -612,7 +656,16 @@ export function ShellModeProvider({
       }
       bumpEpoch(false);
     },
-    [isComposerEnabled, isLibraryEnabled, bumpEpoch, setSettingsOpen, setSessionsOpen, setSchedulesOpen, closeSpaces],
+    [
+      isComposerEnabled,
+      isLibraryEnabled,
+      bumpEpoch,
+      setSettingsOpen,
+      setSessionsOpen,
+      setSchedulesOpen,
+      closeSpaces,
+      closeGoals,
+    ],
   );
 
   const bindMutableAgent = useCallback(
@@ -662,6 +715,7 @@ export function ShellModeProvider({
       setLibraryAgentId(null);
       setSessionsOpen(false);
       setSchedulesOpen(false);
+      closeGoals();
       setAgentConfigOpenState(true);
       return;
     }
@@ -675,6 +729,7 @@ export function ShellModeProvider({
     setSchedulesOpen,
     setSessionsOpen,
     setSettingsOpen,
+    closeGoals,
   ]);
 
   const sandboxEnabled = capabilities?.sandbox.enabled;
@@ -720,6 +775,7 @@ export function ShellModeProvider({
       setSessionsOpen(false);
       setSchedulesOpen(false);
       closeSpaces();
+      closeGoals();
       setPendingSessionId(sessionId);
       setPendingSessionEpoch(n => n + 1);
       if (isMutable) {
@@ -752,6 +808,7 @@ export function ShellModeProvider({
       setSessionsOpen,
       setSchedulesOpen,
       closeSpaces,
+      closeGoals,
     ],
   );
 
@@ -786,9 +843,10 @@ export function ShellModeProvider({
     setLibraryAgentId(null);
     setSchedulesOpen(false);
     closeSpaces();
+    closeGoals();
     setMode({ status: 'idle' });
     bumpEpoch(false);
-  }, [isLibraryEnabled, isComposerEnabled, setSettingsOpen, setSchedulesOpen, closeSpaces, bumpEpoch]);
+  }, [isLibraryEnabled, isComposerEnabled, setSettingsOpen, setSchedulesOpen, closeSpaces, closeGoals, bumpEpoch]);
 
   // Only explicit resets remount the runtime; history and identity changes happen in place.
   const runtimeKey = useMemo(() => {
@@ -824,6 +882,10 @@ export function ShellModeProvider({
       selectedSpaceId,
       openSpaces,
       closeSpaces,
+      goalsOpen,
+      selectedGoalId,
+      openGoals,
+      closeGoals,
       historyCollapsed,
       setHistoryCollapsed,
       selectLibraryAgent,
@@ -870,6 +932,10 @@ export function ShellModeProvider({
       selectedSpaceId,
       openSpaces,
       closeSpaces,
+      goalsOpen,
+      selectedGoalId,
+      openGoals,
+      closeGoals,
       historyCollapsed,
       setHistoryCollapsed,
       selectLibraryAgent,
