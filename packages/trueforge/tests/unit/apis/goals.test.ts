@@ -58,7 +58,7 @@ function dataOf(json: JsonBody): Record<string, unknown> {
 }
 
 function goalOf(json: JsonBody): Record<string, unknown> {
-  const goal = dataOf(json).goal;
+  const goal = dataOf(json)['goal'];
   if (!isRecord(goal)) {
     throw new Error('The response carried no goal.');
   }
@@ -66,7 +66,7 @@ function goalOf(json: JsonBody): Record<string, unknown> {
 }
 
 function setupOf(json: JsonBody): Record<string, unknown> {
-  const setup = dataOf(json).setup;
+  const setup = dataOf(json)['setup'];
   if (!isRecord(setup)) {
     throw new Error('The response carried no setup.');
   }
@@ -111,15 +111,15 @@ describe('goals API', () => {
     const { app } = setup();
     const created = await call(app, 'POST', '/api/v1/goals', createBody());
     expect(created.status).toBe(201);
-    const goalId = goalOf(created.json).goal_id;
+    const goalId = goalOf(created.json)['goal_id'];
     expect(typeof goalId).toBe('string');
-    expect(goalOf(created.json).lifecycle).toBe('draft');
-    expect(dataOf(created.json).next_step_id).not.toBeNull();
+    expect(goalOf(created.json)['lifecycle']).toBe('draft');
+    expect(dataOf(created.json)['next_step_id']).not.toBeNull();
 
     const preview = await call(app, 'GET', `/api/v1/goals/${String(goalId)}/activation-preview`);
     expect(preview.status).toBe(200);
-    const digest = setupOf(preview.json).digest;
-    const revision = goalOf(preview.json).revision;
+    const digest = setupOf(preview.json)['digest'];
+    const revision = goalOf(preview.json)['revision'];
     expect(typeof digest).toBe('string');
 
     const activated = await call(app, 'POST', `/api/v1/goals/${String(goalId)}/activate`, {
@@ -127,14 +127,14 @@ describe('goals API', () => {
       setup_digest: digest,
     });
     expect(activated.status).toBe(200);
-    expect(goalOf(activated.json).lifecycle).toBe('active');
-    expect(goalOf(activated.json).pinned_agent_id).toBe(AGENT_ID);
+    expect(goalOf(activated.json)['lifecycle']).toBe('active');
+    expect(goalOf(activated.json)['pinned_agent_id']).toBe(AGENT_ID);
 
     const paused = await call(app, 'POST', `/api/v1/goals/${String(goalId)}/pause`, {
-      expected_revision: goalOf(activated.json).revision,
+      expected_revision: goalOf(activated.json)['revision'],
     });
     expect(paused.status).toBe(200);
-    expect(goalOf(paused.json).lifecycle).toBe('paused');
+    expect(goalOf(paused.json)['lifecycle']).toBe('paused');
 
     const events = await call(app, 'GET', `/api/v1/goals/${String(goalId)}/events`);
     expect(events.status).toBe(200);
@@ -145,27 +145,27 @@ describe('goals API', () => {
   it('answers a stale activation with the updated card instead of activating', async () => {
     const { app, agents } = setup();
     const created = await call(app, 'POST', '/api/v1/goals', createBody());
-    const goalId = String(goalOf(created.json).goal_id);
+    const goalId = String(goalOf(created.json)['goal_id']);
     const preview = await call(app, 'GET', `/api/v1/goals/${goalId}/activation-preview`);
     agents.changeManifest(AGENT_ID, fundraiserManifest('Changed after the card was shown.'));
 
     const refused = await call(app, 'POST', `/api/v1/goals/${goalId}/activate`, {
-      expected_revision: goalOf(preview.json).revision,
-      setup_digest: setupOf(preview.json).digest,
+      expected_revision: goalOf(preview.json)['revision'],
+      setup_digest: setupOf(preview.json)['digest'],
     });
     expect(refused.status).toBe(409);
     expect(refused.json.error?.code).toBe('goal_setup_changed');
-    expect(setupOf(refused.json).digest).not.toBe(setupOf(preview.json).digest);
+    expect(setupOf(refused.json)['digest']).not.toBe(setupOf(preview.json)['digest']);
 
     const after = await call(app, 'GET', `/api/v1/goals/${goalId}`);
-    expect(goalOf(after.json).lifecycle).toBe('draft');
+    expect(goalOf(after.json)['lifecycle']).toBe('draft');
   });
 
   it('refuses a check on a draft goal and hides the goal from another owner', async () => {
     const shared = { store: new InMemoryGoalStore() };
     const { app } = setup(OWNER_SUBJECT_ID, shared);
     const created = await call(app, 'POST', '/api/v1/goals', createBody());
-    const goalId = String(goalOf(created.json).goal_id);
+    const goalId = String(goalOf(created.json)['goal_id']);
 
     const checked = await call(app, 'POST', `/api/v1/goals/${goalId}/check`);
     expect(checked.status).toBe(400);

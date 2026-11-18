@@ -83,7 +83,10 @@ import type {
   GoalEvidence,
   GoalStep,
 } from '../schemas/goal';
-import { getTurnExecutionError, startTurnInProcess } from './turns';
+import { startTurnInProcess } from './turns';
+
+/** The answer a revision conflict gets: the goal moved since it was read. */
+const GOAL_CHANGED_MESSAGE = 'The goal changed since it was read. Read it again, then try once more.';
 
 /** Stores and runtime a goal check session needs, resolved the same way a schedule run's are. */
 export interface GoalTurnExecutionDeps<TTransaction> {
@@ -116,9 +119,9 @@ export interface GoalTurnExecutionDeps<TTransaction> {
 
 export interface GoalsRouterDeps<TTransaction> {
   resolveGoalStore: (c: Context) => IGoalStore<TTransaction>;
-  resolveAgentStore: (c: Context) => IAgentStore<TTransaction>;
-  resolveSkillStore: (c: Context) => ISkillStore<TTransaction>;
-  resolveSpaceStore: (c: Context) => ISpaceStore<TTransaction>;
+  resolveAgentStore: (c: Context) => Pick<IAgentStore<TTransaction>, 'getAgent'>;
+  resolveSkillStore: (c: Context) => Pick<ISkillStore<TTransaction>, 'listSkills'>;
+  resolveSpaceStore: (c: Context) => Pick<ISpaceStore<TTransaction>, 'getSpace'>;
   resolveRequestContext: ResolveRequestContext;
   /** Present where sessions run; absent, a check completes on the host's record alone. */
   turnExecution?: GoalTurnExecutionDeps<TTransaction> | undefined;
@@ -327,53 +330,29 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
     return { tenant_id: requestContext.tenant_id, subject_id: requestContext.subject.id };
   }
 
-  /** Maps the service's plain errors onto the wire. Returns undefined when the error is not one of ours. */
-  async function errorResponse(
-    c: Context,
-    error: unknown,
-    actor: GoalActor,
-    goal_id: string,
-  ): Promise<Response | undefined> {
-    if (error instanceof GoalNotFoundError) {
-      return c.json({ error: { message: error.message } }, 404);
-    }
-    if (error instanceof GoalSetupChangedError) {
-      try {
-        const preview = await serviceFor(c).previewActivation(actor, goal_id);
-        return c.json(
-          {
-            error: { message: error.message, code: 'goal_setup_changed' as const },
-            data: toWirePreview(preview),
-          },
-          409,
-        );
-      } catch {
-        return c.json({ error: { message: error.message } }, 409);
-      }
-    }
-    if (error instanceof GoalRevisionConflictError) {
+  /**
+   * The updated card a refused activate or check is answered with, resolved
+   * fresh at response time. Those two routes declare one 409 shape, the card,
+   * so a revision conflict there is answered with the card too: the goal moved
+   * since it was read, which is the refusal the card exists for. When the fresh
+   * card cannot be resolved, the reason it failed is the answer instead.
+   */
+  async function answerWithUpdatedCard(c: Context, actor: GoalActor, input: { goal_id: string; message: string }) {
+    try {
+      const preview = await serviceFor(c).previewActivation(actor, input.goal_id);
       return c.json(
-        { error: { message: 'The goal changed since it was read. Read it again, then try once more.' } },
+        {
+          error: { message: input.message, code: 'goal_setup_changed' as const },
+          data: toWirePreview(preview),
+        },
         409,
       );
-    }
-    if (error instanceof GoalStateError) {
-      return c.json({ error: { message: error.message } }, 400);
-    }
-    const turnError = getTurnExecutionError(error);
-    if (turnError) {
-      return c.json({ error: { message: turnError.message } }, turnError.status);
-    }
-    return undefined;
-  }
-
-  async function respond<T>(c: Context, goal_id: string, run: () => Promise<T>): Promise<T | Response> {
-    try {
-      return await run();
     } catch (error) {
-      const response = await errorResponse(c, error, actorFor(c), goal_id);
-      if (response !== undefined) {
-        return response;
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
       }
       throw error;
     }
@@ -393,8 +372,8 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
   const createHandler: RouteHandler<typeof createGoalRoute> = async c => {
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, '', async () =>
-      serviceFor(c).createDraft(actor, {
+    try {
+      const result = await serviceFor(c).createDraft(actor, {
         agent_id: body.agent_id,
         title: body.title,
         outcome: body.outcome,
@@ -411,30 +390,36 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
         ...(body.execution_policy === undefined ? {} : { execution_policy: body.execution_policy }),
         ...(body.notification_policy === undefined ? {} : { notification_policy: body.notification_policy }),
         linked_space_id: body.linked_space_id,
-      }),
-    );
-    if (result instanceof Response) {
-      return result;
+      });
+      return c.json({ data: toWireDetail(result) }, 201);
+    } catch (error) {
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 201);
   };
 
   const getHandler: RouteHandler<typeof getGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () => serviceFor(c).getGoal(actor, goalId));
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).getGoal(actor, goalId);
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const updateHandler: RouteHandler<typeof updateGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).updateGoal(actor, goalId, {
+    try {
+      const result = await serviceFor(c).updateGoal(actor, goalId, {
         expected_revision: body.expected_revision,
         patch: {
           ...(body.title === undefined ? {} : { title: body.title }),
@@ -448,77 +433,127 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
           ...(body.notification_policy === undefined ? {} : { notification_policy: body.notification_policy }),
           ...(body.linked_space_id === undefined ? {} : { linked_space_id: body.linked_space_id }),
         },
-      }),
-    );
-    if (result instanceof Response) {
-      return result;
+      });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const previewHandler: RouteHandler<typeof getActivationPreviewRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () => serviceFor(c).previewActivation(actor, goalId));
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).previewActivation(actor, goalId);
+      return c.json({ data: toWirePreview(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWirePreview(result) }, 200);
   };
 
   const activateHandler: RouteHandler<typeof activateGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).activate(actor, goalId, {
+    try {
+      const result = await serviceFor(c).activate(actor, goalId, {
         expected_revision: body.expected_revision,
         setup_digest: body.setup_digest,
-      }),
-    );
-    if (result instanceof Response) {
-      return result;
+      });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalSetupChangedError) {
+        return answerWithUpdatedCard(c, actor, { goal_id: goalId, message: error.message });
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return answerWithUpdatedCard(c, actor, { goal_id: goalId, message: GOAL_CHANGED_MESSAGE });
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const pauseHandler: RouteHandler<typeof pauseGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).pause(actor, goalId, { expected_revision: body.expected_revision }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).pause(actor, goalId, { expected_revision: body.expected_revision });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const resumeHandler: RouteHandler<typeof resumeGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).resume(actor, goalId, { expected_revision: body.expected_revision }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).resume(actor, goalId, { expected_revision: body.expected_revision });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const endHandler: RouteHandler<typeof endGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).end(actor, goalId, { expected_revision: body.expected_revision }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).end(actor, goalId, { expected_revision: body.expected_revision });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const checkHandler: RouteHandler<typeof checkGoalRoute> = async c => {
@@ -530,70 +565,87 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
     ]);
     const sessionDispatcher =
       deps.turnExecution === undefined ? undefined : createGoalSessionDispatcher(deps.turnExecution)(c);
-    const result = await respond(c, goalId, async () =>
-      runManualCheck({
+    try {
+      const result = await runManualCheck({
         service,
         actor,
         goal_id: goalId,
         sourceReader,
         ...(sessionDispatcher === undefined ? {} : { sessionDispatcher }),
-      }),
-    );
-    if (result instanceof Response) {
-      return result;
-    }
-    return c.json(
-      {
-        data: {
-          cycle: toWireCycle(result.cycle),
-          goal: toWireGoal(result.goal),
-          steps: result.steps.map(toWireStep),
-          new_evidence: result.new_evidence.map(toWireEvidence),
-          unread_sources: result.unread_sources.map(source => ({ ...source })),
-          next_step_id: result.next_step?.step_id ?? null,
+      });
+      return c.json(
+        {
+          data: {
+            cycle: toWireCycle(result.cycle),
+            goal: toWireGoal(result.goal),
+            steps: result.steps.map(toWireStep),
+            new_evidence: result.new_evidence.map(toWireEvidence),
+            unread_sources: result.unread_sources.map(source => ({ ...source })),
+            next_step_id: result.next_step?.step_id ?? null,
+          },
         },
-      },
-      200,
-    );
+        200,
+      );
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalSetupChangedError) {
+        return answerWithUpdatedCard(c, actor, { goal_id: goalId, message: error.message });
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return answerWithUpdatedCard(c, actor, { goal_id: goalId, message: GOAL_CHANGED_MESSAGE });
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
+    }
   };
 
   const evidenceHandler: RouteHandler<typeof listGoalEvidenceRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const { limit, page_token: pageToken } = c.req.valid('query');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).listEvidence(actor, goalId, { limit, page_token: pageToken }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).listEvidence(actor, goalId, { limit, page_token: pageToken });
+      return c.json({ data: result.data.map(toWireEvidence), pagination: result.pagination }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      throw error;
     }
-    return c.json({ data: result.data.map(toWireEvidence), pagination: result.pagination }, 200);
   };
 
   const eventsHandler: RouteHandler<typeof listGoalEventsRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const { limit, page_token: pageToken } = c.req.valid('query');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).listEvents(actor, goalId, { limit, page_token: pageToken }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).listEvents(actor, goalId, { limit, page_token: pageToken });
+      return c.json({ data: result.data.map(toWireEvent), pagination: result.pagination }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      throw error;
     }
-    return c.json({ data: result.data.map(toWireEvent), pagination: result.pagination }, 200);
   };
 
   const approvalsHandler: RouteHandler<typeof listGoalApprovalsRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const { limit, page_token: pageToken } = c.req.valid('query');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).listWaitingApprovals(actor, goalId, { limit, page_token: pageToken }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).listWaitingApprovals(actor, goalId, { limit, page_token: pageToken });
+      return c.json({ data: result.data.map(toWireApproval), pagination: result.pagination }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      throw error;
     }
-    return c.json({ data: result.data.map(toWireApproval), pagination: result.pagination }, 200);
   };
 
   const router = new OpenAPIHono();

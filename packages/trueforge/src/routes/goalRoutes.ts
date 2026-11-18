@@ -53,14 +53,14 @@ const notFound = {
     content: { 'application/json': { schema: RequestErrorResponseSchema } },
     description: 'Goal not found.',
   },
-} as const;
+};
 
 const revisionConflict = {
   409: {
     content: { 'application/json': { schema: RequestErrorResponseSchema } },
     description: 'The goal changed since it was read. Read it again, then retry.',
   },
-} as const;
+};
 
 export const listGoalsRoute = createRoute({
   method: 'get',
