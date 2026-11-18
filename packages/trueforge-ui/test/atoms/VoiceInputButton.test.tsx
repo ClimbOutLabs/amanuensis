@@ -44,10 +44,35 @@ import {
   type VoiceTranscription,
 } from '@/components/VoiceInputContext.js';
 import { LiveVoiceBridge } from '@/containers/LiveVoiceBridge.js';
+import { PRESETS } from '@/theme/presets/index.js';
+import { THEME_PRESET_IDS, TOKEN_CSS_VARS } from '@/theme/types.js';
 import { PUSH_TO_TALK_HOTKEY_STORAGE_KEY } from '@/utils/pushToTalkHotkey.js';
 import { getVoiceMode, setLiveNotice, setVoiceMode } from '@/utils/voiceMode.js';
 import { clearDraftFromVoice, takeDraftFromVoice } from '@/utils/voiceTurn.js';
+import { contrastRatio } from '../theme/wcagContrast.js';
 import { installSpeechSynthesis, removeSpeechSynthesis, stopSpokenReply } from '../utils/speechSynthesisFake.js';
+
+/**
+ * Every preset and mode where the ink on the denied mic and the voice error line falls short
+ * of AA on the surface behind them. The composer shell paints cardBg, so that is the surface
+ * both sit on. The elements carry the text-failure-ink class, which resolves through the
+ * --failure-ink custom property to the failureInk token; this checks the colour pair that
+ * resolution lands on, in the light and the dark theme alike.
+ */
+function failureInkShortfalls(): string[] {
+  const shortfalls: string[] = [];
+  if (TOKEN_CSS_VARS.failureInk !== '--failure-ink') {
+    shortfalls.push(`failureInk maps to ${TOKEN_CSS_VARS.failureInk}, not --failure-ink`);
+  }
+  for (const presetName of THEME_PRESET_IDS) {
+    for (const mode of ['light', 'dark'] as const) {
+      const tokens = PRESETS[presetName][mode];
+      const ratio = contrastRatio({ text: tokens.failureInk, surface: tokens.cardBg, base: tokens.primaryBg });
+      if (ratio < 4.5) shortfalls.push(`${presetName}/${mode} ${ratio.toFixed(2)}:1`);
+    }
+  }
+  return shortfalls;
+}
 
 const DEFAULT_TRANSCRIPTION: VoiceTranscription = {
   text: 'hello world',
@@ -437,8 +462,10 @@ describe('VoiceInputButton', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
 
     const denied = await screen.findByRole('button', { name: 'Microphone access denied. Tap for help.' });
-    expect(denied).toHaveClass('text-failure-bg');
+    expect(denied).toHaveClass('text-failure-ink');
     expect(denied).not.toHaveClass('text-failure-text');
+    expect(denied).not.toHaveClass('text-failure-bg');
+    expect(failureInkShortfalls()).toEqual([]);
   });
 
   it('shows a mic error when capture fails for a non-permission reason', async () => {
@@ -797,11 +824,14 @@ describe('VoiceInputButton voice mode', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Voice mode is missing its listening model.');
-    // The alert sits straight on the composer surface, so it takes the failure colour itself as ink,
-    // the way the message error banner does. The failure-text colour is the near-white that belongs
-    // on top of the failure background; on the light composer it is white on white.
-    expect(alert).toHaveClass('text-failure-bg');
+    // The alert sits straight on the composer surface, so it takes the failure ink: the failure
+    // colour in light themes, its lightened tint in dark ones. The failure-text colour is the
+    // near-white that belongs on top of the failure background; on the light composer it is
+    // white on white, and the failure colour itself falls short on the dark composer.
+    expect(alert).toHaveClass('text-failure-ink');
     expect(alert).not.toHaveClass('text-failure-text');
+    expect(alert).not.toHaveClass('text-failure-bg');
+    expect(failureInkShortfalls()).toEqual([]);
   });
 
   it('ending it while the line is still opening closes the line when it opens', async () => {
