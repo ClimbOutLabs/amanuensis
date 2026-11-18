@@ -497,7 +497,7 @@ function VoiceInputButtonInner({
                   auiButtonClass({ variant: 'ghost', size: 'icon' }),
                   'touch-none select-none',
                   phase === 'recording' && 'bg-failure-bg/15',
-                  phase === 'denied' && 'text-failure-text',
+                  phase === 'denied' && 'text-failure-bg',
                 )}
               >
                 {phase === 'recording' ? (
@@ -576,7 +576,9 @@ function VoiceInputButtonInner({
         </div>
       )}
       {error != null && (
-        <span role="alert" className="text-failure-text inline-flex max-w-48 items-center gap-1 text-xs">
+        // The alert sits straight on the composer surface, so the failure colour itself is the ink, as
+        // in the message error banner. The failure-text colour is the near-white meant for the failure background.
+        <span role="alert" className="text-failure-bg inline-flex max-w-48 items-center gap-1 text-xs">
           <span>{error}</span>
           <button
             type="button"
