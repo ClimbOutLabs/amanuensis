@@ -3124,12 +3124,28 @@ describe('Sandbox provider-owned paths', () => {
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
   });
 
+  it('starts source work in a checkout in both bound and unbound chats', () => {
+    const unbound = new InstructionBuilder('root');
+    makeSandbox(makeProvider()).buildInstruction(unbound);
+    const bound = new InstructionBuilder('root');
+    makeRepositorySandbox(makeProvider()).buildInstruction(bound);
+
+    for (const instructions of [unbound.build(), bound.build()]) {
+      expect(instructions).toContain('including an explanation, bug investigation, review, or edit');
+      expect(instructions).toContain('check the workspace for an existing checkout of that repository');
+      expect(instructions).toContain('Use local git and file tools for the source tree and diffs');
+      expect(instructions).toContain('A compare link supplies the refs directly');
+      expect(instructions).toContain('If it is shallow and you need a merge base, add --unshallow to the fetch.');
+      expect(instructions).toContain('Verify the fetched commits against the metadata');
+      expect(instructions).toContain('Read-only work does not need a task branch');
+    }
+  });
+
   it('puts the provider uploads dir in the system prompt, not /tmp/uploads', () => {
     const unbound = new InstructionBuilder('root');
     makeSandbox(makeProvider()).buildInstruction(unbound);
     expect(unbound.build()).toContain('/prov/uploads/');
-    // The coding guidance only goes out once a repository is attached to the chat.
-    expect(unbound.build()).not.toContain('work from a checked-out repository');
+    expect(unbound.build()).not.toContain('no more than eight inspection calls');
     const sandbox = makeRepositorySandbox(makeProvider());
     const builder = new InstructionBuilder('root');
     sandbox.buildInstruction(builder);

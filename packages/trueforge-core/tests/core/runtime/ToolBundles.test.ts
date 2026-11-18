@@ -10,7 +10,7 @@ import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types
 import { findBundle, TOOL_BUNDLE_NAMES, type ToolBundleName } from '../../../src/core/runtime/toolBundleCatalog';
 import { ToolBundles } from '../../../src/core/runtime/ToolBundles';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { finalAnswerStream, makeSilentLogger, unknownToolStream } from '../harnessMocks';
+import { finalAnswerStream, makeSilentLogger, makeStubPublicSandbox, unknownToolStream } from '../harnessMocks';
 
 /** A built-in tool set whose tools all go out with one bundle, or always when it names none. */
 class Tools extends LocalToolMCP {
@@ -65,6 +65,7 @@ async function runTurn(input: {
   message?: string;
   history?: ContextMessage[];
   capabilityState?: CapabilityState | undefined;
+  sandbox?: boolean;
 }) {
   const sets = toolSets();
   const requests: LLMCreateParamsStreaming[] = [];
@@ -95,6 +96,7 @@ async function runTurn(input: {
     definition: { modelId: undefined, configuredModels: undefined, modelClient, instruction: 'test' },
     context: [...(input.history ?? []), { role: 'user', content: input.message ?? 'Thanks!' }],
     capabilities,
+    sandbox: input.sandbox === true ? makeStubPublicSandbox() : undefined,
     capabilityState: input.capabilityState,
     toolCallMemo: undefined,
     taskState: undefined,
@@ -157,6 +159,17 @@ describe('tool bundles in a turn', () => {
     });
     expect(sets.notes.calls).toEqual(['add_note:plumber']);
     expect(requests).toHaveLength(2);
+  });
+
+  it('points an unbound chat to local Git before its first tool call for repository source', async () => {
+    const { requests } = await runTurn({
+      message: 'Review https://github.com/example/widgets/compare/main...feature/fix',
+      steps: [{ name: 'load_bundle', args: { name: 'sandbox' } }, 'answer'],
+      sandbox: true,
+    });
+
+    expect(bundleIndex(requests[0])).toContain('Start repository source work here with local Git');
+    expect(toolResults(requests[1])[0]).toContain('A compare link supplies the refs directly');
   });
 
   it('keeps the system prompt and tools byte-identical across the steps of a reply', async () => {

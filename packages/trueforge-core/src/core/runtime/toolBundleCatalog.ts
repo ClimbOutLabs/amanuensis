@@ -39,7 +39,8 @@ const TOOL_BUNDLES: Record<ToolBundleName, ToolBundleSpec> = {
     aliases: ['web_browser', 'chrome'],
   },
   sandbox: {
-    summary: 'the sandbox workspace, repository work, file uploads',
+    summary:
+      'workspace and file uploads. Start repository source work here with local Git. Read this guidance before inspecting, reviewing, or editing code.',
     aliases: ['code', 'shell', 'run', 'exec'],
   },
   spaces: {

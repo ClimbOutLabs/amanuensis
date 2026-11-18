@@ -203,6 +203,47 @@ describe('GitBridge (real git on both sides)', () => {
     expect(new Set(scopes)).toEqual(new Set([`${URL}.git`, URL]));
   });
 
+  test.each(['refs/heads/feat/archive-chats', 'refs/pull/42/head'])(
+    'a targeted fetch of %s brings in the complete diff without moving the worktree',
+    async source => {
+      const dir = await cloned();
+      const originalHead = git(dir, 'rev-parse', 'HEAD');
+      expect(git(dir, 'rev-parse', '--is-shallow-repository')).toBe('true');
+      const seed = join(base, 'seed');
+      const mergeBase = git(seed, 'rev-parse', 'HEAD^');
+      git(seed, 'switch', '-c', 'feat/archive-chats', mergeBase);
+      const files = Array.from({ length: 13 }, (_, index) => `change-${String(index).padStart(2, '0')}.txt`);
+      for (const file of files) {
+        await writeFile(join(seed, file), file === files[0] ? 'large diff line\n'.repeat(3000) : 'change\n');
+      }
+      git(seed, 'add', '.');
+      git(seed, 'commit', '-m', 'feature');
+      const head = git(seed, 'rev-parse', 'HEAD');
+      git(seed, 'push', remote, `HEAD:${source}`);
+      await writeFile(join(dir, 'README.md'), 'unsaved local work\n');
+
+      const review = await bridge.run(
+        input(
+          `git fetch --unshallow --no-tags origin refs/heads/main:refs/aman/base ${source}:refs/aman/head`,
+          TOKEN,
+          '/workspace/widgets',
+          APPROVED_ORIGIN,
+        ),
+      );
+      expect(review).toMatchObject({ success: true, response: { exitCode: 0 } });
+      expect(git(dir, 'rev-parse', '--is-shallow-repository')).toBe('false');
+      expect(git(dir, 'rev-parse', 'refs/aman/head')).toBe(head);
+      expect(git(dir, 'merge-base', 'refs/aman/base', head)).toBe(mergeBase);
+      expect(git(dir, 'diff', '--name-only', mergeBase, head).split('\n')).toEqual(files);
+      expect(git(dir, 'rev-parse', 'HEAD')).toBe(originalHead);
+      expect(await readFile(join(dir, 'README.md'), 'utf8')).toBe('unsaved local work\n');
+      const hostFetch = calls.find(call => call.argv.includes(`+${source}:${source}`));
+      expect(hostFetch?.argv).toContain('+refs/heads/main:refs/heads/main');
+      expect(hostFetch?.argv).not.toContain('+refs/heads/*:refs/heads/*');
+      expect(hostFetch?.argv).not.toContain(`+${source}:refs/aman/head`);
+    },
+  );
+
   test('a pull that has to merge writes the merge commit under the name it was given', async () => {
     const dir = await cloned();
     const other = join(base, 'other');

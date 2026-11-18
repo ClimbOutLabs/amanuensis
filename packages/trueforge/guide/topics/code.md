@@ -16,6 +16,12 @@ How to get there: Just ask in any chat. To check the sandbox, click **More** in 
 
 You don't need to read or write any code yourself. To work with a file you have, attach it to your message first. See [Files and pictures](files.md).
 
+## Ask Aman to work on a repository
+
+Give Aman a repository, issue, comparison, or pull request link, or use a chat already linked to the repository. Aman looks for a local copy in the sandbox. If it needs to download one, it asks first through the connected GitHub account.
+
+Aman uses that copy to explain code, investigate bugs, review changes, or make edits. For a review, it compares the requested versions without switching branches or changing your files. If it can't download a version needed for the review, it tells you what it couldn't check.
+
 ## Check that the sandbox is ready
 
 1. Click **More** in the left bar, then **Settings**, then **Sandbox**.

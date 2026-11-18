@@ -172,6 +172,28 @@ function depthFlags(args: readonly string[]): string[] {
   return inline === undefined ? [] : [inline];
 }
 
+const EXACT_FETCH_REF = /^refs\/(?:(?:heads|tags)\/[A-Za-z0-9][A-Za-z0-9._/-]{0,239}|pull\/[1-9][0-9]{0,15}\/head)$/u;
+
+function hostFetchRefspecs(input: { args: readonly string[]; noTags: boolean }): string[] {
+  const [, ...refspecs] = operandsOf({ args: input.args, valued: new Set(['--depth']) });
+  const explicit = refspecs.flatMap(refspec => {
+    const [source] = refspec.replace(/^\+/u, '').split(':');
+    return source !== undefined && EXACT_FETCH_REF.test(source) ? [source] : [];
+  });
+  // Mirror only the source. The guest applies any user-supplied destination in its own checkout.
+  const exact = [...new Set(explicit)].map(source => `+${source}:${source}`);
+  if (input.noTags && explicit.length > 0 && explicit.length === refspecs.length) {
+    return exact;
+  }
+  return [
+    '+refs/heads/*:refs/heads/*',
+    ...(input.noTags ? [] : ['+refs/tags/*:refs/tags/*']),
+    ...exact.filter(
+      refspec => !refspec.startsWith('+refs/heads/') && (input.noTags || !refspec.startsWith('+refs/tags/')),
+    ),
+  ];
+}
+
 function plainSubject(subject: string): string {
   return replaceControlCharacters(subject).replace(/\s+/gu, ' ').trim().slice(0, 100);
 }
@@ -297,8 +319,7 @@ export class GitBridge {
           ...depthFlags(input.plan.args),
           '--',
           this.contact(repo.canonical),
-          '+refs/heads/*:refs/heads/*',
-          ...(noTags ? [] : ['+refs/tags/*:refs/tags/*']),
+          ...hostFetchRefspecs({ args: input.plan.args, noTags }),
         ],
         token: input.token,
         repository: repo.slug,

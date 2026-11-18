@@ -3456,13 +3456,23 @@ export class Sandbox extends LocalToolMCP {
         );
       }
     }
-    // Coding guidance is long and only applies once a repository is attached to the chat.
+    sandboxInstructions.addSection(
+      'source-workspace',
+      dedent`
+        For any task that needs repository source, including an explanation, bug investigation, review, or edit, work from a checked-out repository in the sandbox. This applies even when the chat has no repository binding or the request starts with a link.
+        First resolve the repository and the branch, tag, or commit the user means. Use this chat's bound checkout when it matches, or check the workspace for an existing checkout of that repository before proposing one authenticated git clone. Confirm the checkout's repository and revision with local git. If the target is still ambiguous, ask which one to use.
+        Use GitHub tools for remote facts such as issue details, pull request metadata, CI status, and publishing. Use local git and file tools for the source tree and diffs. Never fetch private repository files through web tools.
+        For any comparison, pin both revisions to commit IDs. A compare link supplies the refs directly and can be reviewed without finding a pull request. When one of its refs names a fork, resolve the fork repository before fetching that ref. For a numbered GitHub pull request, use its metadata to identify the base and head. For example, fetch PR 42 against main with git fetch --no-tags origin refs/heads/main:refs/aman/review/42/base refs/pull/42/head:refs/aman/review/42/head, using the base repository as the remote. Verify the fetched commits against the metadata before reviewing.
+        Check whether the checkout is shallow with git rev-parse --is-shallow-repository. If it is shallow and you need a merge base, add --unshallow to the fetch. Compute the merge base locally when reviewing the changes introduced by a branch. Start with the complete local changed-file list and read patches in small chunks. If a required revision or file is inaccessible, report the gap.
+        Read-only work does not need a task branch, script execution, or changes to the existing worktree. Use explicit refs with git show, git diff, and git grep to inspect a different revision without switching branches. For edits, work on a task branch and preserve existing changes. Pass the checkout path as cwd on repository calls. Setting HOME does not change the working directory.
+      `,
+    );
+
+    // Bound repositories also have registered commands and workspace verification.
     if (this.boundRepository !== undefined) {
       sandboxInstructions.addSection(
         'repository-work',
         dedent`
-          For coding tasks, work from a checked-out repository in the sandbox. Use GitHub connectors for issues, pull requests, CI status, and repository management, not as the primary file editor. If the repository is not checked out, propose one authenticated git clone once. Do not fetch private repository files through web tools.
-          Create the task branch right after cloning. Every command starts in a fresh shell, so include the repository working directory explicitly with cwd. Setting HOME does not change the working directory.
           Inspect narrowly: search first, read only the relevant ranges, and normally spend no more than eight inspection calls before the first focused edit. Do not read whole large files or search installed dependency sources when the repository's own types and a compiler check can answer the question. After two searches return no matches, change strategy or ask one concise question instead of rephrasing the search.
           Batch discovery inside one command instead of issuing it one step at a time: read several files in one exec (\`sed -n 1,80p a.ts; echo ----; sed -n 1,80p b.ts\`), search several names in one call (\`rg -n 'nameA|nameB|nameC' src\`), and list with \`rg --files | rg pattern\` rather than one ls per directory. Each budget-consuming inspection step counts toward the host's inspection cap, so batching is how to stay under it.
           Before reading a file by path, confirm it exists with a listing or a search (ls, find, grep -l, rg -l) unless a previous result in this session already showed that path. Do not guess paths from component names.
