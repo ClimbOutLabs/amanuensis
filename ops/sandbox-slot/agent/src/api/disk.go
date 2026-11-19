@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"aman/slotagent/src/lease"
+	"aman/slotagent/src/tree"
 )
 
 const (
@@ -42,19 +43,33 @@ func newDiskWatch(volume string, minFree, limit int64, dirs ...string) (*diskWat
 	return &diskWatch{dirs: dirs, limit: limit, volume: volume, startUsed: used}, nil
 }
 
-// checkCreateRoom answers whether a new session tree with this quota may be created on the volume:
-// its whole quota plus the free-space reserve must fit in what is free now. A quota is a promise, not
-// reserved bytes, so a tree that grows later is still stopped by its watcher and by the same reserve
-// checked before every call.
-func checkCreateRoom(volume string, minFree, quotaBytes int64) error {
+// checkCreateRoom answers whether a new session tree with this quota may be created on the volume.
+// Two things must hold. What is free now must fit the tree's whole quota plus the free-space
+// reserve. And the quotas already promised to the trees on the volume, plus this quota and the
+// reserve, must fit in the volume itself: a quota is a promise, and an empty tree takes almost no
+// space, so counting only free space would let any number of trees be promised against the same
+// bytes. Counting promises in full at creation is what keeps the reserve real once every tree has
+// grown into its quota, so a chat that already holds a tree can always start its call.
+func (s *Server) checkCreateRoom(quotaBytes int64) error {
+	minFree := s.MinFreeBytes
 	if minFree == 0 {
 		minFree = defaultMinFreeBytes
 	}
-	_, free, err := lease.FilesystemUsedBytes(volume)
+	_, free, err := lease.FilesystemUsedBytes(s.VolumeDir)
 	if err != nil {
 		return err
 	}
 	if free < quotaBytes+minFree {
+		return errStorageFull
+	}
+	total := s.VolumeBytes
+	if total == 0 {
+		total, err = lease.FilesystemTotalBytes(s.VolumeDir)
+		if err != nil {
+			return err
+		}
+	}
+	if tree.PromisedBytes(s.TreeDir)+quotaBytes+minFree > total {
 		return errStorageFull
 	}
 	return nil

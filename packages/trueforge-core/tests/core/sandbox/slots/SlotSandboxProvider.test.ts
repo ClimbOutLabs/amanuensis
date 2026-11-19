@@ -477,6 +477,73 @@ describe('SlotSandboxProvider', () => {
     });
   });
 
+  test('a creation answer lost on the way back is retried on the same slot with the same session id', async () => {
+    const created = new Set<string>();
+    let firstAnswerLost = true;
+    const slotOne: FakeHandler = request => {
+      if (request.path === '/v1/create_session') {
+        const { session_id: sessionId } = bodyOf(request, z.object({ session_id: z.string(), disk_mb: z.number() }));
+        created.add(sessionId);
+        if (firstAnswerLost) {
+          firstAnswerLost = false;
+          // The tree was made, but the answer never arrived: the reply is not an agent error envelope.
+          return { status: 500, body: 'answer lost' };
+        }
+        return { status: 204, body: undefined };
+      }
+      return { status: 200, body: { busy: false, sessions: 0, attestation: attestation() } };
+    };
+    const slotTwo: FakeHandler = request =>
+      request.path === '/v1/create_session'
+        ? { status: 204, body: undefined }
+        : { status: 200, body: { busy: false, sessions: 3, attestation: attestation() } };
+    const { provider, agents: started } = await providerFor([slotOne, slotTwo]);
+    const { sandboxId } = await provider.createSandbox();
+    expect(sandboxId).toMatch(/^s1-[0-9a-f]{32}$/);
+    // The returned workspace is the one the first, unanswered creation made.
+    expect(created.size).toBe(1);
+    expect(sandboxId.slice(3)).toBe([...created][0]);
+    const createsOnOne = started[0]?.requests.filter(request => request.path === '/v1/create_session') ?? [];
+    expect(createsOnOne).toHaveLength(2);
+    expect(createsOnOne.map(request => bodyOf(request, z.object({ session_id: z.string() })).session_id)).toEqual([
+      sandboxId.slice(3),
+      sandboxId.slice(3),
+    ]);
+    // No second workspace was created on the other slot.
+    expect(started[1]?.requests.filter(request => request.path === '/v1/create_session')).toHaveLength(0);
+  });
+
+  test('when the retry also loses its answer, creation moves on and the first tree is removed', async () => {
+    const slotOne: FakeHandler = request => {
+      if (request.path === '/v1/create_session') {
+        return { status: 500, body: 'answer lost' };
+      }
+      if (request.path === '/v1/destroy_session') {
+        return { status: 204, body: undefined };
+      }
+      return { status: 200, body: { busy: false, sessions: 0, attestation: attestation() } };
+    };
+    const slotTwo: FakeHandler = request =>
+      request.path === '/v1/create_session'
+        ? { status: 204, body: undefined }
+        : { status: 200, body: { busy: false, sessions: 3, attestation: attestation() } };
+    const { provider, agents: started } = await providerFor([slotOne, slotTwo]);
+    const { sandboxId } = await provider.createSandbox();
+    expect(sandboxId).toMatch(/^s2-[0-9a-f]{32}$/);
+    const createsOnOne = started[0]?.requests.filter(request => request.path === '/v1/create_session') ?? [];
+    expect(createsOnOne).toHaveLength(2);
+    const abandoned = bodyOf(createsOnOne[0], z.object({ session_id: z.string() })).session_id;
+    // Both attempts used the one id, and that id was then destroyed on the same slot.
+    expect(createsOnOne.map(request => bodyOf(request, z.object({ session_id: z.string() })).session_id)).toEqual([
+      abandoned,
+      abandoned,
+    ]);
+    const destroys = started[0]?.requests.filter(request => request.path === '/v1/destroy_session') ?? [];
+    expect(destroys).toHaveLength(1);
+    expect(bodyOf(destroys[0], z.object({ session_id: z.string() })).session_id).toBe(abandoned);
+    expect(abandoned).not.toBe(sandboxId.slice(3));
+  });
+
   test('Code Mode is refused', async () => {
     const { provider } = await providerFor([healthy]);
     expect(() => provider.createCodeModeTransport()).toThrow('Code Mode is not available');

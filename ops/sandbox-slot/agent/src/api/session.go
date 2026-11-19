@@ -385,12 +385,21 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // ensureTree returns the session's tree root, making the tree when it is missing. Whichever call
-// makes it, a new tree is made only when the volume has room for its whole quota plus the reserve;
-// an existing tree needs no new room. The caller holds the session's lock.
+// makes it, a new tree is made only when the volume has room for it under the creation check; an
+// existing tree needs no new room. The caller holds the session's lock.
 func (s *Server) ensureTree(w http.ResponseWriter, sessionID string, quotaBytes int64) (string, bool) {
 	if _, err := os.Lstat(tree.Root(s.TreeDir, sessionID)); errors.Is(err, os.ErrNotExist) {
-		if err := checkCreateRoom(s.VolumeDir, s.MinFreeBytes, quotaBytes); err != nil {
-			writeStorageError(w, err)
+		// Making a tree is serialized across sessions: two chats must not both pass the room
+		// check against the promises counted before either tree existed.
+		s.createMu.Lock()
+		defer s.createMu.Unlock()
+		if _, err := os.Lstat(tree.Root(s.TreeDir, sessionID)); errors.Is(err, os.ErrNotExist) {
+			if err := s.checkCreateRoom(quotaBytes); err != nil {
+				writeStorageError(w, err)
+				return "", false
+			}
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be checked")
 			return "", false
 		}
 	} else if err != nil {
@@ -401,6 +410,15 @@ func (s *Server) ensureTree(w http.ResponseWriter, sessionID string, quotaBytes 
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
 		return "", false
+	}
+	// The newest call's quota is the tree's promise. Recording it whenever it changes keeps the
+	// promise current when the configured quota changes, and gives trees made before quotas were
+	// recorded a record of their own.
+	if recorded, ok := tree.RecordedQuota(s.TreeDir, sessionID); !ok || recorded != quotaBytes {
+		if err := tree.RecordQuota(s.TreeDir, sessionID, quotaBytes); err != nil {
+			writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree quota could not be recorded")
+			return "", false
+		}
 	}
 	return root, true
 }

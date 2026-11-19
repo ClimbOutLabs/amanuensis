@@ -552,6 +552,67 @@ func TestCreateSessionForAnExistingTreeNeedsNoNewRoom(t *testing.T) {
 	}
 }
 
+func TestCreateSessionCountsTheQuotasAlreadyPromised(t *testing.T) {
+	e := newEnv(t, true)
+	// A volume of 1 GiB plus two 256 MiB quotas, with the default 1 GiB reserve, fits two
+	// creations exactly. A third would promise more than the volume holds, however much free
+	// space it has now, because both existing trees are still empty.
+	e.srv.VolumeBytes = 1536 << 20
+	second := strings.Repeat("b", 32)
+	third := strings.Repeat("c", 32)
+	for _, id := range []string{sessionID, second} {
+		if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": id, "disk_mb": 256}); rec.Code != 204 {
+			t.Fatalf("%s: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": third, "disk_mb": 256})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("a creation past the promised total must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(e.srv.TreeDir, third)); !os.IsNotExist(err) {
+		t.Fatal("a refused creation must leave no tree")
+	}
+	// Removing a tree frees its promise, so the same creation then fits.
+	if rec := e.do("POST", "/v1/destroy_session", map[string]any{"session_id": second}); rec.Code != 204 {
+		t.Fatalf("destroy: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": third, "disk_mb": 256}); rec.Code != 204 {
+		t.Fatalf("after a removal the creation must fit: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestASecondChatCanStillStartAfterTheFirstWritesWithinItsQuota(t *testing.T) {
+	e := newEnv(t, true)
+	// The volume fits both chats' quotas with the reserve to spare, and no third quota: the
+	// promises counted at creation can never crowd out the reserve a call needs to start.
+	e.srv.VolumeBytes = 1536 << 20
+	second := strings.Repeat("b", 32)
+	for _, id := range []string{sessionID, second} {
+		if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": id, "disk_mb": 256}); rec.Code != 204 {
+			t.Fatalf("%s: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	// The first chat writes within its quota.
+	content := base64.StdEncoding.EncodeToString([]byte("work"))
+	write := map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 256}
+	if rec := e.do("POST", "/v1/fs_write", write); rec.Code != 204 {
+		t.Fatalf("write: %d %s", rec.Code, rec.Body.String())
+	}
+	// The second chat can still start its call.
+	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+		m["session_id"] = second
+		m["disk_mb"] = 256
+	}))
+	if rec.Code != 200 {
+		t.Fatalf("the second chat must be able to start: %d %s", rec.Code, rec.Body.String())
+	}
+	// And a third chat is refused at creation, so this cannot change as more chats arrive.
+	third := strings.Repeat("c", 32)
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": third, "disk_mb": 256}); rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("a third quota must not fit: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestEveryCallThatMakesATreeChecksForRoom(t *testing.T) {
 	e := newEnv(t, true)
 	e.srv.MinFreeBytes = 1 << 60

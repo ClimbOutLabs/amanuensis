@@ -85,6 +85,14 @@ const CREATE_STORAGE_FULL_OWN_DISK_MESSAGE =
 const CREATE_STORAGE_FULL_SHARED_DISK_MESSAGE =
   'The sandbox storage is almost full, so a new workspace could not be created. Delete old chats you no longer need, or free some disk space on this machine, then try again.';
 
+/**
+ * A failure on the way to or from the slot, rather than an answer from it: the request may still
+ * have been carried out, so a lost creation answer does not prove nothing was created.
+ */
+function isTransportError(error: SlotCallError): boolean {
+  return error.kind === 'unreachable' || error.kind === 'protocol';
+}
+
 function describeAgentError(error: SlotCallError): string {
   if (error.kind === 'agent' && error.code === 'isolation_refused') {
     return `The sandbox could not prove its safety limits, so nothing was run (${error.message}). Run \`${SLOT_FIX_COMMAND}\`, then try again.`;
@@ -205,10 +213,29 @@ export class SlotSandboxProvider implements SandboxProvider {
         continue;
       }
       const sessionId = randomBytes(16).toString('hex');
-      const result = await this.whileBusy({
-        call: () => client.createSession({ sessionId, diskMb: this.treeDiskMb, signal: params?.signal }),
-        signal: params?.signal,
-      });
+      const create = (): Promise<SlotCallResult<undefined>> =>
+        this.whileBusy({
+          call: () => client.createSession({ sessionId, diskMb: this.treeDiskMb, signal: params?.signal }),
+          signal: params?.signal,
+        });
+      let result = await create();
+      if (!result.ok && isTransportError(result.error)) {
+        // The answer may have been lost after the agent made the tree. Creation is idempotent by
+        // session id, so ask the same slot again with the same id before trying another slot: the
+        // retry takes over the tree if it was made, and makes it if it was not.
+        this.logger.warn(
+          'the answer to a workspace creation was lost; asking the same slot again with the same session id',
+          {
+            slot: slot.index + 1,
+            sessionId,
+            error: result.error.message,
+          },
+        );
+        result = await create();
+        if (!result.ok && isTransportError(result.error)) {
+          await this.removePossiblyCreated({ client, sessionId, slotIndex: slot.index, signal: params?.signal });
+        }
+      }
       if (result.ok) {
         this.logger.debug('Sandbox created', { slot: slot.index + 1 });
         return { sandboxId: `s${String(slot.index + 1)}-${sessionId}` };
@@ -232,6 +259,34 @@ export class SlotSandboxProvider implements SandboxProvider {
       throw new Error(describeAgentError(other));
     }
     throw new Error(SLOT_NOT_READY_MESSAGE);
+  }
+
+  /**
+   * Best effort removal of a tree a lost creation answer may have left on a slot, after the same-id
+   * retry also failed to get an answer. When the removal cannot be confirmed either, the session id
+   * is logged so the tree is not invisible: the slot's idle sweep removes trees no chat uses.
+   */
+  private async removePossiblyCreated(input: {
+    client: SlotClient;
+    sessionId: string;
+    slotIndex: number;
+    signal: AbortSignal | undefined;
+  }): Promise<void> {
+    const removed = await this.whileBusy({
+      call: () => input.client.destroySession({ sessionId: input.sessionId, signal: input.signal }),
+      signal: input.signal,
+    });
+    if (removed.ok) {
+      this.logger.debug('removed a workspace whose creation answer was lost', {
+        slot: input.slotIndex + 1,
+        sessionId: input.sessionId,
+      });
+    } else {
+      this.logger.warn(
+        'a workspace whose creation answer was lost could not be removed; the idle sweep will remove it if no chat uses it',
+        { slot: input.slotIndex + 1, sessionId: input.sessionId, error: removed.error.message },
+      );
+    }
   }
 
   async exec(params: SandboxExecParams): Promise<ExecResult> {

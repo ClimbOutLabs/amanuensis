@@ -171,6 +171,15 @@ func FilesystemUsedBytes(path string) (used, free int64, err error) {
 	return (int64(st.Blocks) - int64(st.Bfree)) * block, int64(st.Bavail) * block, nil
 }
 
+// FilesystemTotalBytes returns the total size of the filesystem holding path.
+func FilesystemTotalBytes(path string) (int64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, err
+	}
+	return int64(st.Blocks) * int64(st.Bsize), nil
+}
+
 // Reclaimed describes what Reclaim removed.
 type Reclaimed struct {
 	Files int

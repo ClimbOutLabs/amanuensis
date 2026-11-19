@@ -43,6 +43,10 @@ The work lands in stages, each its own pull request against this spec:
    the slot agent to create the workspace, and the agent answers from
    the real free space on its storage, refusing only when the new
    workspace's size limit plus the free-space reserve does not fit. The
+   size limits already promised to the slot's workspaces count in full
+   against its storage alongside the new one, so the reserve survives
+   every workspace growing to its limit and a chat that holds a
+   workspace can always start. The
    same check runs whenever any call first makes a tree (a command or a
    file write into a chat whose tree the idle sweep removed), so no path
    makes a tree without it, and making an empty tree never waits for
@@ -109,10 +113,14 @@ empty state, and the card staying hidden on the Docker backend.
 Stage 3 is proved by provider tests against fake slot agents (slots
 holding more chats than the old per-disk count still create, a full slot
 passes the chat to a slot with room, every slot full refuses with the
-plain sentence while the sandbox still reports ready, and creation waits
-out a busy slot), by contract and client tests for the create call, and
+plain sentence while the sandbox still reports ready, creation waits
+out a busy slot, and a creation whose answer is lost is retried on the
+same slot with the same session id), by contract and client tests for the create call, and
 by agent tests: a tree is created, creation is refused with no tree left
-behind when the storage cannot fit the quota plus the reserve, an
+behind when the storage cannot fit the quota plus the reserve, creation
+is refused when the quotas already promised plus the new quota and the
+reserve pass the volume's size, a second chat still starts after the
+first writes within its quota, an
 existing tree needs no new room, bad requests are refused, a command or
 file write that makes a tree is refused the same way, and a new chat's
 tree is made while another chat's call runs. A live
