@@ -297,4 +297,130 @@ describe('goal service', () => {
     const visible = await service.getGoal(ownerActor('persona-mannie'), draft.goal.goal_id);
     expect(visible.goal.goal_id).toBe(draft.goal.goal_id);
   });
+
+  it('confirms a step through the service after a check, unblocking the next step without completing the goal', async () => {
+    const { service } = setup();
+    const { actor, draft } = await activatedGoal(service);
+    const check = await runManualCheck({
+      service,
+      actor,
+      goal_id: draft.goal.goal_id,
+      sourceReader: new FixtureSourceReader(),
+    });
+    const venueStep = check.steps.find(step => step.description === 'Confirm the venue');
+    if (venueStep === undefined) {
+      throw new Error('The venue step is missing from the check result.');
+    }
+    // The check attached the venue evidence and nothing more: the venue step
+    // is still only ready, and the equipment step is still blocked behind it.
+    expect(venueStep.status).toBe('ready');
+    expect(venueStep.evidence_ids).toHaveLength(1);
+    expect(check.steps.find(step => step.description === 'Book the equipment')?.status).toBe('planned');
+
+    const confirmed = await service.confirmStep(actor, draft.goal.goal_id, venueStep.step_id);
+    expect(confirmed.goal.lifecycle).toBe('active');
+    expect(confirmed.steps.find(step => step.step_id === venueStep.step_id)?.status).toBe('owner_confirmed');
+    expect(confirmed.steps.find(step => step.description === 'Book the equipment')?.status).toBe('ready');
+    expect(confirmed.steps.find(step => step.description === 'Confirm the volunteers')?.status).toBe('ready');
+    // Confirming one step verifies no other step, and the goal itself stays open.
+    expect(confirmed.steps.every(step => step.status !== 'verified')).toBe(true);
+
+    // The confirmation is on the goal's record: who confirmed, which step, and when.
+    const events = await service.listEvents(actor, draft.goal.goal_id, { limit: undefined, page_token: undefined });
+    const confirmation = events.data.find(event => event.event_type === 'goal_step_confirmed');
+    expect(confirmation).toBeDefined();
+    expect(confirmation?.actor).toBe(OWNER_SUBJECT_ID);
+    expect(confirmation?.payload['step_id']).toBe(venueStep.step_id);
+    expect(confirmation?.payload['confirmed_by']).toBe(OWNER_SUBJECT_ID);
+    expect(confirmation?.created_at).toBe(FIXED_NOW.toISOString());
+  });
+
+  it('refuses to confirm a step twice, a verified step, or a step on a draft or finished goal', async () => {
+    const { store, service } = setup();
+    const { actor, draft, activated } = await activatedGoal(service);
+    const venueStep = draft.steps[0];
+    const equipmentStep = draft.steps[1];
+    if (venueStep === undefined || equipmentStep === undefined) {
+      throw new Error('The fundraiser draft is missing its first steps.');
+    }
+
+    // A draft's steps cannot be confirmed before the goal is activated.
+    const otherDraft = await service.createDraft(actor, fundraiserDraft());
+    const otherFirstStep = otherDraft.steps[0];
+    if (otherFirstStep === undefined) {
+      throw new Error('The second draft is missing its first step.');
+    }
+    await expect(service.confirmStep(actor, otherDraft.goal.goal_id, otherFirstStep.step_id)).rejects.toBeInstanceOf(
+      GoalStateError,
+    );
+    await expect(service.confirmStep(actor, otherDraft.goal.goal_id, otherFirstStep.step_id)).rejects.toThrow(
+      'still a draft',
+    );
+
+    await service.confirmStep(actor, draft.goal.goal_id, venueStep.step_id);
+    // A second confirmation of the same step refuses instead of succeeding quietly.
+    await expect(service.confirmStep(actor, draft.goal.goal_id, venueStep.step_id)).rejects.toBeInstanceOf(
+      GoalStateError,
+    );
+    await expect(service.confirmStep(actor, draft.goal.goal_id, venueStep.step_id)).rejects.toThrow(
+      'already confirmed',
+    );
+
+    // A step that is already verified has nothing left to confirm.
+    await store.updateStep({
+      tenant_id: TENANT_ID,
+      created_by: OWNER_SUBJECT_ID,
+      goal_id: draft.goal.goal_id,
+      step_id: equipmentStep.step_id,
+      status: 'verified',
+    });
+    await expect(service.confirmStep(actor, draft.goal.goal_id, equipmentStep.step_id)).rejects.toBeInstanceOf(
+      GoalStateError,
+    );
+    await expect(service.confirmStep(actor, draft.goal.goal_id, equipmentStep.step_id)).rejects.toThrow(
+      'already verified',
+    );
+
+    // A finished goal's steps can no longer be confirmed.
+    const volunteersStep = draft.steps[2];
+    if (volunteersStep === undefined) {
+      throw new Error('The fundraiser draft is missing its third step.');
+    }
+    await service.end(actor, draft.goal.goal_id, { expected_revision: activated.goal.revision });
+    await expect(service.confirmStep(actor, draft.goal.goal_id, volunteersStep.step_id)).rejects.toBeInstanceOf(
+      GoalStateError,
+    );
+    await expect(service.confirmStep(actor, draft.goal.goal_id, volunteersStep.step_id)).rejects.toThrow('finished');
+  });
+
+  it('hides step confirmation from another owner and refuses a step that is not on the goal', async () => {
+    const { service } = setup();
+    const { actor, draft } = await activatedGoal(service);
+    const venueStep = draft.steps[0];
+    if (venueStep === undefined) {
+      throw new Error('The fundraiser draft is missing its first step.');
+    }
+    await expect(service.confirmStep(otherActor(), draft.goal.goal_id, venueStep.step_id)).rejects.toBeInstanceOf(
+      GoalNotFoundError,
+    );
+    await expect(service.confirmStep(actor, draft.goal.goal_id, 'step-not-on-this-goal')).rejects.toBeInstanceOf(
+      GoalNotFoundError,
+    );
+    const after = await service.getGoal(actor, draft.goal.goal_id);
+    expect(after.steps.find(step => step.step_id === venueStep.step_id)?.status).toBe('ready');
+  });
+
+  it('lets the owner confirm a step while the goal is paused', async () => {
+    const { service } = setup();
+    const { actor, draft, activated } = await activatedGoal(service);
+    await service.pause(actor, draft.goal.goal_id, { expected_revision: activated.goal.revision });
+    const venueStep = draft.steps[0];
+    if (venueStep === undefined) {
+      throw new Error('The fundraiser draft is missing its first step.');
+    }
+    const confirmed = await service.confirmStep(actor, draft.goal.goal_id, venueStep.step_id);
+    expect(confirmed.goal.lifecycle).toBe('paused');
+    expect(confirmed.steps.find(step => step.step_id === venueStep.step_id)?.status).toBe('owner_confirmed');
+    expect(confirmed.steps.find(step => step.description === 'Book the equipment')?.status).toBe('ready');
+  });
 });

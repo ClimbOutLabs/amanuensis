@@ -11,6 +11,7 @@ import type { ISpaceStore } from '../db/spaceStore';
 import {
   activateGoalRoute,
   checkGoalRoute,
+  confirmGoalStepRoute,
   createGoalRoute,
   endGoalRoute,
   getActivationPreviewRoute,
@@ -446,6 +447,26 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
     }
   };
 
+  const confirmStepHandler: RouteHandler<typeof confirmGoalStepRoute> = async c => {
+    const { goal_id: goalId, step_id: stepId } = c.req.valid('param');
+    const actor = actorFor(c);
+    try {
+      const result = await serviceFor(c).confirmStep(actor, goalId, stepId);
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
+    }
+  };
+
   const evidenceHandler: RouteHandler<typeof listGoalEvidenceRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const { limit, page_token: pageToken } = c.req.valid('query');
@@ -502,6 +523,7 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
   router.openapi(resumeGoalRoute, resumeHandler);
   router.openapi(endGoalRoute, endHandler);
   router.openapi(checkGoalRoute, checkHandler);
+  router.openapi(confirmGoalStepRoute, confirmStepHandler);
   router.openapi(listGoalEvidenceRoute, evidenceHandler);
   router.openapi(listGoalEventsRoute, eventsHandler);
   router.openapi(listGoalApprovalsRoute, approvalsHandler);

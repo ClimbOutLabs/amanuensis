@@ -20,7 +20,6 @@ import {
   otherActor,
   OWNER_SUBJECT_ID,
   ownerActor,
-  TENANT_ID,
 } from '../../../unit/runtime/goals/fundraiserFixture';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../testDatabase';
 
@@ -84,8 +83,7 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
 
     // The restart leg: a fresh store and service over the same database see
     // the goal as it was left, pin and agent included.
-    const restartedParts = serviceOver(env);
-    const restarted = restartedParts.service;
+    const restarted = serviceOver(env).service;
     const reloaded = await restarted.getGoal(actor, draft.goal.goal_id);
     expect(reloaded.goal.lifecycle).toBe('active');
     expect(reloaded.goal.agent_id).toBe(AGENT_ID);
@@ -115,19 +113,17 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
     expect(check.next_step?.description).toBe('Confirm the venue');
     expect(check.steps.find(step => step.description === 'Book the equipment')?.status).toBe('planned');
 
-    // The owner confirms the venue step on the evidence the check recorded,
-    // through the store the service runs on. Confirmation is the owner's
-    // call; the host check itself never marks a step verified.
+    // The owner confirms the venue step on the evidence the check recorded.
+    // Confirmation is the owner's call; the host check itself never marks a
+    // step verified. The confirmed venue unblocks the equipment step at
+    // once, and the goal itself stays active.
     if (checkedVenueStep === undefined) {
       throw new Error('The venue step is missing from the check result.');
     }
-    await restartedParts.store.updateStep({
-      tenant_id: TENANT_ID,
-      created_by: OWNER_SUBJECT_ID,
-      goal_id: draft.goal.goal_id,
-      step_id: checkedVenueStep.step_id,
-      status: 'owner_confirmed',
-    });
+    const confirmed = await restarted.confirmStep(actor, draft.goal.goal_id, checkedVenueStep.step_id);
+    expect(confirmed.goal.lifecycle).toBe('active');
+    expect(confirmed.steps.find(step => step.description === 'Confirm the venue')?.status).toBe('owner_confirmed');
+    expect(confirmed.steps.find(step => step.description === 'Book the equipment')?.status).toBe('ready');
 
     // Evidence read back afterwards still knows its cycle and shows what was read.
     const evidence = await restarted.listEvidence(actor, draft.goal.goal_id, {
@@ -144,6 +140,11 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
     const events = await restarted.listEvents(actor, draft.goal.goal_id, { limit: undefined, page_token: undefined });
     const types = events.data.map(event => event.event_type);
     expect(types).toContain('goal_check_finished');
+    expect(types).toContain('goal_step_confirmed');
+    const confirmation = events.data.find(event => event.event_type === 'goal_step_confirmed');
+    expect(confirmation?.actor).toBe(OWNER_SUBJECT_ID);
+    expect(confirmation?.payload['step_id']).toBe(checkedVenueStep.step_id);
+    expect(confirmation?.payload['confirmed_by']).toBe(OWNER_SUBJECT_ID);
     const sequences = events.data.map(event => event.sequence);
     expect(sequences).toEqual([...sequences].sort((left, right) => left - right));
 

@@ -42,6 +42,17 @@ Aman reads the goal's sources, saves anything new as evidence on the step it bel
 
 Note: A draft cannot be checked. Activate the goal first.
 
+## Confirm a step
+
+A check records evidence, but it never decides that a step is done. That call is yours.
+
+To confirm a step, do the following:
+
+1. Open the goal.
+2. On the step, choose Confirm step.
+
+The step is marked as confirmed by you, and the confirmation is kept on the goal's history with the time it was made. A step that was waiting on it becomes ready. Confirming a step does not finish the goal. Finishing the goal is a separate decision.
+
 ## Pause or end a goal
 
 To pause a goal, open it and choose **Pause**. A paused goal is not checked, and approvals already waiting for it no longer stand. Choose **Resume** to start again.
