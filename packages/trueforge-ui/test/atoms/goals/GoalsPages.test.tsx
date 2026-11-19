@@ -213,6 +213,59 @@ describe('Goal page, draft and activation card', () => {
     expect(await screen.findByRole('button', { name: 'Check now' })).toBeDefined();
   });
 
+  it('reads a comma-grouped daily allowance at its full value when activating', async () => {
+    const steps = [venueStep({}), equipmentStep({})];
+    const draft = fundraiserGoal({ executionPolicy: { ...POLICY, dailyTokenAllowance: 500_000 } });
+    const updated = fundraiserGoal({ revision: 2 });
+    const active = fundraiserGoal({
+      lifecycle: 'active',
+      revision: 3,
+      pinnedSetup: { ...SETUP },
+      nextCheckAt: '2026-06-16T16:00:00.000Z',
+    });
+    const updateGoal = vi.fn<GoalsApi['updateGoal']>(() => Promise.resolve({ goal: updated, steps, nextStepId: null }));
+    const activateGoal = vi.fn<GoalsApi['activateGoal']>(() =>
+      Promise.resolve({ goal: active, steps, nextStepId: 'step-venue' }),
+    );
+    const api = makeApi({
+      getGoal: () => Promise.resolve({ goal: draft, steps, nextStepId: null }),
+      getActivationPreview: () => Promise.resolve({ goal: draft, steps, setup: { ...SETUP } }),
+      updateGoal,
+      activateGoal,
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    expect(await screen.findByText('Review and activate')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced: work limits' }));
+    fireEvent.change(screen.getByLabelText('Tokens per day'), { target: { value: '1,000,000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Activate goal' }));
+
+    await waitFor(() => expect(activateGoal).toHaveBeenCalledTimes(1));
+    expect(updateGoal).toHaveBeenCalledWith('goal-1', {
+      expectedRevision: 1,
+      executionPolicy: { ...POLICY, dailyTokenAllowance: 1_000_000 },
+      notificationPolicy: { digest: true },
+    });
+    expect(activateGoal).toHaveBeenCalledWith('goal-1', { expectedRevision: 2, setupDigest: 'digest-1' });
+  });
+
+  it('refuses a malformed daily allowance on the card and activates nothing', async () => {
+    const activateGoal = vi.fn<GoalsApi['activateGoal']>();
+    const updateGoal = vi.fn<GoalsApi['updateGoal']>();
+    const api = draftApi({ activateGoal, updateGoal });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    expect(await screen.findByText('Review and activate')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced: work limits' }));
+    fireEvent.change(screen.getByLabelText('Tokens per day'), { target: { value: '10x00' } });
+    expect(screen.getByText('Enter a whole number of tokens above zero.')).toBeDefined();
+    const button = screen.getByRole('button', { name: 'Activate goal' });
+    expect(button instanceof HTMLButtonElement ? button.disabled : false).toBe(true);
+    fireEvent.click(button);
+    expect(updateGoal).not.toHaveBeenCalled();
+    expect(activateGoal).not.toHaveBeenCalled();
+  });
+
   it('shows the updated card instead of activating when the setup changed', async () => {
     const updatedPreview: GoalActivationPreview = {
       goal: fundraiserGoal({}),
@@ -310,6 +363,60 @@ describe('Goal page, running goal', () => {
       executionPolicy: { ...POLICY, dailyTokenAllowance: 2_000_000 },
     });
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull());
+  });
+
+  it('reads a comma-grouped daily allowance at its full value when saving an edit', async () => {
+    const active = fundraiserGoal({
+      lifecycle: 'active',
+      revision: 2,
+      pinnedSetup: { ...SETUP },
+      nextCheckAt: '2026-06-16T16:00:00.000Z',
+      executionPolicy: { ...POLICY, dailyTokenAllowance: 500_000 },
+    });
+    const steps = [venueStep({}), equipmentStep({})];
+    const updateGoal = vi.fn<GoalsApi['updateGoal']>(() =>
+      Promise.resolve({ goal: active, steps, nextStepId: 'step-venue' }),
+    );
+    const api = makeApi({
+      getGoal: () => Promise.resolve({ goal: active, steps, nextStepId: 'step-venue' }),
+      updateGoal,
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Tokens per day'), { target: { value: '1,000,000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(updateGoal).toHaveBeenCalledTimes(1));
+    expect(updateGoal).toHaveBeenCalledWith('goal-1', {
+      expectedRevision: 2,
+      executionPolicy: { ...POLICY, dailyTokenAllowance: 1_000_000 },
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull());
+  });
+
+  it('refuses a malformed daily allowance in the edit dialog and saves nothing', async () => {
+    const active = fundraiserGoal({
+      lifecycle: 'active',
+      revision: 2,
+      pinnedSetup: { ...SETUP },
+      nextCheckAt: '2026-06-16T16:00:00.000Z',
+    });
+    const steps = [venueStep({}), equipmentStep({})];
+    const updateGoal = vi.fn<GoalsApi['updateGoal']>();
+    const api = makeApi({
+      getGoal: () => Promise.resolve({ goal: active, steps, nextStepId: 'step-venue' }),
+      updateGoal,
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Tokens per day'), { target: { value: '10x00' } });
+    expect(screen.getByText(/keep the limits as whole numbers in range/)).toBeDefined();
+    const saveButton = screen.getByRole('button', { name: 'Save changes' });
+    expect(saveButton instanceof HTMLButtonElement ? saveButton.disabled : false).toBe(true);
+    fireEvent.click(saveButton);
+    expect(updateGoal).not.toHaveBeenCalled();
   });
 
   it('closes the edit dialog without sending anything when nothing was changed', async () => {

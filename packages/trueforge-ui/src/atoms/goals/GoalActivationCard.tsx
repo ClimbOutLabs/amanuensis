@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react';
 
 import { formatGoalDateTime, goalSourceKindLabel, goalStepStatusLabel } from '../../goals/goalAttention.js';
+import { parseWholeNumber } from '../../goals/parseWholeNumber.js';
 import type { GoalActivationPreview, GoalExecutionPolicy, GoalNotificationPolicy } from '../../goals/types.js';
 import { cn } from '../lib/cn.js';
 import { Button } from '../primitives/Button.js';
@@ -68,12 +69,12 @@ export function GoalActivationCard({
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const choice = checksChoice(checksPerDay);
-  const parsedAllowance = Number.parseInt(dailyAllowance, 10);
-  const allowanceValid = Number.isInteger(parsedAllowance) && parsedAllowance > 0;
+  const parsedAllowance = parseWholeNumber(dailyAllowance);
+  const allowanceValid = parsedAllowance !== null && parsedAllowance > 0;
   const stepName = (stepId: string) => steps.find(step => step.stepId === stepId)?.description ?? 'an earlier step';
 
   const activate = () => {
-    if (!allowanceValid) return;
+    if (parsedAllowance === null || parsedAllowance <= 0) return;
     onActivate({
       executionPolicy: { ...goal.executionPolicy, checksPerDay, dailyTokenAllowance: parsedAllowance },
       notificationPolicy: { digest },

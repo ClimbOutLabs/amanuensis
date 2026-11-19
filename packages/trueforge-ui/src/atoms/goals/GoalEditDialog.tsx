@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import { useGoals } from '../../goals/GoalsContext.js';
+import { parseWholeNumber } from '../../goals/parseWholeNumber.js';
 import type { GoalAgentOption, GoalDetail, UpdateGoalInput } from '../../goals/types.js';
 import { Button } from '../primitives/Button.js';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../primitives/Dialog.js';
@@ -59,15 +60,15 @@ export function GoalEditDialog({
     };
   }, [api]);
 
-  const parsedChecks = Number.parseInt(checksPerDay, 10);
-  const parsedAllowance = Number.parseInt(dailyAllowance, 10);
+  const parsedChecks = parseWholeNumber(checksPerDay);
+  const parsedAllowance = parseWholeNumber(dailyAllowance);
   const valid =
     title.trim() !== '' &&
     outcome.trim() !== '' &&
-    Number.isInteger(parsedChecks) &&
+    parsedChecks !== null &&
     parsedChecks >= 1 &&
     parsedChecks <= 24 &&
-    Number.isInteger(parsedAllowance) &&
+    parsedAllowance !== null &&
     parsedAllowance > 0;
 
   // The edit is diffed against the goal as loaded, field by field, so an
@@ -90,8 +91,9 @@ export function GoalEditDialog({
   const nextTimezone = timezone.trim() === '' ? goal.timezone : timezone.trim();
   if (nextTimezone !== goal.timezone) patch.timezone = nextTimezone;
   if (
-    parsedChecks !== goal.executionPolicy.checksPerDay ||
-    parsedAllowance !== goal.executionPolicy.dailyTokenAllowance
+    parsedChecks !== null &&
+    parsedAllowance !== null &&
+    (parsedChecks !== goal.executionPolicy.checksPerDay || parsedAllowance !== goal.executionPolicy.dailyTokenAllowance)
   ) {
     patch.executionPolicy = {
       ...goal.executionPolicy,
