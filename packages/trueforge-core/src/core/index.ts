@@ -463,7 +463,6 @@ export {
 } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
 export {
-  SlotFullStateLog,
   SlotSandboxProvider,
   retiredSlotSourceIndex,
   retiredSlotTargetIndex,
