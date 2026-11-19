@@ -94,6 +94,60 @@ describe('withSessionListCache', () => {
     expect(listSessions).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a deleted chat out of a page that lands after the tombstone window has passed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    let resolvePage: (page: { data: Array<{ id: string }> }) => void = () => undefined;
+    const listSessions = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ data: Array<{ id: string }> }>(resolve => {
+            resolvePage = resolve;
+          }),
+      )
+      .mockResolvedValue({ data: [{ id: 'session-2' }] });
+    const server = cachedServer({
+      listSessions,
+      deleteSession: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const inFlight = server.listSessions({ limit: 20 });
+    await server.deleteSession?.({ sessionId: 'session-1' });
+
+    vi.setSystemTime(31_000);
+    await expect(server.listSessions({ limit: 20 })).resolves.toEqual({ data: [{ id: 'session-2' }] });
+
+    resolvePage({ data: [{ id: 'session-1' }, { id: 'session-2' }] });
+    await expect(inFlight).resolves.toEqual({ data: [{ id: 'session-2' }] });
+  });
+
+  it('stops filtering a deleted chat once a later fetch confirms the server has caught up', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const listSessions = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [{ id: 'session-1' }, { id: 'session-2' }] })
+      .mockResolvedValueOnce({ data: [{ id: 'session-2' }] })
+      .mockResolvedValue({ data: [{ id: 'session-1' }, { id: 'session-2' }] });
+    const server = cachedServer({
+      listSessions,
+      deleteSession: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await server.listSessions({ limit: 20 });
+    await server.deleteSession?.({ sessionId: 'session-1' });
+
+    vi.setSystemTime(1);
+    await expect(server.listSessions({ limit: 20 })).resolves.toEqual({ data: [{ id: 'session-2' }] });
+
+    vi.setSystemTime(31_000);
+    await expect(server.listSessions({ limit: 20 })).resolves.toEqual({
+      data: [{ id: 'session-1' }, { id: 'session-2' }],
+    });
+    expect(listSessions).toHaveBeenCalledTimes(3);
+  });
+
   it('shares one cache across wrapped servers, so a delete through one clears pages for the other', async () => {
     const cache = createSessionListCache();
     const listSessions = vi.fn().mockResolvedValue({ data: [{ id: 'session-1' }] });
