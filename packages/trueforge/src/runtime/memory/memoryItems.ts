@@ -723,7 +723,6 @@ export function formatItemsBlock({
 /** The sources a flag's citation can be checked against, exactly as the passes saw them. */
 export interface ItemFlagSources {
   userText: string;
-  assistantText: string;
   /** The tool results as the note pass numbered them. */
   results: readonly TurnToolResult[];
 }

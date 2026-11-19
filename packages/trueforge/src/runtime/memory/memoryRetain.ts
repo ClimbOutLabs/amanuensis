@@ -381,7 +381,6 @@ async function applyTurnItemFlags(params: SubmitRetainParams, items: TurnItemCon
   try {
     const sources = {
       userText: params.userText,
-      assistantText: params.assistantText,
       results: boundedToolResults(params.toolResults ?? []),
     };
     const events: ItemEvent[] = [];

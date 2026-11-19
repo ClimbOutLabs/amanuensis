@@ -214,7 +214,7 @@ describe('eventsForItemFlags evidence bar', () => {
     turnId: 't1',
     pass: 'notes' as const,
     at: AT,
-    sources: { userText: '', results: [], assistantText: '' },
+    sources: { userText: '', results: [] },
   };
 
   it('a bulk promotion without a tie to the person records nothing at all', () => {
@@ -238,7 +238,6 @@ describe('eventsForItemFlags evidence bar', () => {
             text: 'List-Unsubscribe: <https://x.example/leave>\nAlex, subscribe today and save 10 percent on gifts.',
           },
         ],
-        assistantText: '',
       },
     });
     expect(events).toEqual([]);
@@ -265,7 +264,6 @@ describe('eventsForItemFlags evidence bar', () => {
             text: 'List-Unsubscribe: <https://school.example/leave>\nTo: Alex\nPlease return the signed consent form for your child by Friday.',
           },
         ],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['opened']);
@@ -285,7 +283,6 @@ describe('eventsForItemFlags evidence bar', () => {
       sources: {
         userText: 'Tell me about the hall.',
         results: [],
-        assistantText: 'I will book the hall for you tomorrow.',
       },
     });
     expect(events).toEqual([]);
@@ -309,7 +306,7 @@ describe('eventsForItemFlags evidence bar', () => {
       items: [item],
       entries: itemListForPrompt([item]).entries,
       flags: [flag],
-      sources: { userText: 'I watered the greenhouse plants this morning.', results: [], assistantText: '' },
+      sources: { userText: 'I watered the greenhouse plants this morning.', results: [] },
     });
     expect(events.map(event => event.kind)).toEqual(['completion_noted']);
   });
@@ -336,7 +333,6 @@ describe('eventsForItemFlags evidence bar', () => {
             text: 'From: School Office <office@school.example>\nTo: reed.alex@school.example\nPlease return the signed consent form for your child by Friday.',
           },
         ],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['opened']);
@@ -364,7 +360,6 @@ describe('eventsForItemFlags evidence bar', () => {
             text: 'From: School Office <office@school.example>\nTo: priya.nair@school.example\nPlease return the signed consent form for your child by Friday.',
           },
         ],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['surfaced']);
@@ -397,7 +392,6 @@ describe('eventsForItemFlags evidence bar', () => {
       sources: {
         userText: 'I filled in the signed lease that was sent to me this afternoon.',
         results: [],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['partial_noted']);
@@ -430,7 +424,6 @@ describe('eventsForItemFlags evidence bar', () => {
       sources: {
         userText: 'I submitted the signed lease to the letting agent this afternoon.',
         results: [],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['closed']);
@@ -475,7 +468,6 @@ describe('eventsForItemFlags evidence bar', () => {
       sources: {
         userText: 'I submitted the stall fee form for the harbour festival this morning.',
         results: [],
-        assistantText: '',
       },
     });
     expect(events.filter(event => event.kind === 'closed')).toEqual([]);
@@ -503,7 +495,6 @@ describe('eventsForItemFlags evidence bar', () => {
       sources: {
         userText: 'I submitted the entry form for the harbour festival this morning.',
         results: [],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['closed']);
@@ -531,7 +522,6 @@ describe('eventsForItemFlags evidence bar', () => {
             text: 'To: Alex\nDear Alex, please submit the enclosed entry form for your stall by Friday.',
           },
         ],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['opened', 'noted']);
@@ -559,7 +549,6 @@ describe('eventsForItemFlags evidence bar', () => {
       sources: {
         userText: 'Thanks. What else is on my list?',
         results: [],
-        assistantText: 'I submitted the harbour festival entry form this morning.',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['completion_noted']);
@@ -596,7 +585,6 @@ describe('eventsForItemFlags evidence bar', () => {
             disposition: 'executed_nonzero',
           },
         ],
-        assistantText: 'The submission failed, so I will try again later.',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['completion_noted']);
@@ -633,7 +621,6 @@ describe('eventsForItemFlags evidence bar', () => {
             disposition: 'executed_ok',
           },
         ],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['closed']);
@@ -669,7 +656,6 @@ describe('eventsForItemFlags evidence bar', () => {
             text: 'Submitted the harbour festival entry form. Confirmation 412.',
           },
         ],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['completion_noted']);
@@ -703,7 +689,6 @@ describe('eventsForItemFlags evidence bar', () => {
       sources: {
         userText: 'I submitted the harbour festival entry form myself this morning.',
         results: [],
-        assistantText: '',
       },
     });
     expect(events.map(event => event.kind)).toEqual(['closed']);
