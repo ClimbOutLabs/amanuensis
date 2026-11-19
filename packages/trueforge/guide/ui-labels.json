@@ -399,5 +399,11 @@
   "Add skill": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillWebsitesReview.tsx",
   "Chat stats": "packages/trueforge-ui/src/atoms/SessionsBrowserButton.tsx",
   "Test your agent here": "packages/trueforge-ui/src/containers/ThreadContainer.tsx",
-  "Ask user questions": "packages/trueforge-ui/src/atoms/draft/AgentRuntimeConfigFields.tsx"
+  "Ask user questions": "packages/trueforge-ui/src/atoms/draft/AgentRuntimeConfigFields.tsx",
+  "Goals": "packages/trueforge-ui/src/atoms/GoalsButton.tsx",
+  "New goal": "packages/trueforge-ui/src/atoms/goals/GoalsListPage.tsx",
+  "Activate goal": "packages/trueforge-ui/src/atoms/goals/GoalActivationCard.tsx",
+  "Check now": "packages/trueforge-ui/src/atoms/goals/GoalDetailPage.tsx",
+  "End goal": "packages/trueforge-ui/src/atoms/goals/GoalDetailPage.tsx",
+  "Confirm step": "packages/trueforge-ui/src/atoms/goals/GoalDetailPage.tsx"
 }

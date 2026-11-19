@@ -45,12 +45,18 @@ function StepRow({
   evidenceById,
   isNext,
   timezone,
+  canConfirm,
+  confirmDisabled,
+  onConfirm,
 }: {
   step: GoalStep;
   steps: readonly GoalStep[];
   evidenceById: ReadonlyMap<string, GoalEvidence>;
   isNext: boolean;
   timezone: string;
+  canConfirm: boolean;
+  confirmDisabled: boolean;
+  onConfirm: () => void;
 }) {
   const evidence = step.evidenceIds
     .map(id => evidenceById.get(id))
@@ -90,6 +96,13 @@ function StepRow({
           </span>
         </span>
       ))}
+      {canConfirm ? (
+        <span>
+          <Button.Secondary type="button" disabled={confirmDisabled} onClick={onConfirm}>
+            Confirm step
+          </Button.Secondary>
+        </span>
+      ) : null}
     </li>
   );
 }
@@ -537,6 +550,13 @@ export function GoalDetailPage({ goalId }: { goalId: string }) {
                 evidenceById={evidenceById}
                 isNext={step.stepId === detail.nextStepId}
                 timezone={goal.timezone}
+                canConfirm={
+                  (goal.lifecycle === 'active' || goal.lifecycle === 'paused') &&
+                  step.status !== 'verified' &&
+                  step.status !== 'owner_confirmed'
+                }
+                confirmDisabled={acting}
+                onConfirm={() => runAction(() => api.confirmStep({ goalId, stepId: step.stepId }))}
               />
             ))}
           </ul>

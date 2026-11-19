@@ -243,6 +243,8 @@ export function goalEventLine(event: GoalEvent): string {
       return 'The goal was activated.';
     case 'goal_setup_confirmed':
       return 'An updated agent setup was confirmed.';
+    case 'goal_step_confirmed':
+      return 'You confirmed a step as done.';
     case 'goal_paused':
       return 'The goal was paused.';
     case 'goal_resumed':

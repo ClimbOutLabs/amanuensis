@@ -282,6 +282,11 @@ export type GoalsApi = {
   resumeGoal(goalId: string, expectedRevision: number): Promise<GoalDetail>;
   /** Ends a goal. Its history is kept for reference. */
   endGoal(goalId: string, expectedRevision: number): Promise<GoalDetail>;
+  /**
+   * Records the owner's word that a step is done. Steps waiting on it become
+   * ready. The goal itself stays open: finishing it is a separate decision.
+   */
+  confirmStep(input: { goalId: string; stepId: string }): Promise<GoalDetail>;
   /** Runs one check now and reports what it recorded. */
   checkGoal(goalId: string): Promise<GoalCheckResult>;
   /** The evidence recorded for a goal, newest first. */

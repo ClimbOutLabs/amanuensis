@@ -724,6 +724,17 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
     endGoal(goalId, expectedRevision) {
       return mutate(`${GOALS_URL}/${encodeURIComponent(goalId)}/end`, { expected_revision: expectedRevision });
     },
+    async confirmStep(input: { goalId: string; stepId: string }) {
+      const body = await request(
+        `${GOALS_URL}/${encodeURIComponent(input.goalId)}/steps/${encodeURIComponent(input.stepId)}/confirm`,
+        { method: 'POST' },
+      );
+      const detail = parseDetail(dataOf(body));
+      if (detail === null) {
+        throw new Error('That goal came back in a shape this version does not recognise.');
+      }
+      return detail;
+    },
     async checkGoal(goalId: string) {
       const body = await request(`${GOALS_URL}/${encodeURIComponent(goalId)}/check`, { method: 'POST' });
       const result = parseCheckResult(dataOf(body));

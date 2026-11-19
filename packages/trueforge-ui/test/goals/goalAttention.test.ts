@@ -241,6 +241,9 @@ describe('goalEventLine', () => {
     expect(goalEventLine(event({ eventType: 'goal_check_finished', payload: { outcome: 'budget_exhausted' } }))).toBe(
       'A check stopped early. The work limit was reached.',
     );
+    expect(goalEventLine(event({ eventType: 'goal_step_confirmed', payload: { step_id: 'step-venue' } }))).toBe(
+      'You confirmed a step as done.',
+    );
     expect(goalEventLine(event({ eventType: 'something_new' }))).toBe('Something changed on this goal.');
   });
 });

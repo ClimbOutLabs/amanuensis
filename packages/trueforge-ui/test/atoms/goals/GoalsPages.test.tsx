@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GoalDetailPage } from '@/atoms/goals/GoalDetailPage.js';
@@ -139,6 +139,7 @@ function makeApi(overrides: Partial<GoalsApi>): GoalsApi {
     pauseGoal: () => Promise.reject(new Error('not stubbed')),
     resumeGoal: () => Promise.reject(new Error('not stubbed')),
     endGoal: () => Promise.reject(new Error('not stubbed')),
+    confirmStep: () => Promise.reject(new Error('not stubbed')),
     checkGoal: () => Promise.reject(new Error('not stubbed')),
     listEvidence: () => Promise.resolve([]),
     listEvents: () => Promise.resolve([]),
@@ -359,6 +360,111 @@ describe('Goal page, running goal', () => {
     expect(await screen.findByRole('heading', { name: 'Work limit reached' })).toBeDefined();
     expect(screen.getByText(/The next step is saved: Confirm the venue/)).toBeDefined();
     expect(screen.getAllByText(/Work can resume at the next check/).length).toBeGreaterThan(0);
+  });
+});
+
+describe('Goal page, confirming a step', () => {
+  it('a check records evidence without confirming, and confirming the venue step makes the equipment step ready', async () => {
+    const before = fundraiserGoal({
+      lifecycle: 'active',
+      revision: 2,
+      pinnedSetup: { ...SETUP },
+      nextCheckAt: '2026-06-16T16:00:00.000Z',
+    });
+    const checkedSteps = [venueStep({ status: 'ready', evidenceIds: ['ev-1'] }), equipmentStep({})];
+    const confirmedSteps = [
+      venueStep({ status: 'owner_confirmed', evidenceIds: ['ev-1'] }),
+      equipmentStep({ status: 'ready' }),
+    ];
+    let current: GoalDetail = {
+      goal: before,
+      steps: [venueStep({ status: 'ready' }), equipmentStep({})],
+      nextStepId: 'step-venue',
+    };
+    let evidence: GoalEvidence[] = [];
+    const checkResult: GoalCheckResult = {
+      cycle: {
+        cycleId: 'cycle-1',
+        goalId: 'goal-1',
+        inputRevision: 2,
+        trigger: 'manual',
+        startedAt: '2026-06-15T16:04:00.000Z',
+        finishedAt: '2026-06-15T16:05:00.000Z',
+        outcome: 'completed',
+        outcomeDetail: null,
+        sessionId: null,
+        nextCheckAt: '2026-06-16T16:00:00.000Z',
+      },
+      goal: { ...before, revision: 3 },
+      steps: checkedSteps,
+      newEvidence: [VENUE_EVIDENCE],
+      unreadSources: [],
+      nextStepId: 'step-venue',
+    };
+    const confirmStep = vi.fn<GoalsApi['confirmStep']>(() => {
+      current = { goal: { ...before, revision: 4 }, steps: confirmedSteps, nextStepId: 'step-equipment' };
+      return Promise.resolve(current);
+    });
+    const api = makeApi({
+      getGoal: () => Promise.resolve(current),
+      listEvidence: () => Promise.resolve(evidence),
+      checkGoal: () => {
+        current = { goal: checkResult.goal, steps: checkedSteps, nextStepId: 'step-venue' };
+        evidence = [VENUE_EVIDENCE];
+        return Promise.resolve(checkResult);
+      },
+      confirmStep,
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Check now' }));
+    expect(await screen.findByText('The hall is free on Saturday, June 6 and holds 120 people.')).toBeDefined();
+
+    const venueRow = screen.getByText('Confirm the venue').closest('li');
+    if (venueRow === null) throw new Error('The venue step row is missing.');
+    const equipmentRow = screen.getByText('Book the equipment').closest('li');
+    if (equipmentRow === null) throw new Error('The equipment step row is missing.');
+    // The check attached the evidence and nothing more: the venue step is not
+    // confirmed, and the equipment step is still waiting on it.
+    expect(within(venueRow).queryByText('Confirmed by you')).toBeNull();
+    expect(within(equipmentRow).getByText('After Confirm the venue')).toBeDefined();
+    expect(within(equipmentRow).getByText('Planned')).toBeDefined();
+    expect(within(equipmentRow).queryByText('Next step')).toBeNull();
+    expect(screen.getByText(/0 of 2 steps confirmed/)).toBeDefined();
+
+    fireEvent.click(within(venueRow).getByRole('button', { name: 'Confirm step' }));
+    await waitFor(() => expect(confirmStep).toHaveBeenCalledTimes(1));
+    expect(confirmStep).toHaveBeenCalledWith({ goalId: 'goal-1', stepId: 'step-venue' });
+
+    expect(await screen.findByText('Confirmed by you')).toBeDefined();
+    const equipmentRowAfter = screen.getByText('Book the equipment').closest('li');
+    if (equipmentRowAfter === null) throw new Error('The equipment step row is missing after confirming.');
+    expect(within(equipmentRowAfter).getByText('Ready')).toBeDefined();
+    expect(within(equipmentRowAfter).getByText('Next step')).toBeDefined();
+    expect(screen.getByText(/1 of 2 steps confirmed/)).toBeDefined();
+    // Confirming a step never finishes the goal: it is still running.
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeDefined();
+  });
+
+  it('offers no Confirm step on a verified step or a confirmed step', async () => {
+    const active = fundraiserGoal({
+      lifecycle: 'active',
+      revision: 2,
+      pinnedSetup: { ...SETUP },
+      nextCheckAt: '2026-06-16T16:00:00.000Z',
+    });
+    const api = makeApi({
+      getGoal: () =>
+        Promise.resolve({
+          goal: active,
+          steps: [venueStep({ status: 'verified' }), equipmentStep({ status: 'owner_confirmed' })],
+          nextStepId: null,
+        }),
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+    expect(await screen.findByText('Verified')).toBeDefined();
+    expect(screen.getByText('Confirmed by you')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Confirm step' })).toBeNull();
   });
 });
 

@@ -239,6 +239,36 @@ test('goals API sends agent_id on update only when the edit carries one', async 
   assert.deepEqual(bodies[1], { expected_revision: 3, title: 'A new title' });
 });
 
+test('goals API posts to the step confirm path and parses the returned detail', async () => {
+  const calls: { url: string; method: string | undefined }[] = [];
+  const api = createGoalsApi({
+    fetcher: async (input, init) => {
+      calls.push({ url: String(input), method: init?.method });
+      return Response.json({
+        data: {
+          goal: goalWire({ lifecycle: 'active', revision: 3 }),
+          steps: STEPS_WIRE.map(step => {
+            if (step.step_id === 'step-venue') return { ...step, status: 'owner_confirmed' };
+            if (step.step_id === 'step-equipment') return { ...step, status: 'ready' };
+            return step;
+          }),
+          next_step_id: 'step-equipment',
+        },
+      });
+    },
+    client: unusedClient,
+  });
+
+  const detail = await api.confirmStep({ goalId: 'goal-1', stepId: 'step-venue' });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0]?.url.endsWith('/api/v1/goals/goal-1/steps/step-venue/confirm'));
+  assert.equal(calls[0]?.method, 'POST');
+  assert.equal(detail.goal.lifecycle, 'active');
+  assert.equal(detail.steps[0]?.status, 'owner_confirmed');
+  assert.equal(detail.steps[1]?.status, 'ready');
+  assert.equal(detail.nextStepId, 'step-equipment');
+});
+
 test('goals API surfaces the server message and rejects a malformed single read', async () => {
   const failing = createGoalsApi({
     fetcher: async () => Response.json({ error: { message: 'That goal is not yours.' } }, { status: 404 }),
