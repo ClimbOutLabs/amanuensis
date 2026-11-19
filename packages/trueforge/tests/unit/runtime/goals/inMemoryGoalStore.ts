@@ -102,15 +102,15 @@ export class InMemoryGoalStore implements IGoalStore {
     return record;
   }
 
-  async getGoal(input: { tenant_id: string; goal_id: string }): Promise<GoalRecord | undefined> {
+  async getGoal(input: { tenant_id: string; created_by: string; goal_id: string }): Promise<GoalRecord | undefined> {
     await Promise.resolve();
     const goal = this.goals.get(input.goal_id);
-    return goal?.tenant_id === input.tenant_id ? goal : undefined;
+    return goal?.tenant_id === input.tenant_id && goal.created_by.subject_id === input.created_by ? goal : undefined;
   }
 
   async listGoals(input: {
     tenant_id: string;
-    created_by_subject_id?: string;
+    created_by: string;
     lifecycle?: GoalRecord['lifecycle'];
     limit: number | undefined;
     page_token: string | undefined;
@@ -118,9 +118,7 @@ export class InMemoryGoalStore implements IGoalStore {
     await Promise.resolve();
     const matching = [...this.goals.values()]
       .filter(goal => goal.tenant_id === input.tenant_id)
-      .filter(
-        goal => input.created_by_subject_id === undefined || goal.created_by.subject_id === input.created_by_subject_id,
-      )
+      .filter(goal => goal.created_by.subject_id === input.created_by)
       .filter(goal => input.lifecycle === undefined || goal.lifecycle === input.lifecycle)
       .sort((left, right) => (left.created_at < right.created_at ? 1 : -1));
     return page(matching, input.limit, input.page_token);
@@ -157,13 +155,14 @@ export class InMemoryGoalStore implements IGoalStore {
     return updated;
   }
 
-  async listSteps(input: { tenant_id: string; goal_id: string }): Promise<GoalStepRecord[]> {
+  async listSteps(input: { tenant_id: string; created_by: string; goal_id: string }): Promise<GoalStepRecord[]> {
     await Promise.resolve();
     return [...(this.steps.get(input.goal_id) ?? [])];
   }
 
   async updateStep(input: {
     tenant_id: string;
+    created_by: string;
     goal_id: string;
     step_id: string;
     status?: GoalStepRecord['status'];
@@ -188,11 +187,12 @@ export class InMemoryGoalStore implements IGoalStore {
   }
 
   async addEvidence(
-    input: Omit<GoalEvidenceRecord, 'evidence_id'> & { tenant_id: string },
+    input: Omit<GoalEvidenceRecord, 'evidence_id'> & { tenant_id: string; created_by: string },
   ): Promise<GoalEvidenceRecord> {
     await Promise.resolve();
-    const { tenant_id, ...rest } = input;
+    const { tenant_id, created_by, ...rest } = input;
     void tenant_id;
+    void created_by;
     const record: GoalEvidenceRecord = { evidence_id: this.#id('evidence'), ...rest };
     this.evidence.unshift(record);
     return record;
@@ -200,6 +200,7 @@ export class InMemoryGoalStore implements IGoalStore {
 
   async listEvidence(input: {
     tenant_id: string;
+    created_by: string;
     goal_id: string;
     limit: number | undefined;
     page_token: string | undefined;
@@ -214,6 +215,7 @@ export class InMemoryGoalStore implements IGoalStore {
 
   async startCycle(input: {
     tenant_id: string;
+    created_by: string;
     goal_id: string;
     input_revision: number;
     trigger: string;
@@ -238,6 +240,7 @@ export class InMemoryGoalStore implements IGoalStore {
 
   async finishCycle(input: {
     tenant_id: string;
+    created_by: string;
     goal_id: string;
     cycle_id: string;
     finished_at: string;
@@ -265,6 +268,7 @@ export class InMemoryGoalStore implements IGoalStore {
 
   async listWaitingActions(input: {
     tenant_id: string;
+    created_by: string;
     goal_id: string;
     limit: number | undefined;
     page_token: string | undefined;
@@ -286,6 +290,7 @@ export class InMemoryGoalStore implements IGoalStore {
 
   async appendEvent(input: {
     tenant_id: string;
+    created_by: string;
     goal_id: string;
     event_type: string;
     actor: string;
@@ -309,6 +314,7 @@ export class InMemoryGoalStore implements IGoalStore {
 
   async listEvents(input: {
     tenant_id: string;
+    created_by: string;
     goal_id: string;
     limit: number | undefined;
     page_token: string | undefined;

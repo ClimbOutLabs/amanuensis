@@ -118,7 +118,7 @@ export class FakeSkillStore {
     }
   }
 
-  async listSkills(input: { tenant_id: string; names?: readonly string[] }): Promise<SkillRecord[]> {
+  async listSkills(input: { tenant_id: string; names: readonly string[] | undefined }): Promise<SkillRecord[]> {
     await Promise.resolve();
     return [...this.#skills.values()].filter(
       record =>

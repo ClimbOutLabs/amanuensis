@@ -1,35 +1,17 @@
 /**
- * Goals API (mounted at /api/v1/goals), plus the session dispatch a goal check
- * uses. Handlers are thin: every rule lives in the goal service, so the API and
- * the goal tools cannot drift apart.
+ * Goals API (mounted at /api/v1/goals). Handlers are thin: every rule lives in
+ * the goal service, so the API and the goal tools cannot drift apart.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import type { Context } from 'hono';
-import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
-import type { McpCatalog } from '../catalog/McpCatalog';
-import configuration from '../config';
-import type { AgentRecord, IAgentStore } from '../db/agentStore';
-import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
-import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
-import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
-import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
-import type { IModelProviderStore } from '../db/modelProviderStore';
-import type { IPersonalizationStore } from '../db/personalizationStore';
-import type { IPersonaStore } from '../db/personaStore';
-import type { IRepositoryStore } from '../db/repositoryStore';
-import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
-import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
-import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+import type { IAgentStore } from '../db/agentStore';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
-import type { ITurnArtifactStore } from '../db/turnArtifactStore';
-import type { IOAuthTokenStore } from '../mcp/auth/types';
-import { buildPersonaContext } from '../personas/persona';
 import {
   activateGoalRoute,
   checkGoalRoute,
+  confirmGoalStepRoute,
   createGoalRoute,
   endGoalRoute,
   getActivationPreviewRoute,
@@ -42,11 +24,7 @@ import {
   resumeGoalRoute,
   updateGoalRoute,
 } from '../routes/goalRoutes';
-import type { ActiveTurnRegistry } from '../runtime/activeTurns';
-import { chatAssistantAgentName, getOrCreateChatAssistantAgent } from '../runtime/chatAssistant';
-import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
-import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
-import { runManualCheck, type GoalSessionDispatcher } from '../runtime/goals/goalCheck';
+import { runManualCheck } from '../runtime/goals/goalCheck';
 import {
   createGoalService,
   GoalNotFoundError,
@@ -68,11 +46,6 @@ import {
   type PinnedAgentSetup,
 } from '../runtime/goals/goalStorePort';
 import { chainGoalSourceReaders, createSpaceGoalSourceReader } from '../runtime/goals/spaceGoalSourceReader';
-import { createMemoryClient } from '../runtime/memory/createMemoryClient';
-import { resolveSandboxProvider } from '../runtime/sessionResources';
-import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
-import type { TurnDrainRegistry } from '../runtime/turnDrains';
-import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import type {
   ActivationPreview,
   Goal,
@@ -83,45 +56,16 @@ import type {
   GoalEvidence,
   GoalStep,
 } from '../schemas/goal';
-import { getTurnExecutionError, startTurnInProcess } from './turns';
 
-/** Stores and runtime a goal check session needs, resolved the same way a schedule run's are. */
-export interface GoalTurnExecutionDeps<TTransaction> {
-  mcpCatalog: McpCatalog;
-  sessions: Sessions<SessionCustom, TurnCustom>;
-  activeTurns: ActiveTurnRegistry;
-  turnDrains: TurnDrainRegistry;
-  eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
-  logger: Logger;
-  resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore<TTransaction>;
-  resolveMcpServerStore: (c: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore<TTransaction>;
-  resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
-  resolveSkillStore: (c: Context) => ISkillStore<TTransaction>;
-  agentStore: IAgentStore<TTransaction>;
-  personaStore: Pick<IPersonaStore<TTransaction>, 'getPersona'>;
-  personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
-  tokenStore: IOAuthTokenStore<TTransaction>;
-  repositoryStore: IRepositoryStore<TTransaction>;
-  sentinelSettingsStore?: ISentinelSettingsStore<TTransaction> | undefined;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
-  spaceStore: ISpaceStore<TTransaction>;
-  googleConnectionStore?: IGoogleConnectionStore | undefined;
-  turnArtifactStore: ITurnArtifactStore<TTransaction>;
-  sandboxProviderResolver?: typeof resolveSandboxProvider | undefined;
-  globalSettingsStore: IGlobalSettingsStore<TTransaction>;
-  tokenFactoryBudget: TokenFactoryBudget;
-  chatDeletionStore: DeletedChatUsageReader;
-  chatSearchIndexer?: ChatSearchIndexer | undefined;
-}
+/** The answer a revision conflict gets: the goal moved since it was read. */
+const GOAL_CHANGED_MESSAGE = 'The goal changed since it was read. Read it again, then try once more.';
 
 export interface GoalsRouterDeps<TTransaction> {
   resolveGoalStore: (c: Context) => IGoalStore<TTransaction>;
-  resolveAgentStore: (c: Context) => IAgentStore<TTransaction>;
-  resolveSkillStore: (c: Context) => ISkillStore<TTransaction>;
-  resolveSpaceStore: (c: Context) => ISpaceStore<TTransaction>;
+  resolveAgentStore: (c: Context) => Pick<IAgentStore<TTransaction>, 'getAgent'>;
+  resolveSkillStore: (c: Context) => Pick<ISkillStore<TTransaction>, 'listSkills'>;
+  resolveSpaceStore: (c: Context) => Pick<ISpaceStore<TTransaction>, 'getSpace'>;
   resolveRequestContext: ResolveRequestContext;
-  /** Present where sessions run; absent, a check completes on the host's record alone. */
-  turnExecution?: GoalTurnExecutionDeps<TTransaction> | undefined;
 }
 
 function toWireGoal(record: GoalRecord): Goal {
@@ -219,100 +163,6 @@ function toWireCycle(record: GoalCycleRecord): GoalCycle {
   return { ...record };
 }
 
-/**
- * Dispatch one goal check as a session, the way a schedule run is dispatched:
- * the pinned setup becomes the host-managed agent made for exactly that setup,
- * a session is got or created for this cycle, and a turn starts unattended with
- * the check's task. A retry finds the session's turn already there and starts
- * nothing twice.
- */
-export function createGoalSessionDispatcher<TTransaction>(
-  deps: GoalTurnExecutionDeps<TTransaction>,
-): (c: Context) => GoalSessionDispatcher {
-  return (c: Context) => ({
-    async dispatch({ goal, cycle, setup, task }) {
-      const agent = await getOrCreateChatAssistantAgent({
-        tenant_id: goal.tenant_id,
-        owner: goal.created_by,
-        name: chatAssistantAgentName({ owner: goal.created_by, spec: setup.spec }),
-        spec: setup.spec,
-        agentStore: deps.agentStore,
-      });
-      const { session } = await deps.sessions.getOrCreateByExternalId({
-        tenant_id: goal.tenant_id,
-        external_id: `goal-check:${cycle.cycle_id}`,
-        created_by_subject: goal.created_by,
-        agent: { type: 'reference', id: agent.id, name: agent.name },
-      });
-      const { data: turns } = await session.listTurns({ limit: 1 });
-      if (turns.length > 0) {
-        return { session_id: session.session_id };
-      }
-      const persona =
-        goal.persona_id === null
-          ? undefined
-          : await deps.personaStore.getPersona({
-              tenant_id: goal.tenant_id,
-              created_by: goal.created_by.subject_id,
-              id: goal.persona_id,
-            });
-      const personalizationProfile = await deps.personalizationStore.getProfile({
-        tenant_id: goal.tenant_id,
-        created_by: goal.created_by.subject_id,
-      });
-      const memoryClient = createMemoryClient({
-        markdownDir: configuration.MEMORY_MARKDOWN_DIR,
-        namespace: goal.tenant_id,
-        vaultScope: persona === undefined ? undefined : { personaName: persona.display_name, personaId: persona.id },
-        embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
-          ? {
-              modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-              batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
-              log: (message: string) => deps.logger.info(message),
-            }
-          : undefined,
-      });
-      await startTurnInProcess({
-        session,
-        input: [{ type: 'user.message', content: task }],
-        previous_turn_id: 'none',
-        userRef: goal.created_by.subject_id,
-        session_title: `Goal check: ${goal.title}`,
-        unattended: true,
-        deps: {
-          mcpCatalog: deps.mcpCatalog,
-          activeTurns: deps.activeTurns,
-          turnDrains: deps.turnDrains,
-          eventSubscriptions: deps.eventSubscriptions,
-          agentStore: deps.agentStore,
-          modelProviderStore: deps.resolveModelProviderStore(c, agent),
-          mcpServerStore: deps.resolveMcpServerStore(c, agent),
-          sandboxProviderStore: deps.resolveSandboxProviderStore(c),
-          skillStore: deps.resolveSkillStore(c),
-          tokenStore: deps.tokenStore,
-          repositoryStore: deps.repositoryStore,
-          sentinelSettingsStore: deps.sentinelSettingsStore,
-          sessionStore: deps.sessionStore,
-          spaceStore: deps.spaceStore,
-          googleConnectionStore: deps.googleConnectionStore,
-          turnArtifactStore: deps.turnArtifactStore,
-          sandboxProviderResolver: deps.sandboxProviderResolver,
-          globalSettingsStore: deps.globalSettingsStore,
-          tokenFactoryBudget: deps.tokenFactoryBudget,
-          chatDeletionStore: deps.chatDeletionStore,
-          chatSearchIndexer: deps.chatSearchIndexer,
-          personalizationProfile,
-          personaContext: persona === undefined ? undefined : buildPersonaContext(persona),
-          memoryClient,
-          logger: deps.logger,
-          clientTimezone: goal.timezone,
-        },
-      });
-      return { session_id: session.session_id };
-    },
-  });
-}
-
 export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransaction>) {
   function serviceFor(c: Context): GoalService {
     return createGoalService({
@@ -327,53 +177,29 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
     return { tenant_id: requestContext.tenant_id, subject_id: requestContext.subject.id };
   }
 
-  /** Maps the service's plain errors onto the wire. Returns undefined when the error is not one of ours. */
-  async function errorResponse(
-    c: Context,
-    error: unknown,
-    actor: GoalActor,
-    goal_id: string,
-  ): Promise<Response | undefined> {
-    if (error instanceof GoalNotFoundError) {
-      return c.json({ error: { message: error.message } }, 404);
-    }
-    if (error instanceof GoalSetupChangedError) {
-      try {
-        const preview = await serviceFor(c).previewActivation(actor, goal_id);
-        return c.json(
-          {
-            error: { message: error.message, code: 'goal_setup_changed' as const },
-            data: toWirePreview(preview),
-          },
-          409,
-        );
-      } catch {
-        return c.json({ error: { message: error.message } }, 409);
-      }
-    }
-    if (error instanceof GoalRevisionConflictError) {
+  /**
+   * The updated card a refused activate or check is answered with, resolved
+   * fresh at response time. Those two routes declare one 409 shape, the card,
+   * so a revision conflict there is answered with the card too: the goal moved
+   * since it was read, which is the refusal the card exists for. When the fresh
+   * card cannot be resolved, the reason it failed is the answer instead.
+   */
+  async function answerWithUpdatedCard(c: Context, actor: GoalActor, input: { goal_id: string; message: string }) {
+    try {
+      const preview = await serviceFor(c).previewActivation(actor, input.goal_id);
       return c.json(
-        { error: { message: 'The goal changed since it was read. Read it again, then try once more.' } },
+        {
+          error: { message: input.message, code: 'goal_setup_changed' as const },
+          data: toWirePreview(preview),
+        },
         409,
       );
-    }
-    if (error instanceof GoalStateError) {
-      return c.json({ error: { message: error.message } }, 400);
-    }
-    const turnError = getTurnExecutionError(error);
-    if (turnError) {
-      return c.json({ error: { message: turnError.message } }, turnError.status);
-    }
-    return undefined;
-  }
-
-  async function respond<T>(c: Context, goal_id: string, run: () => Promise<T>): Promise<T | Response> {
-    try {
-      return await run();
     } catch (error) {
-      const response = await errorResponse(c, error, actorFor(c), goal_id);
-      if (response !== undefined) {
-        return response;
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
       }
       throw error;
     }
@@ -393,8 +219,8 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
   const createHandler: RouteHandler<typeof createGoalRoute> = async c => {
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, '', async () =>
-      serviceFor(c).createDraft(actor, {
+    try {
+      const result = await serviceFor(c).createDraft(actor, {
         agent_id: body.agent_id,
         title: body.title,
         outcome: body.outcome,
@@ -411,30 +237,36 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
         ...(body.execution_policy === undefined ? {} : { execution_policy: body.execution_policy }),
         ...(body.notification_policy === undefined ? {} : { notification_policy: body.notification_policy }),
         linked_space_id: body.linked_space_id,
-      }),
-    );
-    if (result instanceof Response) {
-      return result;
+      });
+      return c.json({ data: toWireDetail(result) }, 201);
+    } catch (error) {
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 201);
   };
 
   const getHandler: RouteHandler<typeof getGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () => serviceFor(c).getGoal(actor, goalId));
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).getGoal(actor, goalId);
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const updateHandler: RouteHandler<typeof updateGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).updateGoal(actor, goalId, {
+    try {
+      const result = await serviceFor(c).updateGoal(actor, goalId, {
         expected_revision: body.expected_revision,
         patch: {
           ...(body.title === undefined ? {} : { title: body.title }),
@@ -442,82 +274,133 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
           ...(body.success_criteria === undefined ? {} : { success_criteria: body.success_criteria }),
           ...(body.target_at === undefined ? {} : { target_at: body.target_at }),
           ...(body.timezone === undefined ? {} : { timezone: body.timezone }),
+          ...(body.agent_id === undefined ? {} : { agent_id: body.agent_id }),
           ...(body.selected_sources === undefined ? {} : { selected_sources: body.selected_sources }),
           ...(body.execution_policy === undefined ? {} : { execution_policy: body.execution_policy }),
           ...(body.notification_policy === undefined ? {} : { notification_policy: body.notification_policy }),
           ...(body.linked_space_id === undefined ? {} : { linked_space_id: body.linked_space_id }),
         },
-      }),
-    );
-    if (result instanceof Response) {
-      return result;
+      });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const previewHandler: RouteHandler<typeof getActivationPreviewRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () => serviceFor(c).previewActivation(actor, goalId));
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).previewActivation(actor, goalId);
+      return c.json({ data: toWirePreview(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWirePreview(result) }, 200);
   };
 
   const activateHandler: RouteHandler<typeof activateGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).activate(actor, goalId, {
+    try {
+      const result = await serviceFor(c).activate(actor, goalId, {
         expected_revision: body.expected_revision,
         setup_digest: body.setup_digest,
-      }),
-    );
-    if (result instanceof Response) {
-      return result;
+      });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalSetupChangedError) {
+        return answerWithUpdatedCard(c, actor, { goal_id: goalId, message: error.message });
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return answerWithUpdatedCard(c, actor, { goal_id: goalId, message: GOAL_CHANGED_MESSAGE });
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const pauseHandler: RouteHandler<typeof pauseGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).pause(actor, goalId, { expected_revision: body.expected_revision }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).pause(actor, goalId, { expected_revision: body.expected_revision });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const resumeHandler: RouteHandler<typeof resumeGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).resume(actor, goalId, { expected_revision: body.expected_revision }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).resume(actor, goalId, { expected_revision: body.expected_revision });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const endHandler: RouteHandler<typeof endGoalRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const body = c.req.valid('json');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).end(actor, goalId, { expected_revision: body.expected_revision }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).end(actor, goalId, { expected_revision: body.expected_revision });
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
     }
-    return c.json({ data: toWireDetail(result) }, 200);
   };
 
   const checkHandler: RouteHandler<typeof checkGoalRoute> = async c => {
@@ -527,72 +410,106 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
     const sourceReader = chainGoalSourceReaders([
       createSpaceGoalSourceReader({ spaceStore: deps.resolveSpaceStore(c) }),
     ]);
-    const sessionDispatcher =
-      deps.turnExecution === undefined ? undefined : createGoalSessionDispatcher(deps.turnExecution)(c);
-    const result = await respond(c, goalId, async () =>
-      runManualCheck({
+    try {
+      const result = await runManualCheck({
         service,
         actor,
         goal_id: goalId,
         sourceReader,
-        ...(sessionDispatcher === undefined ? {} : { sessionDispatcher }),
-      }),
-    );
-    if (result instanceof Response) {
-      return result;
-    }
-    return c.json(
-      {
-        data: {
-          cycle: toWireCycle(result.cycle),
-          goal: toWireGoal(result.goal),
-          steps: result.steps.map(toWireStep),
-          new_evidence: result.new_evidence.map(toWireEvidence),
-          unread_sources: result.unread_sources.map(source => ({ ...source })),
-          next_step_id: result.next_step?.step_id ?? null,
+      });
+      return c.json(
+        {
+          data: {
+            cycle: toWireCycle(result.cycle),
+            goal: toWireGoal(result.goal),
+            steps: result.steps.map(toWireStep),
+            new_evidence: result.new_evidence.map(toWireEvidence),
+            unread_sources: result.unread_sources.map(source => ({ ...source })),
+            next_step_id: result.next_step?.step_id ?? null,
+          },
         },
-      },
-      200,
-    );
+        200,
+      );
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalSetupChangedError) {
+        return answerWithUpdatedCard(c, actor, { goal_id: goalId, message: error.message });
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return answerWithUpdatedCard(c, actor, { goal_id: goalId, message: GOAL_CHANGED_MESSAGE });
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
+    }
+  };
+
+  const confirmStepHandler: RouteHandler<typeof confirmGoalStepRoute> = async c => {
+    const { goal_id: goalId, step_id: stepId } = c.req.valid('param');
+    const actor = actorFor(c);
+    try {
+      const result = await serviceFor(c).confirmStep(actor, goalId, stepId);
+      return c.json({ data: toWireDetail(result) }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof GoalRevisionConflictError) {
+        return c.json({ error: { message: GOAL_CHANGED_MESSAGE } }, 409);
+      }
+      if (error instanceof GoalStateError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
+    }
   };
 
   const evidenceHandler: RouteHandler<typeof listGoalEvidenceRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const { limit, page_token: pageToken } = c.req.valid('query');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).listEvidence(actor, goalId, { limit, page_token: pageToken }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).listEvidence(actor, goalId, { limit, page_token: pageToken });
+      return c.json({ data: result.data.map(toWireEvidence), pagination: result.pagination }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      throw error;
     }
-    return c.json({ data: result.data.map(toWireEvidence), pagination: result.pagination }, 200);
   };
 
   const eventsHandler: RouteHandler<typeof listGoalEventsRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const { limit, page_token: pageToken } = c.req.valid('query');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).listEvents(actor, goalId, { limit, page_token: pageToken }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).listEvents(actor, goalId, { limit, page_token: pageToken });
+      return c.json({ data: result.data.map(toWireEvent), pagination: result.pagination }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      throw error;
     }
-    return c.json({ data: result.data.map(toWireEvent), pagination: result.pagination }, 200);
   };
 
   const approvalsHandler: RouteHandler<typeof listGoalApprovalsRoute> = async c => {
     const { goal_id: goalId } = c.req.valid('param');
     const { limit, page_token: pageToken } = c.req.valid('query');
     const actor = actorFor(c);
-    const result = await respond(c, goalId, async () =>
-      serviceFor(c).listWaitingApprovals(actor, goalId, { limit, page_token: pageToken }),
-    );
-    if (result instanceof Response) {
-      return result;
+    try {
+      const result = await serviceFor(c).listWaitingApprovals(actor, goalId, { limit, page_token: pageToken });
+      return c.json({ data: result.data.map(toWireApproval), pagination: result.pagination }, 200);
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      throw error;
     }
-    return c.json({ data: result.data.map(toWireApproval), pagination: result.pagination }, 200);
   };
 
   const router = new OpenAPIHono();
@@ -606,6 +523,7 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
   router.openapi(resumeGoalRoute, resumeHandler);
   router.openapi(endGoalRoute, endHandler);
   router.openapi(checkGoalRoute, checkHandler);
+  router.openapi(confirmGoalStepRoute, confirmStepHandler);
   router.openapi(listGoalEvidenceRoute, evidenceHandler);
   router.openapi(listGoalEventsRoute, eventsHandler);
   router.openapi(listGoalApprovalsRoute, approvalsHandler);

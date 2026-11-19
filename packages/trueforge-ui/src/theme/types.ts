@@ -60,6 +60,12 @@ export type SemanticTokens = {
   successText: string;
   failureBg: string;
   failureText: string;
+  /**
+   * The failure colour as ink on a plain surface, where no failure fill sits behind it.
+   * Light themes carry the failure colour itself; dark themes carry a lightened tint of
+   * it, because the colour itself falls short of AA on a dark surface.
+   */
+  failureInk: string;
   warningBg: string;
   warningText: string;
   /**
@@ -287,6 +293,7 @@ export const TOKEN_CSS_VARS: Record<keyof SemanticTokens, string> = {
   successText: '--success-text',
   failureBg: '--failure-bg',
   failureText: '--failure-text',
+  failureInk: '--failure-ink',
   warningBg: '--warning-bg',
   warningText: '--warning-text',
   success: '--success',

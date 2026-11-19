@@ -101,6 +101,9 @@
     --failure-bg: #a95445;
     --failure-bg: oklch(0.546 0.115 31.4);
     --failure-text: #fffdf8;
+    /* The failure colour as ink on a plain surface: the colour itself in light, a lightened tint in dark. */
+    --failure-ink: #a95445;
+    --failure-ink: oklch(0.546 0.115 31.4);
     --warning-bg: #936f3e;
     --warning-text: #fffdf8;
     /* The one highlight. Bright gold carries marks and fills; gold-ink carries words, edges and focus. */
@@ -192,6 +195,8 @@
     --failure-bg: #a65344;
     --failure-bg: oklch(0.54 0.113 31.6);
     --failure-text: #f2ecdd;
+    --failure-ink: #da8271;
+    --failure-ink: oklch(0.697 0.112 31.8);
     --warning-bg: #b5894c;
     --warning-text: #221f19;
     --gold: #e9b949;
@@ -1021,6 +1026,7 @@ button.aman-runtime-rail__desk-row:hover .aman-runtime-rail__desk-row-title {
   --color-success-text: var(--success-text);
   --color-failure-bg: var(--failure-bg);
   --color-failure-text: var(--failure-text);
+  --color-failure-ink: var(--failure-ink);
   --color-warning-bg: var(--warning-bg);
   --color-warning-text: var(--warning-text);
   --color-success: var(--success);

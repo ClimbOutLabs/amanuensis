@@ -15,6 +15,7 @@ import {
   GoalLifecycleSchema,
   GoalRevisionRequestSchema,
   GoalSetupChangedResponseSchema,
+  GoalStepParamsSchema,
   ListGoalApprovalsResponseSchema,
   ListGoalEventsResponseSchema,
   ListGoalEvidenceResponseSchema,
@@ -53,14 +54,14 @@ const notFound = {
     content: { 'application/json': { schema: RequestErrorResponseSchema } },
     description: 'Goal not found.',
   },
-} as const;
+};
 
 const revisionConflict = {
   409: {
     content: { 'application/json': { schema: RequestErrorResponseSchema } },
     description: 'The goal changed since it was read. Read it again, then retry.',
   },
-} as const;
+};
 
 export const listGoalsRoute = createRoute({
   method: 'get',
@@ -308,6 +309,30 @@ export const checkGoalRoute = createRoute({
       content: { 'application/json': { schema: GoalSetupChangedResponseSchema } },
       description: 'The agent setup changed since activation. The response carries the updated card to confirm.',
     },
+  },
+});
+
+export const confirmGoalStepRoute = createRoute({
+  method: 'post',
+  path: '/{goal_id}/steps/{step_id}/confirm',
+  tags: [OpenApiTag.GOALS],
+  summary: 'Confirm a goal step',
+  description:
+    'Records the owner confirming a step as done, and steps waiting on it become ready. The goal itself stays open. Finishing it is a separate decision.',
+  'x-fern-sdk-group-name': ['goals'],
+  'x-fern-sdk-method-name': 'confirm_step',
+  request: { params: GoalStepParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetGoalResponseSchema } },
+      description: 'The goal with the confirmed step.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The goal is a draft or finished, or the step is already confirmed or verified.',
+    },
+    ...notFound,
+    ...revisionConflict,
   },
 });
 
