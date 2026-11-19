@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 export type ChatFolder = {
   id: string;
@@ -47,6 +47,8 @@ type ChatFolderContextValue = {
   updateFolderSessionTitle(input: { sessionId: string; title: string }): void;
   /** Drops a folder row after its chat was deleted through the server. */
   removeFolderSession(input: { sessionId: string }): void;
+  /** Loads the folder state again, so chats changed elsewhere show up without a page refresh. */
+  reload(): void;
 };
 
 const ChatFolderContext = createContext<ChatFolderContextValue | null>(null);
@@ -73,8 +75,61 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
   const [unfiledSessions, setUnfiledSessions] = useState<readonly ChatFolderSession[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Only the newest load may apply: a load that started before a chat was deleted or
+  // before a newer load must not bring the old state back when it lands.
+  const loadGenerationRef = useRef(0);
+  // Chats removed since the last applied load. A load already in flight can still hold
+  // one of these, so applied snapshots are filtered against this set.
+  const removedSessionIdsRef = useRef(new Set<string>());
+
+  const applySnapshot = useCallback((snapshot: ChatFolderSnapshot) => {
+    const removed = removedSessionIdsRef.current;
+    const inSnapshot = new Set<string>();
+    for (const row of snapshot.folderSessions) {
+      for (const session of row.sessions) inSnapshot.add(session.sessionId);
+    }
+    for (const session of snapshot.unfiledSessions) inSnapshot.add(session.sessionId);
+    // A snapshot without a removed chat confirms the server has caught up with the
+    // delete, so the guard for that chat can be dropped.
+    for (const sessionId of removed) {
+      if (!inSnapshot.has(sessionId)) removed.delete(sessionId);
+    }
+    const keep = (session: ChatFolderSession) => !removed.has(session.sessionId);
+    setFolders(sortFolders(snapshot.folders));
+    setAssignments(
+      new Map(
+        snapshot.assignments.filter(row => !removed.has(row.sessionId)).map(row => [row.sessionId, row.folderId]),
+      ),
+    );
+    setFolderSessions(new Map(snapshot.folderSessions.map(row => [row.folderId, row.sessions.filter(keep)])));
+    setUnfiledSessions(snapshot.unfiledSessions.filter(keep));
+    setLoadError(null);
+  }, []);
+
+  const reload = useCallback(() => {
+    if (store === undefined) return;
+    const generation = ++loadGenerationRef.current;
+    const timeout = setTimeout(() => {
+      if (loadGenerationRef.current === generation) setLoadError(CHAT_FOLDER_LOAD_ERROR);
+    }, CHAT_FOLDER_LOAD_TIMEOUT_MS);
+    void store
+      .load()
+      .then(snapshot => {
+        if (loadGenerationRef.current !== generation) return;
+        clearTimeout(timeout);
+        applySnapshot(snapshot);
+      })
+      .catch(() => {
+        if (loadGenerationRef.current !== generation) return;
+        clearTimeout(timeout);
+        // Folder organization is optional. Keep chat history usable if it cannot load.
+        setLoadError(CHAT_FOLDER_LOAD_ERROR);
+      });
+  }, [applySnapshot, store]);
+
   useEffect(() => {
     if (store === undefined) {
+      loadGenerationRef.current++;
       setFolders([]);
       setAssignments(new Map());
       setFolderSessions(new Map());
@@ -82,34 +137,8 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
       setLoadError(null);
       return;
     }
-
-    let cancelled = false;
-    const timeout = setTimeout(() => {
-      if (cancelled) return;
-      setLoadError(CHAT_FOLDER_LOAD_ERROR);
-    }, CHAT_FOLDER_LOAD_TIMEOUT_MS);
-    void store
-      .load()
-      .then(snapshot => {
-        if (cancelled) return;
-        clearTimeout(timeout);
-        setFolders(sortFolders(snapshot.folders));
-        setAssignments(new Map(snapshot.assignments.map(row => [row.sessionId, row.folderId])));
-        setFolderSessions(new Map(snapshot.folderSessions.map(row => [row.folderId, row.sessions])));
-        setUnfiledSessions(snapshot.unfiledSessions);
-        setLoadError(null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        clearTimeout(timeout);
-        // Folder organization is optional. Keep chat history usable if it cannot load.
-        setLoadError(CHAT_FOLDER_LOAD_ERROR);
-      });
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-    };
-  }, [store]);
+    reload();
+  }, [reload, store]);
 
   const createFolder = useCallback(
     async ({ name }: { name: string }) => {
@@ -178,6 +207,7 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
   }, []);
 
   const removeFolderSession = useCallback(({ sessionId }: { sessionId: string }) => {
+    removedSessionIdsRef.current.add(sessionId);
     setFolderSessions(current => {
       let changed = false;
       const next = new Map<string, readonly ChatFolderSession[]>();
@@ -235,6 +265,7 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
       moveChat,
       updateFolderSessionTitle,
       removeFolderSession,
+      reload,
     };
   }, [
     assignments,
@@ -244,6 +275,7 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
     folders,
     loadError,
     moveChat,
+    reload,
     removeFolderSession,
     renameFolder,
     store,
