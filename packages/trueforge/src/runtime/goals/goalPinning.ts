@@ -26,6 +26,10 @@ export class GoalSetupResolutionError extends Error {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** JSON with object keys sorted at every depth, so equal setups hash equally however they were built. */
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -38,7 +42,11 @@ export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(item => canonicalJson(item)).join(',')}]`;
   }
-  const entries = Object.entries(value as Record<string, unknown>)
+  if (!isRecord(value)) {
+    // Only records reach this point; the guard narrows the type without a cast.
+    return 'null';
+  }
+  const entries = Object.entries(value)
     .filter(([, entryValue]) => entryValue !== undefined)
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${canonicalJson(entryValue)}`).join(',')}}`;
