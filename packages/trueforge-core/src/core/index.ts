@@ -479,6 +479,7 @@ export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCal
 
 // Sentinel: three-tier permission system for tool execution
 export {
+  callReadsMemoryPages,
   callResultSource,
   callReturnsOutsideContent,
   contextCalledMemoryPagesWriter,
