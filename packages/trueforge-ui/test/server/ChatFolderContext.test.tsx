@@ -39,7 +39,35 @@ type FolderContextValue = ReturnType<typeof useOptionalChatFolders>;
 function Probe({ capture }: { capture: (value: FolderContextValue) => void }) {
   const value = useOptionalChatFolders();
   capture(value);
-  return <div data-testid="unfiled">{(value?.unfiledSessions ?? []).map(session => session.sessionId).join(',')}</div>;
+  return (
+    <>
+      <div data-testid="unfiled">{(value?.unfiledSessions ?? []).map(session => session.sessionId).join(',')}</div>
+      <div data-testid="folders">{(value?.folders ?? []).map(folder => folder.name).join(',')}</div>
+    </>
+  );
+}
+
+function snapshotWithFolders(folders: Array<{ id: string; name: string }>): ChatFolderSnapshot {
+  return { folders, assignments: [], folderSessions: [], unfiledSessions: [] };
+}
+
+/** A store whose first load resolves with the initial snapshot and whose later loads stay open until released. */
+function deferredLaterLoads(initial: ChatFolderSnapshot) {
+  let resolveLoad: (snapshot: ChatFolderSnapshot) => void = () => undefined;
+  let loads = 0;
+  const store = storeReturning(() => {
+    loads++;
+    if (loads === 1) return Promise.resolve(initial);
+    return new Promise<ChatFolderSnapshot>(resolve => {
+      resolveLoad = resolve;
+    });
+  });
+  return {
+    store,
+    releaseLoad: (snapshot: ChatFolderSnapshot) => {
+      resolveLoad(snapshot);
+    },
+  };
 }
 
 describe('ChatFolderProvider reload', () => {
@@ -107,5 +135,106 @@ describe('ChatFolderProvider reload', () => {
     });
 
     expect(screen.getByTestId('unfiled')).toHaveTextContent('');
+  });
+});
+
+describe('ChatFolderProvider local edits', () => {
+  it('keeps a renamed folder name when a load started before the rename lands after it', async () => {
+    const before = snapshotWithFolders([{ id: 'folder-1', name: 'Old name' }]);
+    const { store, releaseLoad } = deferredLaterLoads(before);
+    let captured: FolderContextValue = null;
+    render(
+      <ChatFolderProvider store={store}>
+        <Probe
+          capture={value => {
+            captured = value;
+          }}
+        />
+      </ChatFolderProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('folders')).toHaveTextContent('Old name');
+    });
+
+    act(() => {
+      captured?.reload();
+    });
+    await act(async () => {
+      await captured?.renameFolder({ folderId: 'folder-1', name: 'New name' });
+    });
+    expect(screen.getByTestId('folders')).toHaveTextContent('New name');
+
+    await act(async () => {
+      releaseLoad(before);
+    });
+
+    expect(screen.getByTestId('folders')).toHaveTextContent('New name');
+  });
+
+  it('keeps a created folder when a load started before the create lands after it', async () => {
+    const before = snapshotWithFolders([{ id: 'folder-1', name: 'Existing' }]);
+    const { store, releaseLoad } = deferredLaterLoads(before);
+    let captured: FolderContextValue = null;
+    render(
+      <ChatFolderProvider store={store}>
+        <Probe
+          capture={value => {
+            captured = value;
+          }}
+        />
+      </ChatFolderProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('folders')).toHaveTextContent('Existing');
+    });
+
+    act(() => {
+      captured?.reload();
+    });
+    await act(async () => {
+      await captured?.createFolder({ name: 'Brand new' });
+    });
+    expect(screen.getByTestId('folders').textContent).toBe('Brand new,Existing');
+
+    await act(async () => {
+      releaseLoad(before);
+    });
+
+    expect(screen.getByTestId('folders').textContent).toBe('Brand new,Existing');
+  });
+
+  it('keeps a deleted folder gone when a load started before the delete lands after it', async () => {
+    const before = snapshotWithFolders([{ id: 'folder-1', name: 'Doomed' }]);
+    const { store, releaseLoad } = deferredLaterLoads(before);
+    let captured: FolderContextValue = null;
+    render(
+      <ChatFolderProvider store={store}>
+        <Probe
+          capture={value => {
+            captured = value;
+          }}
+        />
+      </ChatFolderProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('folders')).toHaveTextContent('Doomed');
+    });
+
+    act(() => {
+      captured?.reload();
+    });
+    await act(async () => {
+      await captured?.deleteFolder({ folderId: 'folder-1' });
+    });
+    expect(screen.getByTestId('folders').textContent).toBe('');
+
+    await act(async () => {
+      releaseLoad(before);
+    });
+
+    expect(screen.getByTestId('folders').textContent).toBe('');
   });
 });

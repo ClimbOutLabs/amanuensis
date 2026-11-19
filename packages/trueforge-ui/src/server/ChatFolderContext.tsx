@@ -75,8 +75,10 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
   const [unfiledSessions, setUnfiledSessions] = useState<readonly ChatFolderSession[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Only the newest load may apply: a load that started before a chat was deleted or
-  // before a newer load must not bring the old state back when it lands.
+  // Only the newest load may apply: a load that started before a chat was deleted,
+  // before a newer load, or before a folder edit saved here must not bring the old
+  // state back when it lands. A saved edit bumps the counter, which retires any
+  // load still in flight.
   const loadGenerationRef = useRef(0);
   // Chats removed since the last applied load. A load already in flight can still hold
   // one of these, so applied snapshots are filtered against this set.
@@ -144,6 +146,7 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
     async ({ name }: { name: string }) => {
       if (store === undefined) throw new Error('Chat folders are not available on this server');
       const created = await store.createFolder({ name });
+      loadGenerationRef.current++;
       setFolders(current => sortFolders([...current, created]));
       return created;
     },
@@ -154,6 +157,7 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
     async ({ folderId, name }: { folderId: string; name: string }) => {
       if (store === undefined) throw new Error('Chat folders are not available on this server');
       const renamed = await store.renameFolder({ folderId, name });
+      loadGenerationRef.current++;
       setFolders(current => sortFolders(current.map(folder => (folder.id === folderId ? renamed : folder))));
     },
     [store],
@@ -163,6 +167,7 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
     async ({ folderId }: { folderId: string }) => {
       if (store === undefined) throw new Error('Chat folders are not available on this server');
       await store.deleteFolder({ folderId });
+      loadGenerationRef.current++;
       setFolders(current => current.filter(folder => folder.id !== folderId));
       setAssignments(current => new Map([...current].filter(([, assignedFolderId]) => assignedFolderId !== folderId)));
       // Deleting a folder keeps its chats: they land with the chats that have no
@@ -241,6 +246,7 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
       if (store === undefined) throw new Error('Chat folders are not available on this server');
       // Applied only once the server accepts it: moving the row earlier would remount the dialog that shows a failure.
       await store.setSessionFolder({ sessionId, folderId });
+      loadGenerationRef.current++;
       setAssignments(current => {
         const next = new Map(current);
         if (folderId === null) next.delete(sessionId);
