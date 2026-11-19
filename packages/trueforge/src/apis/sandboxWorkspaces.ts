@@ -3,6 +3,7 @@ import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import {
   formatSandboxId,
   rawSandboxId,
+  retiredSlotSourceIndex,
   type SandboxWorkspace,
   type SandboxWorkspaceSlot,
 } from '@truefoundry/trueforge-core/core';
@@ -40,9 +41,16 @@ export function createSandboxWorkspacesRouter(deps: SandboxWorkspacesRouterDeps)
       });
     }
 
-    // Join key: the sandbox id a chat's latest turn recorded, which may be the raw slot id or its versioned form.
+    // Join keys: the sandbox id a chat's latest turn recorded, which may be the raw slot id or its
+    // versioned form. A chat from before the slot count shrank may still name its workspace by the
+    // retired slot it started on, so each workspace is also looked up under that spelling.
+    const joinKeys = (slot: number, sessionId: string): string[] => {
+      const current = `s${String(slot)}-${sessionId}`;
+      const retired = retiredSlotSourceIndex(slot - 1);
+      return retired === undefined ? [current] : [current, `s${String(retired + 1)}-${sessionId}`];
+    };
     const reported = slotListings.flatMap(slotListing =>
-      slotListing.sessions.map(session => `s${String(slotListing.slot)}-${session.session_id}`),
+      slotListing.sessions.flatMap(session => joinKeys(slotListing.slot, session.session_id)),
     );
     const chats = await deps.sessionStore.findChatsBySandboxIds({
       tenant_id: requestContext.tenant_id,
@@ -57,7 +65,9 @@ export function createSandboxWorkspacesRouter(deps: SandboxWorkspacesRouterDeps)
       for (const session of slotListing.sessions) {
         totalBytes += session.bytes;
         const sandboxId = `s${String(slotListing.slot)}-${session.session_id}`;
-        const chat = chatBySandboxId.get(sandboxId);
+        const chat = joinKeys(slotListing.slot, session.session_id)
+          .map(key => chatBySandboxId.get(key))
+          .find(found => found !== undefined);
         // Another person's chat is named only as theirs: its title is theirs to see.
         const yours = chat?.created_by_subject_id === requestContext.subject.id;
         // A private chat stays out of every list by title, even for its owner.

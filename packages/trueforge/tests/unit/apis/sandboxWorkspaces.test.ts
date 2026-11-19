@@ -264,7 +264,7 @@ describe('sandbox workspaces listing', () => {
     expect(JSON.stringify(listing)).not.toContain('Doctor visit notes');
   });
 
-  it('looks up every reported workspace in one read, in both forms a chat may have stored', async () => {
+  it('looks up every reported workspace in one read, in both forms and both slot spellings a chat may have stored', async () => {
     const store = fakeStore([], []);
     await listWorkspaces({
       sessionStore: store,
@@ -281,13 +281,67 @@ describe('sandbox workspaces listing', () => {
         ]),
     });
 
+    // Slot 1 also answers for retired slot 3, whose chats were moved onto it, so each workspace is
+    // looked up under the s3 spelling as well as its own, each in raw and versioned form.
     expect(store.reads).toEqual([
       [
         `s1-${SLOT_ONE_SESSION}`,
         `v1:slots:s1-${SLOT_ONE_SESSION}`,
+        `s3-${SLOT_ONE_SESSION}`,
+        `v1:slots:s3-${SLOT_ONE_SESSION}`,
         `s1-${SLOT_ONE_ORPHAN}`,
         `v1:slots:s1-${SLOT_ONE_ORPHAN}`,
+        `s3-${SLOT_ONE_ORPHAN}`,
+        `v1:slots:s3-${SLOT_ONE_ORPHAN}`,
       ],
+    ]);
+  });
+
+  it('joins a workspace to a chat that still names it by the retired slot it started on', async () => {
+    const store = fakeStore(
+      [
+        // This chat's latest turn ran before the move, so it names its workspace by retired slot 3.
+        chatRecord('chat-from-slot-3', 'From slot three', 'turn-from-slot-3'),
+        // This one names its workspace by retired slot 4, in the raw form.
+        chatRecord('chat-from-slot-4', 'From slot four', 'turn-from-slot-4'),
+        // This chat's latest turn ran after the move, so it names the workspace by its current slot.
+        chatRecord('chat-current', 'Current spelling', 'turn-current'),
+        // A retired spelling for a workspace that is not on the slot joins nothing.
+        chatRecord('chat-elsewhere', 'Somewhere else', 'turn-elsewhere'),
+      ],
+      [
+        turnRecord('chat-from-slot-3', 'turn-from-slot-3', `v1:slots:s3-${SLOT_ONE_SESSION}`),
+        turnRecord('chat-from-slot-4', 'turn-from-slot-4', `s4-${SLOT_TWO_SESSION}`),
+        turnRecord('chat-current', 'turn-current', `s1-${SLOT_ONE_ORPHAN}`),
+        turnRecord('chat-elsewhere', 'turn-elsewhere', `s3-${'d'.repeat(32)}`),
+      ],
+    );
+    const { status, listing } = await listWorkspaces({
+      sessionStore: store,
+      listSlotWorkspaces: () =>
+        Promise.resolve([
+          {
+            slot: 1,
+            storeFreeBytes: 1000,
+            sessions: [
+              { session_id: SLOT_ONE_SESSION, bytes: 4096, entries: 12, last_used: '2026-11-01T10:00:00.000Z' },
+              { session_id: SLOT_ONE_ORPHAN, bytes: 2048, entries: 3, last_used: '2026-10-20T09:00:00.000Z' },
+            ],
+          },
+          {
+            slot: 2,
+            storeFreeBytes: 2000,
+            sessions: [
+              { session_id: SLOT_TWO_SESSION, bytes: 8192, entries: 30, last_used: '2026-11-02T08:00:00.000Z' },
+            ],
+          },
+        ]),
+    });
+    expect(status).toBe(200);
+    expect(listing.workspaces.map(w => [w.sandbox_id, w.holder, w.chat_id])).toEqual([
+      [`s1-${SLOT_ONE_SESSION}`, 'you', 'chat-from-slot-3'],
+      [`s1-${SLOT_ONE_ORPHAN}`, 'you', 'chat-current'],
+      [`s2-${SLOT_TWO_SESSION}`, 'you', 'chat-from-slot-4'],
     ]);
   });
 

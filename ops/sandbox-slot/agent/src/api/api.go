@@ -174,10 +174,14 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Unlock()
 		writeJSON(w, http.StatusOK, healthResponse{Busy: false, Sessions: tree.Count(s.TreeDir), Attestation: report})
 	default:
-		// A lease is running: its own attestation just passed, so report the last one.
+		// A lease is running: its own attestation just passed, so report the last one. Its free
+		// space predates the running command's writes, so read that one fact fresh from the volume.
 		s.mu.Lock()
 		report := s.last
 		s.mu.Unlock()
+		if _, free, err := lease.FilesystemUsedBytes(s.VolumeDir); err == nil {
+			report.Facts.StoreFreeBytes = free
+		}
 		writeJSON(w, http.StatusOK, healthResponse{Busy: true, Sessions: tree.Count(s.TreeDir), Attestation: report})
 	}
 }

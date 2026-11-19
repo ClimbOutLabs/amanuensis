@@ -137,6 +137,31 @@ function withoutGuestPinnedEnv(env: Readonly<Record<string, string>>): Record<st
 }
 
 /**
+ * Where each retired slot's chats went, as zero-based indexes: slot 3 to slot 1, slot 4 to slot 2, and
+ * no other slot. This one mapping is shared by every reader of a slot id, so resolving an old id and
+ * reporting who holds a workspace can never disagree about where a retired slot's chats live.
+ */
+const RETIRED_SLOT_TARGETS: ReadonlyMap<number, number> = new Map([
+  [2, 0],
+  [3, 1],
+]);
+
+/** The current slot index a retired slot's chats went to, or undefined when the slot is not a retired one. */
+export function retiredSlotTargetIndex(slot: number): number | undefined {
+  return RETIRED_SLOT_TARGETS.get(slot);
+}
+
+/** The retired slot index whose chats went to a current slot, or undefined when no slot retired into it. */
+export function retiredSlotSourceIndex(slot: number): number | undefined {
+  for (const [retired, current] of RETIRED_SLOT_TARGETS) {
+    if (current === slot) {
+      return retired;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Shell and file tools on sandbox slots. A sandbox is a workspace tree pinned to one slot; every command
  * runs in a fresh gVisor guest that mounts that tree at /workspace. Background processes end with the call.
  */
@@ -459,9 +484,9 @@ export class SlotSandboxProvider implements SandboxProvider {
     }
   }
 
-  /** The slot a retired slot's chats went to, as an index: slot 3 to slot 1, slot 4 to slot 2, and no other slot. */
+  /** The slot a retired slot's chats went to, as an index, when that slot is one of the slots in use. */
   private retiredIndex(slot: number): number | undefined {
-    const target = slot === 2 ? 0 : slot === 3 ? 1 : undefined;
+    const target = retiredSlotTargetIndex(slot);
     return target !== undefined && target < this.clients.length ? target : undefined;
   }
 
