@@ -487,13 +487,41 @@ function comparisonText(text: string): string {
 }
 
 /**
- * Whether a reply sentence only says again what the turn read out of its stored memory pages. The words
- * must match whole on one side or the other: the sentence inside the recalled text, or the recalled text
- * inside the sentence with nothing around it but a pointer back at where the fact was read, such as
- * "as you mentioned". Either way the matched words must reach the minimum length, so a short sentence
- * is never dropped over a few shared words. A sentence carrying any words of its own around the match
- * is not a restatement and is kept, even when the added words are short: "after" standing before noon
- * makes a different deadline, and "might" makes a different claim.
+ * The sentences of a recalled text, each flattened to its words alone. A recalled text is a whole
+ * memory page, so a line break ends a sentence just as an end mark does, and the page's headings
+ * and other sentences stand as sentences of their own rather than as words around a match.
+ */
+function storedSentences(recalled: string): string[] {
+  return recalled
+    .split('\n')
+    .flatMap(line => line.split(SENTENCE_END))
+    .map(sentence => comparisonText(sentence))
+    .filter(sentence => sentence !== '');
+}
+
+/** Whether the needle sits in the haystack with nothing around it but a pointer back at where the fact was read. */
+function holdsOnlyAsRestatement({ haystack, needle }: { haystack: string; needle: string }): boolean {
+  const at = haystack.indexOf(needle);
+  if (at === -1) {
+    return false;
+  }
+  const before = haystack.slice(0, at).trim();
+  const after = haystack.slice(at + needle.length).trim();
+  return wrappedInAttribution({ before, after });
+}
+
+/**
+ * Whether a reply sentence only says again what the turn read out of its stored memory pages. The
+ * words must match whole in one direction or the other: the reply sentence inside one sentence of
+ * the recalled text, or the recalled text inside the reply sentence. Whichever side carries words
+ * around the match, those words must be absent or only point back at where the fact was read, such
+ * as "as you mentioned". The recalled side is judged a sentence at a time because a recalled text
+ * is a whole memory page, and the page's other sentences and headings are not words around the
+ * match. Either way the matched words must reach the minimum length, so a short sentence is never
+ * dropped over a few shared words. A sentence carrying any words of its own around the match is
+ * not a restatement and is kept, even when the added words are short: "after" standing before noon
+ * makes a different deadline, "might" makes a different claim, and a condition the recalled
+ * sentence stated, such as "only if the permit arrives", makes the bare reply a different claim.
  */
 function restatesRecalledMemory({
   text,
@@ -507,20 +535,14 @@ function restatesRecalledMemory({
     return false;
   }
   return recalledMemory.some(recalled => {
-    const stored = comparisonText(recalled);
-    if (stored.includes(note)) {
+    if (storedSentences(recalled).some(sentence => holdsOnlyAsRestatement({ haystack: sentence, needle: note }))) {
       return true;
     }
+    const stored = comparisonText(recalled);
     if (stored.length < RESTATED_MIN_CHARACTERS) {
       return false;
     }
-    const at = note.indexOf(stored);
-    if (at === -1) {
-      return false;
-    }
-    const before = note.slice(0, at).trim();
-    const after = note.slice(at + stored.length).trim();
-    return wrappedInAttribution({ before, after });
+    return holdsOnlyAsRestatement({ haystack: note, needle: stored });
   });
 }
 

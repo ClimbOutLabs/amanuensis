@@ -543,6 +543,41 @@ describe('parseNotesReply and what the turn recalled from its memory pages', () 
     ).toEqual([]);
   });
 
+  it('keeps a sentence that drops a condition the recalled sentence put on the fact', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday.',
+        recalledMemory: ['The venue is available on Friday only if the permit arrives.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'The venue is available on Friday.' }]);
+  });
+
+  it('drops a sentence the recalled sentence itself leads into with words pointing back at the person who raised it', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday.',
+        recalledMemory: ['As you mentioned, the venue is available on Friday.'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('drops a sentence the recalled sentence itself follows with words pointing back at the person who raised it', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday.',
+        recalledMemory: ['The venue is available on Friday, as you mentioned.'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('drops a sentence that repeats one sentence of a recalled page word for word, with other sentences around it', () => {
+    const page = '# Bookings\n\nThe venue is available on Friday.\nThe hall holds eighty people.';
+    expect(parse({ responses: [1], reply: 'The venue is available on Friday.', recalledMemory: [page] })).toEqual([]);
+  });
+
   it('keeps a sentence that moves a recalled time with a word of its own standing before it', () => {
     expect(
       parse({
