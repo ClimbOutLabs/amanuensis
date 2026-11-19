@@ -22,6 +22,10 @@ Each fact is a short note that starts with what it is about, such as "Sister Pip
 
 With **Turn summaries** off, Aman saves each turn word for word, as two notes. Your words are one note. Aman's reply is a second note, marked `> External source: assistant reply`, so what Aman said is never saved as something you said. The summaries use the **Background model** from [A model for each job](model-roles.mdx), and each one costs an extra model call.
 
+### Open items
+
+Beside the diary of notes, Aman keeps a short list of what you still have to do. When something asks you for a concrete thing, in mail or in a chat, or you say you will do something, it goes on the list. When finishing it is clear, it comes off. An item never comes off just because its date passed. Aman works the list out from the same turn summaries, so it costs no extra model call, and it checks each entry against the words it came from before anything is added or removed. The list lives in a plain file named `items.md` with your memory files, and you can read it end to end. Aman reads the list before it writes a brief, ahead of the diary, so a brief never reminds you about something already done. You can turn the list off with the **Track open items** switch in **Settings**, **Memory**. Turning it off changes nothing in your saved memories.
+
 ### What Aman learns about you
 
 What Aman learns about you lives in your profile, not in memory. The learned profile lives in **Settings**, **Memory**, on the **Learned profile** tab, and is added to every reply from there. It has a size limit. When it is full, its oldest fact about you is moved into memory, word for word, to make room for the new one, so nothing is lost and there is nothing for you to tidy. Earlier versions also saved a copy of it as a note in memory. When you clear the learned profile or delete your profile, Aman stops using that copy at once, it no longer shows in your memories, and its text is removed from your disk like any memory you delete.

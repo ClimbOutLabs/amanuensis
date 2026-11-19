@@ -12,6 +12,7 @@ import type { Logger } from 'winston';
 import configuration from '../../config';
 import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
+import { resolveMemoryItemTrackingEnabled } from '../memoryItemTrackingSettings';
 import { readMemoryPageSortingSetting } from '../memoryPageSortingSettings';
 import type { TurnModelUsage } from '../modelUsage';
 import { sessionKeepsNothing } from '../privateChat';
@@ -24,6 +25,16 @@ import { trackMemoryBackgroundWork } from './memoryBackgroundWork';
 import type { MemoryClient, RetainItem, WrittenEntry } from './memoryClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './memoryClient';
 import {
+  appendItemEvents,
+  eventsForItemFlags,
+  foldItemEvents,
+  itemListForPrompt,
+  readItemEvents,
+  type ItemFlag,
+  type ItemListEntry,
+  type TrackedItem,
+} from './memoryItems';
+import {
   ASSISTANT_RESPONSE_SOURCE,
   labeledNoteText,
   NOTE_DATE_METADATA_KEY,
@@ -34,7 +45,7 @@ import {
   REPLY_READ_NOTHING_METADATA_KEY,
   type MemoryNoteSource,
 } from './memoryNotes';
-import { summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
+import { boundedToolResults, summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
 import {
   MEMORY_ORIGIN_METADATA_KEY,
   TOOL_INGESTED_ORIGIN,
@@ -312,15 +323,98 @@ function formatFacts(facts: readonly string[]): string {
  * an unsummarized turn, or "nothing durable" stores nothing. Every outcome is logged at debug so
  * the effective state stays observable.
  */
+/**
+ * What item tracking needs from one turn: the folder the items file lives in, the folded state
+ * the turn started from, the numbered list both passes are shown, and the flags they raised.
+ * Absent when tracking is off for the turn or the backend keeps no memory files.
+ */
+interface TurnItemContext {
+  dir: string;
+  items: readonly TrackedItem[];
+  entries: readonly ItemListEntry[];
+  lines: readonly string[];
+  flags: { pass: 'person' | 'notes'; flags: readonly ItemFlag[] }[];
+}
+
+/**
+ * The turn's item context, when item tracking is on. The setting is read now, at retain time,
+ * so a change in Settings applies to the very next turn. Never throws: a state that cannot be
+ * read means no tracking this turn, and the diary still holds the evidence.
+ */
+async function itemContextForTurn(
+  params: SubmitRetainParams,
+  summarize: SummarizeTurnContext,
+): Promise<TurnItemContext | undefined> {
+  try {
+    const enabled = await resolveMemoryItemTrackingEnabled({
+      globalSettingsStore: summarize.globalSettingsStore,
+      logger: params.logger,
+    });
+    const dir = enabled ? params.client.pagesWriteDir?.() : undefined;
+    if (dir === undefined) {
+      return undefined;
+    }
+    const items = foldItemEvents(await readItemEvents({ dir, logger: params.logger }));
+    const { lines, entries } = itemListForPrompt(items);
+    return { dir, items, entries, lines, flags: [] };
+  } catch (error) {
+    params.logger.debug('Item tracking could not read its state for this turn', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      ...extractErrorLogFields(error),
+    });
+    return undefined;
+  }
+}
+
+/**
+ * Records what the turn's two passes flagged for the item list, each flag judged against the
+ * state the turn started from. Runs once per decision, and the events carry ids minted from the
+ * turn, so a resubmitted decision appends nothing twice. Never throws: item tracking must never
+ * fail or delay the turn's memory.
+ */
+async function applyTurnItemFlags(params: SubmitRetainParams, items: TurnItemContext): Promise<void> {
+  try {
+    const events = items.flags.flatMap(({ pass, flags }) =>
+      eventsForItemFlags({
+        flags,
+        pass,
+        sessionId: params.sessionId,
+        turnId: params.turnId,
+        at: params.completedAt,
+        items: items.items,
+        entries: items.entries,
+        sources: {
+          userText: params.userText,
+          assistantText: params.assistantText,
+          results: boundedToolResults(params.toolResults ?? []),
+        },
+        personName: params.summarize?.personName,
+      }),
+    );
+    await appendItemEvents({ dir: items.dir, events, logger: params.logger });
+  } catch (error) {
+    params.logger.warn('Item flags from a turn could not be recorded', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      ...extractErrorLogFields(error),
+    });
+  }
+}
+
 async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory> {
   const summarize = params.summarize;
   if (summarize === undefined) {
     return decidePersonFacts(params);
   }
+  const items = await itemContextForTurn(params, summarize);
   // One after the other: both ask the same model, and a model server that shares its speed between
   // requests would run each at half speed, so both could run out of time together.
-  const person = await decidePersonFacts(params);
-  const notes = await decideNotes({ params, summarize });
+  const person = await decidePersonFacts(params, items);
+  const notes = await decideNotes({ params, summarize, items });
+  if (items !== undefined) {
+    await applyTurnItemFlags(params, items);
+  }
   if (notes.length === 0) {
     return person;
   }
@@ -331,9 +425,11 @@ async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory>
 async function decideNotes({
   params,
   summarize,
+  items,
 }: {
   params: SubmitRetainParams;
   summarize: SummarizeTurnContext;
+  items: TurnItemContext | undefined;
 }): Promise<LabeledNote[]> {
   const notes = await summarizeTurnNotes({
     results: params.toolResults ?? [],
@@ -349,6 +445,14 @@ async function decideNotes({
     tokenFactoryBudget: summarize.tokenFactoryBudget,
     modelUsage: summarize.modelUsage,
     logger: params.logger,
+    resolveLlm: summarize.resolveLlm,
+    itemLines: items?.lines,
+    onItemFlags:
+      items === undefined
+        ? undefined
+        : flags => {
+            items.flags.push({ pass: 'notes', flags });
+          },
   });
   const date = turnDay(params);
   const assistantName = usablePersonName(summarize.assistantName);
@@ -382,7 +486,7 @@ function fullReplyNotes(params: SubmitRetainParams): LabeledNote[] {
 }
 
 /** What the person said that is worth keeping, decided as it always was; notes are decided apart from it. */
-async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory> {
+async function decidePersonFacts(params: SubmitRetainParams, items?: TurnItemContext): Promise<TurnMemory> {
   const summarize = params.summarize;
   if (summarize === undefined) {
     params.logger.debug('Turn summarization context not provided; retaining the full exchange', {
@@ -410,6 +514,13 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       profileLines: params.profileLearning?.knownLines,
       vaultDir: params.client.pagesWriteDir?.(),
       resolveLlm: summarize.resolveLlm,
+      itemLines: items?.lines,
+      onItemFlags:
+        items === undefined
+          ? undefined
+          : flags => {
+              items.flags.push({ pass: 'person', flags });
+            },
     });
     params.profileLearning?.onAnswered(result.status === 'summarized' ? (result.profileLines ?? []) : []);
     switch (result.status) {

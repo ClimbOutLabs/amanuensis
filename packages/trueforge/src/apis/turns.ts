@@ -131,6 +131,7 @@ import { serverMemoryConfig, withMemoryScreenOverride } from '../runtime/memory/
 import type { ProfileLineSuggestion } from '../runtime/memory/memorySummarize';
 import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
 import { createOutsideInputTracker, inputAttachesFiles } from '../runtime/memory/turnOutsideInput';
+import { resolveMemoryItemTrackingEnabled } from '../runtime/memoryItemTrackingSettings';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -462,6 +463,8 @@ function createTurnResolver(deps: {
   memorySummarize: SummarizeTurnContext | undefined;
   /** The person's "use memories in replies" switch when they set it; absent, the agent's own setting applies. */
   memoryRecallEnabled: boolean | undefined;
+  /** The person's item-tracking switch for this turn: off, no tracked items are folded into recall. */
+  memoryItemTrackingEnabled: boolean;
   /** The person's past-chat search switch for this turn; off, the search tool is not offered. */
   chatSearchEnabled: boolean;
   /** Lists the person's personas, so the search keeps to the chats this persona may recall; absent, the tool is not offered. */
@@ -532,6 +535,7 @@ function createTurnResolver(deps: {
     previousTurnId,
     memorySummarize,
     memoryRecallEnabled,
+    memoryItemTrackingEnabled,
     chatSearchEnabled,
     personaStore,
     spaceStore,
@@ -1067,6 +1071,7 @@ function createTurnResolver(deps: {
       // An explicit value wins over the spec in resolveAgentDefinition: unattended runs do not recall,
       // and the person's switch applies to every agent, saved ones included.
       recallEnabled: deps.unattended ? false : memoryRecallEnabled,
+      itemTrackingEnabled: memoryItemTrackingEnabled,
       summarize: memorySummarize,
       clientTimezone,
       internalSourceState,
@@ -2033,6 +2038,11 @@ async function beginAcceptedTurnExecution(
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
       });
+      // The person's item-tracking switch, read once per turn the same way.
+      const memoryItemTrackingEnabled = await resolveMemoryItemTrackingEnabled({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+      });
       // The person's past-chat search switch, read once per turn the same way.
       const chatSearchEnabled = await readChatSearchEnabled({
         sentinelSettingsStore: deps.sentinelSettingsStore,
@@ -2101,6 +2111,7 @@ async function beginAcceptedTurnExecution(
         previousTurnId: deps.previousTurnId ?? null,
         memorySummarize,
         memoryRecallEnabled,
+        memoryItemTrackingEnabled,
         chatSearchEnabled,
         personaStore: deps.personaStore,
         clientTimezone: deps.clientTimezone,
@@ -2974,6 +2985,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
+    // The person's item-tracking switch, read once per turn the same way.
+    const memoryItemTrackingEnabled = await resolveMemoryItemTrackingEnabled({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
     // The person's past-chat search switch, read once per turn the same way.
     const chatSearchEnabled = await readChatSearchEnabled({
       sentinelSettingsStore: deps.sentinelSettingsStore,
@@ -3025,6 +3041,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previousTurnId: memoryPreviousTurnId,
       memorySummarize,
       memoryRecallEnabled,
+      memoryItemTrackingEnabled,
       chatSearchEnabled,
       personaStore: deps.personaStore,
       spaceStore: deps.spaceStore,

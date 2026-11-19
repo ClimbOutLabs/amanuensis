@@ -4008,6 +4008,17 @@
         ],
         "type": "object"
       },
+      "GetMemoryItemTrackingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryItemTracking"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetMemoryNightlyResponse": {
         "properties": {
           "data": {
@@ -7560,6 +7571,28 @@
           "state",
           "detail",
           "indexed_entries"
+        ],
+        "type": "object"
+      },
+      "MemoryItemTracking": {
+        "properties": {
+          "default_enabled": {
+            "description": "The default used when no override is stored: on.",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "The stored setting: the persisted override when set, else the default, on.",
+            "type": "boolean"
+          },
+          "overridden": {
+            "description": "Whether a persisted override is currently stored.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "overridden",
+          "default_enabled"
         ],
         "type": "object"
       },
@@ -17290,6 +17323,24 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateMemoryItemTrackingRequest": {
+        "example": {
+          "enabled": true
+        },
+        "properties": {
+          "enabled": {
+            "description": "Persisted override: `true`/`false`. `null` clears the override back to the default.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "type": "object"
       },
@@ -28286,6 +28337,116 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "get"
+      }
+    },
+    "/api/v1/settings/memory-item-tracking": {
+      "get": {
+        "description": "The stored override for item tracking, or the default (on) when none is stored.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryItemTrackingResponse"
+                }
+              }
+            },
+            "description": "The stored item-tracking setting."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the item-tracking setting",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryItemTracking"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Persists the item-tracking override: `true`/`false` turns tracking of open items on/off; `null` clears the override back to the default. Turning it off leaves the diary and the items already recorded untouched.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryItemTrackingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryItemTrackingResponse"
+                }
+              }
+            },
+            "description": "The stored item-tracking setting after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Create, replace, or clear the item-tracking override",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryItemTracking"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
       }
     },
     "/api/v1/settings/memory-nightly": {

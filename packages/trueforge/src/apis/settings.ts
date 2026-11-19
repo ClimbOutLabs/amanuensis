@@ -28,6 +28,7 @@ import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
 import { createFirstRunGuideRouter } from './firstRunGuide';
 import { createGitCommitIdentityRouter } from './gitCommitIdentity';
 import { createSettingsMcpServersRouter } from './mcpServers';
+import { createMemoryItemTrackingRouter } from './memoryItemTracking';
 import { createMemoryNightlyRouter } from './memoryNightly';
 import { createMemoryPageSortingRouter } from './memoryPageSorting';
 import { createMemoryRecallRouter } from './memoryRecall';
@@ -155,6 +156,13 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
   router.route(
     '/memory-summarize',
     createMemorySummarizeRouter({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    }),
+  );
+  router.route(
+    '/memory-item-tracking',
+    createMemoryItemTrackingRouter({
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     }),
