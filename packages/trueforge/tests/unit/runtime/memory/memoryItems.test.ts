@@ -102,6 +102,14 @@ describe('citationVerifies and namesThePerson', () => {
     expect(namesThePerson({ owner: 'you', personName: undefined })).toBe(true);
     expect(namesThePerson({ owner: 'Priya Nair', personName: 'Alex' })).toBe(false);
   });
+
+  it('matches names by whole words, so a longer name is not the person', () => {
+    expect(namesThePerson({ owner: 'Alexandra', personName: 'Alex' })).toBe(false);
+    expect(namesThePerson({ owner: 'Alex', personName: 'Alexandra' })).toBe(false);
+    expect(namesThePerson({ owner: 'Alexandra Reed', personName: 'Alex Reed' })).toBe(false);
+    expect(namesThePerson({ owner: 'Alex Reed', personName: 'Alex' })).toBe(true);
+    expect(namesThePerson({ owner: 'Alex', personName: 'Alex Reed' })).toBe(true);
+  });
 });
 
 describe('the event log', () => {
@@ -304,5 +312,229 @@ describe('eventsForItemFlags evidence bar', () => {
       sources: { userText: 'I watered the greenhouse plants this morning.', results: [], assistantText: '' },
     });
     expect(events.map(event => event.kind)).toEqual(['completion_noted']);
+  });
+
+  it('a To line holding only the person\u2019s mail address, surname first, still counts as addressed to them', () => {
+    const flag: ItemFlag = {
+      kind: 'request',
+      result: 1,
+      owner: 'the person',
+      action: 'Return the signed consent form',
+      citation: 'Please return the signed consent form for your child by Friday',
+      addressedToPerson: true,
+      tiedToRole: true,
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      personName: 'Alex Reed',
+      flags: [flag],
+      sources: {
+        userText: '',
+        results: [
+          {
+            source: 'email',
+            text: 'From: School Office <office@school.example>\nTo: reed.alex@school.example\nPlease return the signed consent form for your child by Friday.',
+          },
+        ],
+        assistantText: '',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['opened']);
+  });
+
+  it('a To line naming somebody else does not clear the bar, however the flag is worded', () => {
+    const flag: ItemFlag = {
+      kind: 'request',
+      result: 1,
+      owner: 'the person',
+      action: 'Return the signed consent form',
+      citation: 'Please return the signed consent form for your child by Friday',
+      addressedToPerson: true,
+      tiedToRole: true,
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      personName: 'Alex Reed',
+      flags: [flag],
+      sources: {
+        userText: '',
+        results: [
+          {
+            source: 'email',
+            text: 'From: School Office <office@school.example>\nTo: priya.nair@school.example\nPlease return the signed consent form for your child by Friday.',
+          },
+        ],
+        assistantText: '',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['surfaced']);
+  });
+
+  it('filling in a form that was sent to the person does not close a request to submit it', () => {
+    const item = foldItemEvents([
+      openedEvent({
+        action: 'Submit the signed lease to the letting agent',
+        citation: 'I must submit the signed lease to the letting agent by Friday',
+        source: 'person',
+      }),
+    ])[0];
+    if (item === undefined) {
+      throw new Error('fixture item missing');
+    }
+    const flag: ItemFlag = {
+      kind: 'completion',
+      item: 1,
+      owner: 'the person',
+      action: 'Fill in the signed lease',
+      citation: 'I filled in the signed lease that was sent to me this afternoon',
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      pass: 'person',
+      items: [item],
+      entries: itemListForPrompt([item]).entries,
+      flags: [flag],
+      sources: {
+        userText: 'I filled in the signed lease that was sent to me this afternoon.',
+        results: [],
+        assistantText: '',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['partial_noted']);
+  });
+
+  it('a completion whose own words say the thing was submitted still closes a submit request', () => {
+    const item = foldItemEvents([
+      openedEvent({
+        action: 'Submit the signed lease to the letting agent',
+        citation: 'I must submit the signed lease to the letting agent by Friday',
+        source: 'person',
+      }),
+    ])[0];
+    if (item === undefined) {
+      throw new Error('fixture item missing');
+    }
+    const flag: ItemFlag = {
+      kind: 'completion',
+      item: 1,
+      owner: 'the person',
+      action: 'Submit the signed lease to the letting agent',
+      citation: 'I submitted the signed lease to the letting agent this afternoon',
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      pass: 'person',
+      items: [item],
+      entries: itemListForPrompt([item]).entries,
+      flags: [flag],
+      sources: {
+        userText: 'I submitted the signed lease to the letting agent this afternoon.',
+        results: [],
+        assistantText: '',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['closed']);
+  });
+
+  /** The events that open the two similar harbour festival items, from the person's own words. */
+  function twoFestivalOpenEvents(): ItemEvent[] {
+    return [
+      openedEvent({
+        eventId: 'evt-entry-open',
+        itemId: 'item-entry1',
+        action: 'Submit the harbour festival entry form',
+        citation: 'I need to submit the entry form for the harbour festival',
+        source: 'person',
+      }),
+      openedEvent({
+        eventId: 'evt-stall-open',
+        itemId: 'item-stall1',
+        action: 'Submit the harbour festival stall fee form',
+        citation: 'I need to submit the stall fee form for the harbour festival',
+        source: 'person',
+      }),
+    ];
+  }
+
+  it('a completion that fits a different open item better than the one it names closes neither', () => {
+    const openEvents = twoFestivalOpenEvents();
+    const items = foldItemEvents(openEvents);
+    const flag: ItemFlag = {
+      kind: 'completion',
+      item: 1,
+      owner: 'the person',
+      action: 'Submit the harbour festival stall fee form',
+      citation: 'I submitted the stall fee form for the harbour festival this morning',
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      pass: 'person',
+      items,
+      entries: itemListForPrompt(items).entries,
+      flags: [flag],
+      sources: {
+        userText: 'I submitted the stall fee form for the harbour festival this morning.',
+        results: [],
+        assistantText: '',
+      },
+    });
+    expect(events.filter(event => event.kind === 'closed')).toEqual([]);
+    expect(events.map(event => event.kind).sort()).toEqual(['completion_noted', 'completion_noted']);
+    const folded = foldItemEvents([...openEvents, ...events]);
+    expect(folded.every(item => item.state === 'open')).toBe(true);
+    expect(folded.every(item => item.unconfirmedCompletions.length === 1)).toBe(true);
+  });
+
+  it('a completion whose anchors pick out the named item still closes it, with a similar item open', () => {
+    const items = foldItemEvents(twoFestivalOpenEvents());
+    const flag: ItemFlag = {
+      kind: 'completion',
+      item: 1,
+      owner: 'the person',
+      action: 'Submit the harbour festival entry form',
+      citation: 'I submitted the entry form for the harbour festival this morning',
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      pass: 'person',
+      items,
+      entries: itemListForPrompt(items).entries,
+      flags: [flag],
+      sources: {
+        userText: 'I submitted the entry form for the harbour festival this morning.',
+        results: [],
+        assistantText: '',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['closed']);
+    expect(events[0]?.itemId).toBe('item-entry1');
+  });
+
+  it('the same request flagged twice in one pass opens one item, not two', () => {
+    const flag: ItemFlag = {
+      kind: 'request',
+      result: 1,
+      owner: 'the person',
+      action: 'Submit the harbour festival entry form',
+      citation: 'please submit the enclosed entry form for your stall by Friday',
+      addressedToPerson: true,
+      tiedToRole: true,
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      flags: [flag, flag],
+      sources: {
+        userText: '',
+        results: [
+          {
+            source: 'email',
+            text: 'To: Alex\nDear Alex, please submit the enclosed entry form for your stall by Friday.',
+          },
+        ],
+        assistantText: '',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['opened', 'noted']);
+    expect(foldItemEvents(events)).toHaveLength(1);
   });
 });

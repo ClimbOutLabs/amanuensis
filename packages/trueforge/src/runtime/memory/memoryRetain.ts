@@ -28,8 +28,10 @@ import {
   appendItemEvents,
   eventsForItemFlags,
   foldItemEvents,
+  foldMoreItemEvents,
   itemListForPrompt,
   readItemEvents,
+  type ItemEvent,
   type ItemFlag,
   type ItemListEntry,
   type TrackedItem,
@@ -368,30 +370,39 @@ async function itemContextForTurn(
 }
 
 /**
- * Records what the turn's two passes flagged for the item list, each flag judged against the
- * state the turn started from. Runs once per decision, and the events carry ids minted from the
- * turn, so a resubmitted decision appends nothing twice. Never throws: item tracking must never
- * fail or delay the turn's memory.
+ * Records what the turn's two passes flagged for the item list. Each pass is judged against
+ * the state the passes before it in the same turn produced, so a request both passes flag
+ * opens once; the numbered entries stay the turn-start list both passes were shown, so a
+ * number means the same item in each. Runs once per decision, and the events carry ids minted
+ * from the turn, so a resubmitted decision appends nothing twice. Never throws: item tracking
+ * must never fail or delay the turn's memory.
  */
 async function applyTurnItemFlags(params: SubmitRetainParams, items: TurnItemContext): Promise<void> {
   try {
-    const events = items.flags.flatMap(({ pass, flags }) =>
-      eventsForItemFlags({
+    const sources = {
+      userText: params.userText,
+      assistantText: params.assistantText,
+      results: boundedToolResults(params.toolResults ?? []),
+    };
+    const events: ItemEvent[] = [];
+    let current = items.items;
+    for (const { pass, flags } of items.flags) {
+      const produced = eventsForItemFlags({
         flags,
         pass,
         sessionId: params.sessionId,
         turnId: params.turnId,
         at: params.completedAt,
-        items: items.items,
+        items: current,
         entries: items.entries,
-        sources: {
-          userText: params.userText,
-          assistantText: params.assistantText,
-          results: boundedToolResults(params.toolResults ?? []),
-        },
+        sources,
         personName: params.summarize?.personName,
-      }),
-    );
+      });
+      events.push(...produced);
+      if (produced.length > 0) {
+        current = foldMoreItemEvents(current, produced);
+      }
+    }
     await appendItemEvents({ dir: items.dir, events, logger: params.logger });
   } catch (error) {
     params.logger.warn('Item flags from a turn could not be recorded', {

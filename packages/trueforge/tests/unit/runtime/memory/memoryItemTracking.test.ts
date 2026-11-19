@@ -820,6 +820,70 @@ describe('tracked open items across chats', () => {
     expect(itemsSegment(await briefBlock())).toBe('');
   });
 
+  it('a school consent form in bulk mail opens when the model answers in the shape the prompt teaches', async () => {
+    scripted.notes = prompt => {
+      // The reply copies the item shape from the prompt's own example, whichever field names
+      // the instructions use, the way a real model following the prompt would.
+      const request = {
+        kind: 'request',
+        result: 1,
+        owner: 'the person',
+        action: 'Return the signed consent form for your child',
+        citation: 'please return the signed consent form for your child by Friday',
+        due: '2026-11-20',
+      };
+      const item = prompt.includes('"addressedToPerson"')
+        ? { ...request, addressedToPerson: true, tiedToRole: true }
+        : { ...request, addressed: true, tied: true };
+      return JSON.stringify({ findings: [], responses: [], items: [item] });
+    };
+    await submit({
+      sessionId: 'chat-a',
+      id: 'a1',
+      userText: 'Can you read this email from the school?',
+      completedAt: '2026-11-16T12:00:00.000Z',
+      toolResults: [
+        {
+          source: 'email',
+          text: [
+            'From: School Office <office@springfieldschool.example>',
+            'To: Alex',
+            'List-Unsubscribe: <https://springfieldschool.example/leave>',
+            'Subject: Consent form for the school trip',
+            'Dear parent, please return the signed consent form for your child by Friday so your child can join the school trip.',
+          ].join('\n'),
+        },
+      ],
+    });
+    const folded = await items();
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.state).toBe('open');
+    expect(folded[0]?.action).toBe('Return the signed consent form for your child');
+    expect(itemsSegment(await briefBlock())).toContain('Return the signed consent form for your child');
+  });
+
+  it('the same request flagged by both passes of one turn opens one item, not two', async () => {
+    const flag = {
+      kind: 'request',
+      owner: 'the person',
+      action: 'Submit the harbour festival entry form',
+      citation: 'I need to submit the harbour festival entry form on Friday',
+    };
+    scripted.person = () => JSON.stringify({ facts: [], items: [flag] });
+    scripted.notes = () => JSON.stringify({ findings: [], responses: [], items: [flag] });
+    await submit({
+      sessionId: 'chat-a',
+      id: 'a1',
+      userText: 'I need to submit the harbour festival entry form on Friday.',
+      completedAt: '2026-11-16T12:00:00.000Z',
+      toolResults: [FESTIVAL_EMAIL],
+    });
+    const folded = await items();
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.state).toBe('open');
+    expect(folded[0]?.action).toBe('Submit the harbour festival entry form');
+  });
+
   it('the off switch: with tracking off, a turn records no items and recall supplies none', async () => {
     settings = inMemoryGlobalSettingsStore({ memory_item_tracking_enabled: 'false' });
     festivalRequestNotes();

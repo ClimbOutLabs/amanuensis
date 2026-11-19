@@ -215,7 +215,7 @@ function sameCitation({ first, second }: { first: string; second: string }): boo
 }
 
 /** The content words two texts share that are long enough, or numeric enough, to tie a passage to an item. */
-function sharesAnchor({ first, second }: { first: string; second: string }): boolean {
+function sharedAnchorWords({ first, second }: { first: string; second: string }): Set<string> {
   const wordsOf = (text: string): Set<string> =>
     new Set(
       itemComparisonText(text)
@@ -223,12 +223,18 @@ function sharesAnchor({ first, second }: { first: string; second: string }): boo
         .filter(word => word.length >= 4 || /^\d{2,}$/.test(word)),
     );
   const left = wordsOf(first);
+  const shared = new Set<string>();
   for (const word of wordsOf(second)) {
     if (left.has(word)) {
-      return true;
+      shared.add(word);
     }
   }
-  return false;
+  return shared;
+}
+
+/** Whether two texts share any anchor word at all. */
+function sharesAnchor({ first, second }: { first: string; second: string }): boolean {
+  return sharedAnchorWords({ first, second }).size > 0;
 }
 
 /** Words that say a thing must still be handed over: sent, filed, posted, returned. */
@@ -292,6 +298,30 @@ const BULK_MARKERS = /list-unsubscribe|list-id:|precedence:\s*bulk/i;
 /** The address line of a message, when the text carries one. */
 const TO_LINE = /^to:\s*(.+)$/im;
 
+/**
+ * Whether a message's address line names the person: their whole name as consecutive words,
+ * or every part of it of three letters or more as a whole word, in any order. An address built
+ * from the parts of the name, surname first, counts. A line naming somebody else does not.
+ */
+function toLineNamesThePerson({ toLine, personName }: { toLine: string; personName: string }): boolean {
+  const nameWords = itemComparisonText(personName)
+    .split(' ')
+    .filter(word => word !== '');
+  if (nameWords.length === 0) {
+    return false;
+  }
+  const lineWords = itemComparisonText(toLine)
+    .split(' ')
+    .filter(word => word !== '');
+  for (let start = 0; start + nameWords.length <= lineWords.length; start += 1) {
+    if (nameWords.every((word, offset) => lineWords[start + offset] === word)) {
+      return true;
+    }
+  }
+  const parts = nameWords.filter(word => word.length >= 3);
+  return parts.length > 0 && parts.every(part => lineWords.includes(part));
+}
+
 /** Whether the flag's owner names the person themselves rather than somebody else. */
 export function namesThePerson({ owner, personName }: { owner: string; personName: string | undefined }): boolean {
   const named = itemComparisonText(owner);
@@ -305,7 +335,13 @@ export function namesThePerson({ owner, personName }: { owner: string; personNam
   if (own === '') {
     return false;
   }
-  return named === own || named.includes(own) || own.includes(named);
+  // Whole words only: one name may leave words out, but a word that merely starts with the
+  // person's name is a different name, so "Alexandra" never counts as "Alex".
+  const namedWords = named.split(' ');
+  const ownWords = own.split(' ');
+  const within = (part: readonly string[], whole: readonly string[]): boolean =>
+    part.every(word => whole.includes(word));
+  return within(namedWords, ownWords) || within(ownWords, namedWords);
 }
 
 /** The file's path inside the folder that holds the memory files. */
@@ -412,17 +448,22 @@ export function parseItemLog(content: string): ItemEvent[] {
   return events;
 }
 
-/** The items the events leave behind, in the order they were first opened or surfaced. A retried event id applies once. */
-export function foldItemEvents(events: readonly ItemEvent[]): TrackedItem[] {
-  const seen = new Set<string>();
-  const byId = new Map<string, TrackedItem>();
-  const order: TrackedItem[] = [];
-  const ensure = (event: ItemEvent): TrackedItem => {
-    const existing = byId.get(event.itemId);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const item: TrackedItem = {
+/** A fold in progress: the items by id, in first-seen order, and the event ids already applied. */
+interface ItemFold {
+  byId: Map<string, TrackedItem>;
+  order: TrackedItem[];
+  seen: Set<string>;
+}
+
+/** Applies one event to a fold in progress. A retried event id applies once. */
+function applyItemEvent(fold: ItemFold, event: ItemEvent): void {
+  if (fold.seen.has(event.eventId)) {
+    return;
+  }
+  fold.seen.add(event.eventId);
+  let item = fold.byId.get(event.itemId);
+  if (item === undefined) {
+    item = {
       id: event.itemId,
       state: 'surfaced',
       owner: event.owner ?? 'the person',
@@ -435,78 +476,100 @@ export function foldItemEvents(events: readonly ItemEvent[]): TrackedItem[] {
       unconfirmedCompletions: [],
       evidenceCount: 0,
     };
-    byId.set(event.itemId, item);
-    order.push(item);
-    return item;
-  };
-  for (const event of events) {
-    if (seen.has(event.eventId)) {
-      continue;
-    }
-    seen.add(event.eventId);
-    const item = ensure(event);
-    switch (event.kind) {
-      case 'opened':
-        item.state = 'open';
-        item.closeReason = undefined;
+    fold.byId.set(event.itemId, item);
+    fold.order.push(item);
+  }
+  switch (event.kind) {
+    case 'opened':
+      item.state = 'open';
+      item.closeReason = undefined;
+      if (event.action !== undefined) {
+        item.action = event.action;
+      }
+      if (event.owner !== undefined) {
+        item.owner = event.owner;
+      }
+      if (event.due !== undefined) {
+        item.due = event.due;
+      }
+      if (event.citation !== undefined) {
+        item.citation = event.citation;
+      }
+      if (event.source !== undefined) {
+        item.source = event.source;
+      }
+      break;
+    case 'surfaced':
+      // A below-bar copy never demotes an item that already tracks or already closed.
+      if (item.state === 'surfaced' && item.action === '') {
         if (event.action !== undefined) {
           item.action = event.action;
-        }
-        if (event.owner !== undefined) {
-          item.owner = event.owner;
-        }
-        if (event.due !== undefined) {
-          item.due = event.due;
         }
         if (event.citation !== undefined) {
           item.citation = event.citation;
         }
-        if (event.source !== undefined) {
-          item.source = event.source;
-        }
-        break;
-      case 'surfaced':
-        // A below-bar copy never demotes an item that already tracks or already closed.
-        if (item.state === 'surfaced' && item.action === '') {
-          if (event.action !== undefined) {
-            item.action = event.action;
-          }
-          if (event.citation !== undefined) {
-            item.citation = event.citation;
-          }
-        }
-        break;
-      case 'noted':
-        if (item.state === 'open') {
-          item.evidenceCount += 1;
-        }
-        break;
-      case 'completion_noted':
-        if (item.state === 'open' && event.note !== undefined) {
-          item.unconfirmedCompletions.push(event.note);
-        }
-        break;
-      case 'partial_noted':
-        if (item.state === 'open' && event.note !== undefined) {
-          item.partialNotes.push(event.note);
-        }
-        break;
-      case 'corrected':
-        if (event.action !== undefined && event.action !== '') {
-          item.action = event.action;
-        }
-        break;
-      case 'closed':
-        item.state = 'closed';
-        item.closeReason = event.closeReason ?? 'completed';
-        break;
-      case 'reopened':
-        item.state = 'open';
-        item.closeReason = undefined;
-        break;
-    }
+      }
+      break;
+    case 'noted':
+      if (item.state === 'open') {
+        item.evidenceCount += 1;
+      }
+      break;
+    case 'completion_noted':
+      if (item.state === 'open' && event.note !== undefined) {
+        item.unconfirmedCompletions.push(event.note);
+      }
+      break;
+    case 'partial_noted':
+      if (item.state === 'open' && event.note !== undefined) {
+        item.partialNotes.push(event.note);
+      }
+      break;
+    case 'corrected':
+      if (event.action !== undefined && event.action !== '') {
+        item.action = event.action;
+      }
+      break;
+    case 'closed':
+      item.state = 'closed';
+      item.closeReason = event.closeReason ?? 'completed';
+      break;
+    case 'reopened':
+      item.state = 'open';
+      item.closeReason = undefined;
+      break;
   }
-  return order;
+}
+
+/** The items the events leave behind, in the order they were first opened or surfaced. A retried event id applies once. */
+export function foldItemEvents(events: readonly ItemEvent[]): TrackedItem[] {
+  const fold: ItemFold = { byId: new Map(), order: [], seen: new Set() };
+  for (const event of events) {
+    applyItemEvent(fold, event);
+  }
+  return fold.order;
+}
+
+/**
+ * The items a folded list becomes after further events, leaving the list given untouched: a
+ * turn judges its later flags against the state its earlier flags produced, so the same
+ * request raised twice in one turn, or once by each of its passes, opens one item.
+ */
+export function foldMoreItemEvents(items: readonly TrackedItem[], events: readonly ItemEvent[]): TrackedItem[] {
+  const fold: ItemFold = { byId: new Map(), order: [], seen: new Set() };
+  for (const item of items) {
+    const copy: TrackedItem = {
+      ...item,
+      partialNotes: [...item.partialNotes],
+      unconfirmedCompletions: [...item.unconfirmedCompletions],
+    };
+    fold.byId.set(copy.id, copy);
+    fold.order.push(copy);
+  }
+  for (const event of events) {
+    applyItemEvent(fold, event);
+  }
+  return fold.order;
 }
 
 /** Appends in this process are serialized, so two turns ending together never interleave lines. */
@@ -690,10 +753,11 @@ function itemIdFor(eventId: string): string {
 }
 
 /**
- * The events one turn's flags earn, judged against the folded state the turn started from and the
- * sources the flags cite. This is the evidence bar: a flag changes the list only when its
- * citation verifies against the source it names and the passage clears the bar for its kind.
- * Pure: it reads no files and appends nothing, so the caller decides when to write.
+ * The events one turn's flags earn, judged against the folded state the turn started from, as
+ * the turn's own earlier flags leave it, and against the sources the flags cite. This is the
+ * evidence bar: a flag changes the list only when its citation verifies against the source it
+ * names and the passage clears the bar for its kind. Pure: it reads no files and appends
+ * nothing, so the caller decides when to write.
  */
 export function eventsForItemFlags(params: {
   flags: readonly ItemFlag[];
@@ -707,15 +771,20 @@ export function eventsForItemFlags(params: {
   personName: string | undefined;
 }): ItemEvent[] {
   const events: ItemEvent[] = [];
-  const namedItem = (flag: ItemFlag): TrackedItem | undefined =>
-    flag.item === undefined ? undefined : params.entries.find(entry => entry.number === flag.item)?.item;
-  /** Open items a passage could be about: the ones sharing a name, number or long word with it. */
-  const candidatesFor = (flag: ItemFlag): TrackedItem[] =>
-    params.items.filter(
-      item =>
-        item.state === 'open' &&
-        sharesAnchor({ first: `${flag.action} ${flag.citation}`, second: `${item.action} ${item.citation}` }),
-    );
+  /**
+   * The folded state as this call leaves it. Each flag is judged against the state the flags
+   * before it in the same call produced, so one call cannot open the same request twice. The
+   * numbered entries stay the list the passes were shown; a number is resolved to its item
+   * here, in the current state.
+   */
+  let state: readonly TrackedItem[] = params.items;
+  const namedItem = (flag: ItemFlag): TrackedItem | undefined => {
+    if (flag.item === undefined) {
+      return undefined;
+    }
+    const entry = params.entries.find(candidate => candidate.number === flag.item);
+    return entry === undefined ? undefined : state.find(item => item.id === entry.item.id);
+  };
   const base = (index: number, part?: string) => ({
     eventId: itemEventId({ sessionId: params.sessionId, turnId: params.turnId, pass: params.pass, index, part }),
     at: params.at,
@@ -724,7 +793,7 @@ export function eventsForItemFlags(params: {
   const requestEvents = (flag: ItemFlag, index: number): void => {
     // A request that names an existing item, or repeats its passage, is evidence about that item.
     const named = namedItem(flag);
-    const repeated = params.items.find(item => sameCitation({ first: item.citation, second: flag.citation }));
+    const repeated = state.find(item => sameCitation({ first: item.citation, second: flag.citation }));
     const target = named ?? repeated;
     if (target !== undefined) {
       if (
@@ -773,7 +842,7 @@ export function eventsForItemFlags(params: {
       const addressedByName =
         toLine === undefined ||
         params.personName === undefined ||
-        itemComparisonText(toLine).includes(itemComparisonText(params.personName));
+        toLineNamesThePerson({ toLine, personName: params.personName });
       const clears = (flag.addressedToPerson === true || tied) && addressedByName && (!bulk || tied);
       if (clears) {
         events.push({ ...opened, source: result.source });
@@ -795,11 +864,25 @@ export function eventsForItemFlags(params: {
 
   const completionEvents = (flag: ItemFlag, index: number, partialOnly: boolean): void => {
     const named = namedItem(flag);
-    const candidates = named !== undefined ? [named] : candidatesFor(flag);
-    const open = candidates.filter(item => item.state === 'open');
-    if (open.length !== 1) {
-      // Ambiguous or unplaceable: recorded against every candidate it could mean, closing none.
-      for (const item of open) {
+    const passage = `${flag.action} ${flag.citation}`;
+    // How strongly the passage ties to each open item, counted in the anchor words they share.
+    // A completion may close only the item the passage picks out: the item it names, when no
+    // other open item ties to the passage as strongly, or the one open item it ties to most
+    // strongly. A passage that fits two open items as well as each other closes neither, so a
+    // misnumbered flag can never close the wrong one of two similar items.
+    const strength = new Map<string, number>();
+    for (const candidate of state) {
+      if (candidate.state === 'open') {
+        strength.set(
+          candidate.id,
+          sharedAnchorWords({ first: passage, second: `${candidate.action} ${candidate.citation}` }).size,
+        );
+      }
+    }
+    const strengthOf = (item: TrackedItem): number => strength.get(item.id) ?? 0;
+    const matched = state.filter(item => item.state === 'open' && strengthOf(item) > 0);
+    const unconfirmed = (itemsToNote: readonly TrackedItem[]): void => {
+      for (const item of itemsToNote) {
         events.push({
           ...base(index, item.id),
           kind: 'completion_noted',
@@ -808,9 +891,29 @@ export function eventsForItemFlags(params: {
           note: flag.action,
         });
       }
-      return;
+    };
+    let item: TrackedItem | undefined;
+    if (named !== undefined) {
+      if (named.state !== 'open') {
+        return;
+      }
+      const rivals = matched.filter(
+        candidate => candidate.id !== named.id && strengthOf(candidate) >= strengthOf(named),
+      );
+      if (rivals.length > 0) {
+        unconfirmed([named, ...matched.filter(candidate => candidate.id !== named.id)]);
+        return;
+      }
+      item = named;
+    } else if (matched.length > 0) {
+      const best = Math.max(...matched.map(candidate => strengthOf(candidate)));
+      const leaders = matched.filter(candidate => strengthOf(candidate) === best);
+      if (leaders.length !== 1) {
+        unconfirmed(matched);
+        return;
+      }
+      item = leaders[0];
     }
-    const [item] = open;
     if (item === undefined) {
       return;
     }
@@ -823,10 +926,7 @@ export function eventsForItemFlags(params: {
           sourceText: params.sources.results[flag.result - 1]?.text ?? '',
         })) ||
       citationVerifies({ citation: flag.citation, sourceText: params.sources.assistantText });
-    const aboutItem = sharesAnchor({
-      first: `${flag.action} ${flag.citation}`,
-      second: `${item.action} ${item.citation}`,
-    });
+    const aboutItem = strengthOf(item) > 0;
     if (!cited || !aboutItem) {
       events.push({
         ...base(index),
@@ -838,11 +938,13 @@ export function eventsForItemFlags(params: {
       return;
     }
     // Filling in a form satisfies a request to fill it in. Against a request to hand the thing
-    // over, work that only made it ready is partial, however the flag was worded.
+    // over, work that only made it ready is partial, however the flag was worded. The handover
+    // is judged on the words that say what was done, never on the citation: a passage can
+    // mention how the thing reached the person ("sent to me") without them handing it over.
     const onlyPrepared =
       holdsWord(item.action, DELIVER_WORDS) &&
       holdsWord(`${flag.action} ${flag.citation}`, PREPARE_WORDS) &&
-      !holdsWord(`${flag.action} ${flag.citation}`, DELIVER_WORDS);
+      !holdsWord(flag.action, DELIVER_WORDS);
     if (partialOnly || onlyPrepared) {
       events.push({
         ...base(index),
@@ -869,9 +971,7 @@ export function eventsForItemFlags(params: {
     }
     const named = namedItem(flag);
     const candidates =
-      named !== undefined
-        ? [named]
-        : params.items.filter(item => sharesAnchor({ first: flag.action, second: item.action }));
+      named !== undefined ? [named] : state.filter(item => sharesAnchor({ first: flag.action, second: item.action }));
     const [item] = candidates;
     if (item === undefined || candidates.length !== 1) {
       return;
@@ -929,19 +1029,23 @@ export function eventsForItemFlags(params: {
   };
 
   params.flags.forEach((flag, index) => {
+    const before = events.length;
     switch (flag.kind) {
       case 'request':
         requestEvents(flag, index);
-        return;
+        break;
       case 'completion':
         completionEvents(flag, index, false);
-        return;
+        break;
       case 'partial':
         completionEvents(flag, index, true);
-        return;
+        break;
       case 'correction':
         correctionEvents(flag, index);
-        return;
+        break;
+    }
+    if (events.length > before) {
+      state = foldMoreItemEvents(state, events.slice(before));
     }
   });
   return events;
