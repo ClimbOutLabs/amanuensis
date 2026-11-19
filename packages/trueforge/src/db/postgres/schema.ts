@@ -82,6 +82,15 @@ export const TABLES_TO_MOVE = [
   'telegram_connection',
   'telegram_pending_reply',
   'telegram_pending_approval',
+  'goal',
+  'goal_step',
+  'goal_evidence',
+  'goal_event',
+  'goal_cycle',
+  'goal_action',
+  'goal_claim',
+  'goal_fencing_counter',
+  'goal_wakeup',
 ] as const;
 
 /**

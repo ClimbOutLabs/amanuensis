@@ -1,5 +1,5 @@
 import { decodePageToken, encodePageToken } from '@truefoundry/trueforge-core/agent-session/store/PageToken';
-import { sql, type Kysely } from 'kysely';
+import { SqliteAdapter, sql, type Kysely } from 'kysely';
 import { z } from 'zod';
 
 import {
@@ -296,6 +296,19 @@ export class GoalClaimFencedError extends Error {
   }
 }
 
+/** The goal is not active, so no worker may claim it. The claim was refused and nothing changed. */
+export class GoalClaimLifecycleError extends Error {
+  readonly goal_id: string;
+  readonly lifecycle: GoalLifecycle;
+
+  constructor(input: { goal_id: string; lifecycle: GoalLifecycle }, options?: ErrorOptions) {
+    super(`Goal ${input.goal_id} cannot be claimed while it is ${input.lifecycle}`, options);
+    this.name = 'GoalClaimLifecycleError';
+    this.goal_id = input.goal_id;
+    this.lifecycle = input.lifecycle;
+  }
+}
+
 /** The record kinds an import bundle carries, named in import refusal errors. */
 export type GoalImportRecordKind = 'goal' | 'step' | 'evidence' | 'event' | 'cycle' | 'action';
 
@@ -393,6 +406,11 @@ export interface UpdateGoalStepInput extends PersonOwner {
   step_id: string;
   expected_revision: number;
   patch: GoalStepPatch;
+  /**
+   * The caller's cycle claim. When given, the write lands only while this
+   * exact claim is the goal's live claim; a taken-over claim fences it out.
+   */
+  fencing_token?: number | undefined;
 }
 
 export interface AddGoalEvidenceInput extends PersonOwner {
@@ -408,6 +426,11 @@ export interface AddGoalEvidenceInput extends PersonOwner {
   freshness: string;
   admission: string;
   extraction_method: string;
+  /**
+   * The caller's cycle claim. When given, the write lands only while this
+   * exact claim is the goal's live claim; a taken-over claim fences it out.
+   */
+  fencing_token?: number | undefined;
 }
 
 export interface ListGoalEvidenceInput extends PersonOwner {
@@ -421,6 +444,11 @@ export interface AppendGoalEventInput extends PersonOwner {
   event_type: string;
   actor: string;
   payload: GoalJsonDocument;
+  /**
+   * The caller's cycle claim. When given, the write lands only while this
+   * exact claim is the goal's live claim; a taken-over claim fences it out.
+   */
+  fencing_token?: number | undefined;
 }
 
 export interface ListGoalEventsInput extends PersonOwner {
@@ -443,6 +471,11 @@ export interface RecordGoalCycleInput extends PersonOwner {
   outcome: string | null;
   outcome_detail: string | null;
   next_check_at: string | null;
+  /**
+   * The caller's cycle claim. When given, the write lands only while this
+   * exact claim is the goal's live claim; a taken-over claim fences it out.
+   */
+  fencing_token?: number | undefined;
 }
 
 export interface GoalCyclePatch {
@@ -459,6 +492,11 @@ export interface UpdateGoalCycleInput extends PersonOwner {
   goal_id: string;
   cycle_id: string;
   patch: GoalCyclePatch;
+  /**
+   * The caller's cycle claim. When given, the write lands only while this
+   * exact claim is the goal's live claim; a taken-over claim fences it out.
+   */
+  fencing_token?: number | undefined;
 }
 
 export interface ListGoalCyclesInput extends PersonOwner {
@@ -478,6 +516,11 @@ export interface RecordGoalActionInput extends PersonOwner {
   approval_ref: string | null;
   execution_state: string;
   receipt_ref: string | null;
+  /**
+   * The caller's cycle claim. When given, the write lands only while this
+   * exact claim is the goal's live claim; a taken-over claim fences it out.
+   */
+  fencing_token?: number | undefined;
 }
 
 export interface GoalActionPatch {
@@ -492,6 +535,11 @@ export interface UpdateGoalActionInput extends PersonOwner {
   goal_id: string;
   action_id: string;
   patch: GoalActionPatch;
+  /**
+   * The caller's cycle claim. When given, the write lands only while this
+   * exact claim is the goal's live claim; a taken-over claim fences it out.
+   */
+  fencing_token?: number | undefined;
 }
 
 export interface ListGoalActionsInput extends PersonOwner {
@@ -544,7 +592,9 @@ export interface IGoalStore {
    * Replaces the patched fields and advances the revision by one, in one
    * transaction with the optional wake-up. Refuses, changing nothing, when the
    * goal is gone, the expected revision is stale, the lifecycle move is not
-   * allowed, or a named fencing token is not the live claim.
+   * allowed, or a named fencing token is not the live claim. A lifecycle move
+   * away from active also expires the goal's live claim in the same
+   * transaction, so the running check can no longer commit.
    */
   updateGoal(input: UpdateGoalInput, transaction?: Kysely<GoalDatabase>): Promise<Goal>;
   /** Deletes the goal and, by cascade, its steps, evidence, events, cycles, actions, claim, and wake-ups. Idempotent. */
@@ -554,37 +604,40 @@ export interface IGoalStore {
   addStep(input: AddGoalStepInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPlanStep>;
   /** The goal's plan steps, in the order they were added. Empty when the goal is missing or someone else's. */
   listSteps(input: PersonOwner & { goal_id: string }, transaction?: Kysely<GoalDatabase>): Promise<GoalPlanStep[]>;
-  /** Replaces the patched step fields and advances the step revision. A stale expected revision is refused, changing nothing. */
+  /** Replaces the patched step fields and advances the step revision. A stale expected revision is refused, changing nothing, and so is a named fencing token that is not the live claim. */
   updateStep(input: UpdateGoalStepInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPlanStep>;
 
-  /** Stores one evidence record under a goal the owner owns. */
+  /** Stores one evidence record under a goal the owner owns. A named fencing token that is not the live claim is refused, changing nothing. */
   addEvidence(input: AddGoalEvidenceInput, transaction?: Kysely<GoalDatabase>): Promise<GoalEvidence>;
   /** The goal's evidence, newest observed first. */
   listEvidence(input: ListGoalEvidenceInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPage<GoalEvidence>>;
 
-  /** Appends an event with the goal's next sequence. Concurrent appends retry so sequences stay gapless per goal. */
+  /** Appends an event with the goal's next sequence. Concurrent appends retry so sequences stay gapless per goal. A named fencing token that is not the live claim is refused, changing nothing. */
   appendEvent(input: AppendGoalEventInput, transaction?: Kysely<GoalDatabase>): Promise<GoalEvent>;
   /** The goal's events in sequence order. */
   listEvents(input: ListGoalEventsInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPage<GoalEvent>>;
 
-  /** Stores one cycle record under a goal the owner owns. */
+  /** Stores one cycle record under a goal the owner owns. A named fencing token that is not the live claim is refused, changing nothing. */
   recordCycle(input: RecordGoalCycleInput, transaction?: Kysely<GoalDatabase>): Promise<GoalCycle>;
-  /** Replaces the patched cycle fields, for finishing a cycle and settling its usage. */
+  /** Replaces the patched cycle fields, for finishing a cycle and settling its usage. A named fencing token that is not the live claim is refused, changing nothing. */
   updateCycle(input: UpdateGoalCycleInput, transaction?: Kysely<GoalDatabase>): Promise<GoalCycle>;
   /** The goal's cycles, most recently started first. */
   listCycles(input: ListGoalCyclesInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPage<GoalCycle>>;
 
-  /** Stores one decision/action record under a goal the owner owns. */
+  /** Stores one decision/action record under a goal the owner owns. A named fencing token that is not the live claim is refused, changing nothing. */
   recordAction(input: RecordGoalActionInput, transaction?: Kysely<GoalDatabase>): Promise<GoalAction>;
-  /** Replaces the patched action fields, for moving execution state and attaching refs as they arrive. */
+  /** Replaces the patched action fields, for moving execution state and attaching refs as they arrive. A named fencing token that is not the live claim is refused, changing nothing. */
   updateAction(input: UpdateGoalActionInput, transaction?: Kysely<GoalDatabase>): Promise<GoalAction>;
   /** The goal's actions, most recently recorded first. */
   listActions(input: ListGoalActionsInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPage<GoalAction>>;
 
   /**
-   * Claims the goal for one worker. Resolves to the claim, or undefined while
-   * another claim is live. An expired claim is taken over with a higher
-   * fencing token, which fences the old holder's commits out.
+   * Claims the goal for one worker. Only an active goal can be claimed;
+   * claiming a goal in any other lifecycle state is refused, so a worker
+   * whose claim was revoked by a pause cannot take a fresh one until the
+   * goal is active again. Resolves to the claim, or undefined while another
+   * claim is live. An expired claim is taken over with a higher fencing
+   * token, which fences the old holder's commits out.
    */
   claimGoal(input: ClaimGoalInput, transaction?: Kysely<GoalDatabase>): Promise<GoalClaim | undefined>;
   /** Extends the caller's live claim. Resolves to the claim, or undefined when the token is not the live claim. */
@@ -895,6 +948,48 @@ export class GoalStore implements IGoalStore {
     return row;
   }
 
+  /**
+   * Refuses a write whose named claim is not the goal's live claim: no claim
+   * row, a row holding another token, or a lease that has expired. The claim
+   * row is read under a row lock where the database has one, so a takeover
+   * committing at the same moment cannot slip between this check and the
+   * write it guards. SQLite has no row locks; there the check runs inside
+   * the write's transaction, where writers are serialized. Every write path
+   * that accepts a fencing token runs this inside its transaction, before
+   * the write itself.
+   */
+  async #requireLiveClaim(db: Kysely<GoalDatabase>, input: { goal_id: string; fencing_token: number }): Promise<void> {
+    let query = db.selectFrom('goal_claim').selectAll().where('goal_id', '=', input.goal_id);
+    if (!(db.getExecutor().adapter instanceof SqliteAdapter)) {
+      query = query.forUpdate();
+    }
+    const claim = await query.executeTakeFirst();
+    if (claim === undefined) {
+      throw new GoalClaimFencedError({ goal_id: input.goal_id, fencing_token: input.fencing_token });
+    }
+    if (claim.fencing_token !== input.fencing_token || toIso(claim.expires_at) <= nowIso()) {
+      throw new GoalClaimFencedError({ goal_id: input.goal_id, fencing_token: input.fencing_token });
+    }
+  }
+
+  /**
+   * Runs one write the way its inputs ask: inside the caller's transaction
+   * when one is passed, inside a fresh transaction when the write names a
+   * fencing token (so the claim check and the write land or roll back
+   * together), and directly otherwise, which is how a write with no token
+   * has always run.
+   */
+  async #runWrite<T>(input: {
+    fencing_token?: number | undefined;
+    transaction: Kysely<GoalDatabase> | undefined;
+    run: (db: Kysely<GoalDatabase>) => Promise<T>;
+  }): Promise<T> {
+    if (input.transaction !== undefined) {
+      return input.run(input.transaction);
+    }
+    return input.fencing_token === undefined ? input.run(this.#db) : this.#db.transaction().execute(input.run);
+  }
+
   async createGoal(input: CreateGoalInput, transaction?: Kysely<GoalDatabase>): Promise<Goal> {
     const db = transaction ?? this.#db;
     const timestamp = nowIso();
@@ -995,6 +1090,9 @@ export class GoalStore implements IGoalStore {
   async updateGoal(input: UpdateGoalInput, transaction?: Kysely<GoalDatabase>): Promise<Goal> {
     const run = async (db: Kysely<GoalDatabase>): Promise<Goal> => {
       const current = toGoal(await this.#requireGoal(db, input));
+      if (input.fencing_token !== undefined) {
+        await this.#requireLiveClaim(db, { goal_id: input.goal_id, fencing_token: input.fencing_token });
+      }
       if (current.revision !== input.expected_revision) {
         throw new GoalRevisionConflictError({
           record: 'goal',
@@ -1006,19 +1104,6 @@ export class GoalStore implements IGoalStore {
       const nextLifecycle = input.patch.lifecycle ?? current.lifecycle;
       if (nextLifecycle !== current.lifecycle && !canTransitionGoalLifecycle(current.lifecycle, nextLifecycle)) {
         throw new GoalLifecycleTransitionError({ goal_id: input.goal_id, from: current.lifecycle, to: nextLifecycle });
-      }
-      if (input.fencing_token !== undefined) {
-        const claim = await db
-          .selectFrom('goal_claim')
-          .selectAll()
-          .where('goal_id', '=', input.goal_id)
-          .executeTakeFirst();
-        if (claim === undefined) {
-          throw new GoalClaimFencedError({ goal_id: input.goal_id, fencing_token: input.fencing_token });
-        }
-        if (claim.fencing_token !== input.fencing_token || toIso(claim.expires_at) <= nowIso()) {
-          throw new GoalClaimFencedError({ goal_id: input.goal_id, fencing_token: input.fencing_token });
-        }
       }
       const timestamp = nowIso();
       const set: {
@@ -1099,6 +1184,18 @@ export class GoalStore implements IGoalStore {
           actual_revision: actual.revision,
         });
       }
+      if (nextLifecycle !== current.lifecycle && nextLifecycle !== 'active') {
+        // Moving a goal away from active ends the running check's authority:
+        // its claim is expired in the same transaction, so a worker holding
+        // an otherwise valid lease can no longer land a token-carrying write.
+        // The claim row stays, so its fencing token is never reused.
+        await db
+          .updateTable('goal_claim')
+          .set({ expires_at: timestamp, updated_at: timestamp })
+          .where('goal_id', '=', input.goal_id)
+          .where('expires_at', '>', timestamp)
+          .execute();
+      }
       if (input.wakeup !== undefined) {
         await this.#insertWakeup(db, input, input.wakeup);
       }
@@ -1173,105 +1270,115 @@ export class GoalStore implements IGoalStore {
   }
 
   async updateStep(input: UpdateGoalStepInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPlanStep> {
-    const db = transaction ?? this.#db;
-    await this.#requireGoal(db, input);
-    const current = await db
-      .selectFrom('goal_step')
-      .selectAll()
-      .where('goal_id', '=', input.goal_id)
-      .where('step_id', '=', input.step_id)
-      .executeTakeFirst();
-    if (current === undefined) {
-      throw new GoalRecordNotFoundError({ record: 'step', record_id: input.step_id, goal_id: input.goal_id });
-    }
-    if (current.revision !== input.expected_revision) {
-      throw new GoalRevisionConflictError({
-        record: 'step',
-        record_id: input.step_id,
-        expected_revision: input.expected_revision,
-        actual_revision: current.revision,
-      });
-    }
-    const set: {
-      description?: string;
-      depends_on?: string;
-      status?: string;
-      acceptance_criteria?: string;
-      evidence_ids?: string;
-      action_id?: string | null;
-      revision: number;
-      updated_at: string;
-    } = { revision: input.expected_revision + 1, updated_at: nowIso() };
-    if (input.patch.description !== undefined) {
-      set.description = input.patch.description;
-    }
-    if (input.patch.depends_on !== undefined) {
-      set.depends_on = JSON.stringify(input.patch.depends_on);
-    }
-    if (input.patch.status !== undefined) {
-      set.status = input.patch.status;
-    }
-    if (input.patch.acceptance_criteria !== undefined) {
-      set.acceptance_criteria = JSON.stringify(input.patch.acceptance_criteria);
-    }
-    if (input.patch.evidence_ids !== undefined) {
-      set.evidence_ids = JSON.stringify(input.patch.evidence_ids);
-    }
-    if (input.patch.action_id !== undefined) {
-      set.action_id = input.patch.action_id;
-    }
-    const row = await db
-      .updateTable('goal_step')
-      .set(set)
-      .where('goal_id', '=', input.goal_id)
-      .where('step_id', '=', input.step_id)
-      .where('revision', '=', input.expected_revision)
-      .returningAll()
-      .executeTakeFirst();
-    if (row === undefined) {
-      throw new GoalRevisionConflictError({
-        record: 'step',
-        record_id: input.step_id,
-        expected_revision: input.expected_revision,
-        actual_revision: input.expected_revision,
-      });
-    }
-    return toStep(row);
+    const run = async (db: Kysely<GoalDatabase>): Promise<GoalPlanStep> => {
+      await this.#requireGoal(db, input);
+      if (input.fencing_token !== undefined) {
+        await this.#requireLiveClaim(db, { goal_id: input.goal_id, fencing_token: input.fencing_token });
+      }
+      const current = await db
+        .selectFrom('goal_step')
+        .selectAll()
+        .where('goal_id', '=', input.goal_id)
+        .where('step_id', '=', input.step_id)
+        .executeTakeFirst();
+      if (current === undefined) {
+        throw new GoalRecordNotFoundError({ record: 'step', record_id: input.step_id, goal_id: input.goal_id });
+      }
+      if (current.revision !== input.expected_revision) {
+        throw new GoalRevisionConflictError({
+          record: 'step',
+          record_id: input.step_id,
+          expected_revision: input.expected_revision,
+          actual_revision: current.revision,
+        });
+      }
+      const set: {
+        description?: string;
+        depends_on?: string;
+        status?: string;
+        acceptance_criteria?: string;
+        evidence_ids?: string;
+        action_id?: string | null;
+        revision: number;
+        updated_at: string;
+      } = { revision: input.expected_revision + 1, updated_at: nowIso() };
+      if (input.patch.description !== undefined) {
+        set.description = input.patch.description;
+      }
+      if (input.patch.depends_on !== undefined) {
+        set.depends_on = JSON.stringify(input.patch.depends_on);
+      }
+      if (input.patch.status !== undefined) {
+        set.status = input.patch.status;
+      }
+      if (input.patch.acceptance_criteria !== undefined) {
+        set.acceptance_criteria = JSON.stringify(input.patch.acceptance_criteria);
+      }
+      if (input.patch.evidence_ids !== undefined) {
+        set.evidence_ids = JSON.stringify(input.patch.evidence_ids);
+      }
+      if (input.patch.action_id !== undefined) {
+        set.action_id = input.patch.action_id;
+      }
+      const row = await db
+        .updateTable('goal_step')
+        .set(set)
+        .where('goal_id', '=', input.goal_id)
+        .where('step_id', '=', input.step_id)
+        .where('revision', '=', input.expected_revision)
+        .returningAll()
+        .executeTakeFirst();
+      if (row === undefined) {
+        throw new GoalRevisionConflictError({
+          record: 'step',
+          record_id: input.step_id,
+          expected_revision: input.expected_revision,
+          actual_revision: input.expected_revision,
+        });
+      }
+      return toStep(row);
+    };
+    return this.#runWrite({ fencing_token: input.fencing_token, transaction, run });
   }
 
   async addEvidence(input: AddGoalEvidenceInput, transaction?: Kysely<GoalDatabase>): Promise<GoalEvidence> {
-    const db = transaction ?? this.#db;
-    await this.#requireGoal(db, input);
-    const evidence = GoalEvidenceSchema.parse({
-      evidence_id: input.evidence_id ?? newId(),
-      goal_id: input.goal_id,
-      source_kind: input.source_kind,
-      source_ref: input.source_ref,
-      source_revision: input.source_revision,
-      content_hash: input.content_hash,
-      observed_at: input.observed_at,
-      claimed_event_at: input.claimed_event_at,
-      freshness: input.freshness,
-      admission: input.admission,
-      extraction_method: input.extraction_method,
-    });
-    await db
-      .insertInto('goal_evidence')
-      .values({
-        evidence_id: evidence.evidence_id,
-        goal_id: evidence.goal_id,
-        source_kind: evidence.source_kind,
-        source_ref: evidence.source_ref,
-        source_revision: evidence.source_revision,
-        content_hash: evidence.content_hash,
-        observed_at: evidence.observed_at,
-        claimed_event_at: evidence.claimed_event_at,
-        freshness: evidence.freshness,
-        admission: evidence.admission,
-        extraction_method: evidence.extraction_method,
-      })
-      .execute();
-    return evidence;
+    const run = async (db: Kysely<GoalDatabase>): Promise<GoalEvidence> => {
+      await this.#requireGoal(db, input);
+      if (input.fencing_token !== undefined) {
+        await this.#requireLiveClaim(db, { goal_id: input.goal_id, fencing_token: input.fencing_token });
+      }
+      const evidence = GoalEvidenceSchema.parse({
+        evidence_id: input.evidence_id ?? newId(),
+        goal_id: input.goal_id,
+        source_kind: input.source_kind,
+        source_ref: input.source_ref,
+        source_revision: input.source_revision,
+        content_hash: input.content_hash,
+        observed_at: input.observed_at,
+        claimed_event_at: input.claimed_event_at,
+        freshness: input.freshness,
+        admission: input.admission,
+        extraction_method: input.extraction_method,
+      });
+      await db
+        .insertInto('goal_evidence')
+        .values({
+          evidence_id: evidence.evidence_id,
+          goal_id: evidence.goal_id,
+          source_kind: evidence.source_kind,
+          source_ref: evidence.source_ref,
+          source_revision: evidence.source_revision,
+          content_hash: evidence.content_hash,
+          observed_at: evidence.observed_at,
+          claimed_event_at: evidence.claimed_event_at,
+          freshness: evidence.freshness,
+          admission: evidence.admission,
+          extraction_method: evidence.extraction_method,
+        })
+        .execute();
+      return evidence;
+    };
+    return this.#runWrite({ fencing_token: input.fencing_token, transaction, run });
   }
 
   async listEvidence(
@@ -1332,6 +1439,9 @@ export class GoalStore implements IGoalStore {
 
   async #appendEventOnce(input: AppendGoalEventInput, db: Kysely<GoalDatabase>): Promise<GoalEvent> {
     await this.#requireGoal(db, input);
+    if (input.fencing_token !== undefined) {
+      await this.#requireLiveClaim(db, { goal_id: input.goal_id, fencing_token: input.fencing_token });
+    }
     const top = await db
       .selectFrom('goal_event')
       .select(eb => eb.fn.max<number>('sequence').as('max_sequence'))
@@ -1389,86 +1499,96 @@ export class GoalStore implements IGoalStore {
   }
 
   async recordCycle(input: RecordGoalCycleInput, transaction?: Kysely<GoalDatabase>): Promise<GoalCycle> {
-    const db = transaction ?? this.#db;
-    await this.#requireGoal(db, input);
-    const cycle = GoalCycleSchema.parse({
-      cycle_id: input.cycle_id ?? newId(),
-      goal_id: input.goal_id,
-      input_revision: input.input_revision,
-      trigger_ids: [...input.trigger_ids],
-      lease: input.lease,
-      budgets: input.budgets,
-      usage: input.usage,
-      started_at: input.started_at,
-      finished_at: input.finished_at,
-      outcome: input.outcome,
-      outcome_detail: input.outcome_detail,
-      next_check_at: input.next_check_at,
-    });
-    await db
-      .insertInto('goal_cycle')
-      .values({
-        cycle_id: cycle.cycle_id,
-        goal_id: cycle.goal_id,
-        input_revision: cycle.input_revision,
-        trigger_ids: JSON.stringify(cycle.trigger_ids),
-        lease: cycle.lease === null ? null : JSON.stringify(cycle.lease),
-        budgets: JSON.stringify(cycle.budgets),
-        usage: JSON.stringify(cycle.usage),
-        started_at: cycle.started_at,
-        finished_at: cycle.finished_at,
-        outcome: cycle.outcome,
-        outcome_detail: cycle.outcome_detail,
-        next_check_at: cycle.next_check_at,
-      })
-      .execute();
-    return cycle;
+    const run = async (db: Kysely<GoalDatabase>): Promise<GoalCycle> => {
+      await this.#requireGoal(db, input);
+      if (input.fencing_token !== undefined) {
+        await this.#requireLiveClaim(db, { goal_id: input.goal_id, fencing_token: input.fencing_token });
+      }
+      const cycle = GoalCycleSchema.parse({
+        cycle_id: input.cycle_id ?? newId(),
+        goal_id: input.goal_id,
+        input_revision: input.input_revision,
+        trigger_ids: [...input.trigger_ids],
+        lease: input.lease,
+        budgets: input.budgets,
+        usage: input.usage,
+        started_at: input.started_at,
+        finished_at: input.finished_at,
+        outcome: input.outcome,
+        outcome_detail: input.outcome_detail,
+        next_check_at: input.next_check_at,
+      });
+      await db
+        .insertInto('goal_cycle')
+        .values({
+          cycle_id: cycle.cycle_id,
+          goal_id: cycle.goal_id,
+          input_revision: cycle.input_revision,
+          trigger_ids: JSON.stringify(cycle.trigger_ids),
+          lease: cycle.lease === null ? null : JSON.stringify(cycle.lease),
+          budgets: JSON.stringify(cycle.budgets),
+          usage: JSON.stringify(cycle.usage),
+          started_at: cycle.started_at,
+          finished_at: cycle.finished_at,
+          outcome: cycle.outcome,
+          outcome_detail: cycle.outcome_detail,
+          next_check_at: cycle.next_check_at,
+        })
+        .execute();
+      return cycle;
+    };
+    return this.#runWrite({ fencing_token: input.fencing_token, transaction, run });
   }
 
   async updateCycle(input: UpdateGoalCycleInput, transaction?: Kysely<GoalDatabase>): Promise<GoalCycle> {
-    const db = transaction ?? this.#db;
-    await this.#requireGoal(db, input);
-    const set: {
-      lease?: string | null;
-      budgets?: string;
-      usage?: string;
-      finished_at?: string | null;
-      outcome?: string | null;
-      outcome_detail?: string | null;
-      next_check_at?: string | null;
-    } = {};
-    if (input.patch.lease !== undefined) {
-      set.lease = input.patch.lease === null ? null : JSON.stringify(input.patch.lease);
-    }
-    if (input.patch.budgets !== undefined) {
-      set.budgets = JSON.stringify(input.patch.budgets);
-    }
-    if (input.patch.usage !== undefined) {
-      set.usage = JSON.stringify(input.patch.usage);
-    }
-    if (input.patch.finished_at !== undefined) {
-      set.finished_at = input.patch.finished_at;
-    }
-    if (input.patch.outcome !== undefined) {
-      set.outcome = input.patch.outcome;
-    }
-    if (input.patch.outcome_detail !== undefined) {
-      set.outcome_detail = input.patch.outcome_detail;
-    }
-    if (input.patch.next_check_at !== undefined) {
-      set.next_check_at = input.patch.next_check_at;
-    }
-    const row = await db
-      .updateTable('goal_cycle')
-      .set(set)
-      .where('goal_id', '=', input.goal_id)
-      .where('cycle_id', '=', input.cycle_id)
-      .returningAll()
-      .executeTakeFirst();
-    if (row === undefined) {
-      throw new GoalRecordNotFoundError({ record: 'cycle', record_id: input.cycle_id, goal_id: input.goal_id });
-    }
-    return toCycle(row);
+    const run = async (db: Kysely<GoalDatabase>): Promise<GoalCycle> => {
+      await this.#requireGoal(db, input);
+      if (input.fencing_token !== undefined) {
+        await this.#requireLiveClaim(db, { goal_id: input.goal_id, fencing_token: input.fencing_token });
+      }
+      const set: {
+        lease?: string | null;
+        budgets?: string;
+        usage?: string;
+        finished_at?: string | null;
+        outcome?: string | null;
+        outcome_detail?: string | null;
+        next_check_at?: string | null;
+      } = {};
+      if (input.patch.lease !== undefined) {
+        set.lease = input.patch.lease === null ? null : JSON.stringify(input.patch.lease);
+      }
+      if (input.patch.budgets !== undefined) {
+        set.budgets = JSON.stringify(input.patch.budgets);
+      }
+      if (input.patch.usage !== undefined) {
+        set.usage = JSON.stringify(input.patch.usage);
+      }
+      if (input.patch.finished_at !== undefined) {
+        set.finished_at = input.patch.finished_at;
+      }
+      if (input.patch.outcome !== undefined) {
+        set.outcome = input.patch.outcome;
+      }
+      if (input.patch.outcome_detail !== undefined) {
+        set.outcome_detail = input.patch.outcome_detail;
+      }
+      if (input.patch.next_check_at !== undefined) {
+        set.next_check_at = input.patch.next_check_at;
+      }
+      const row = await db
+        .updateTable('goal_cycle')
+        .set(set)
+        .where('goal_id', '=', input.goal_id)
+        .where('cycle_id', '=', input.cycle_id)
+        .returningAll()
+        .executeTakeFirst();
+      if (row === undefined) {
+        throw new GoalRecordNotFoundError({ record: 'cycle', record_id: input.cycle_id, goal_id: input.goal_id });
+      }
+      return toCycle(row);
+    };
+    return this.#runWrite({ fencing_token: input.fencing_token, transaction, run });
   }
 
   async listCycles(input: ListGoalCyclesInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPage<GoalCycle>> {
@@ -1504,78 +1624,88 @@ export class GoalStore implements IGoalStore {
   }
 
   async recordAction(input: RecordGoalActionInput, transaction?: Kysely<GoalDatabase>): Promise<GoalAction> {
-    const db = transaction ?? this.#db;
-    await this.#requireGoal(db, input);
-    const timestamp = nowIso();
-    const action = GoalActionSchema.parse({
-      action_id: input.action_id ?? newId(),
-      goal_id: input.goal_id,
-      cycle_id: input.cycle_id,
-      expected_revision: input.expected_revision,
-      preconditions: input.preconditions,
-      tool_call_ref: input.tool_call_ref,
-      approval_ref: input.approval_ref,
-      execution_state: input.execution_state,
-      receipt_ref: input.receipt_ref,
-      created_at: timestamp,
-      updated_at: timestamp,
-    });
-    await db
-      .insertInto('goal_action')
-      .values({
-        action_id: action.action_id,
-        goal_id: action.goal_id,
-        cycle_id: action.cycle_id,
-        expected_revision: action.expected_revision,
-        preconditions: JSON.stringify(action.preconditions),
-        tool_call_ref: action.tool_call_ref,
-        approval_ref: action.approval_ref,
-        execution_state: action.execution_state,
-        receipt_ref: action.receipt_ref,
-        created_at: action.created_at,
-        updated_at: action.updated_at,
-      })
-      .execute();
-    return action;
+    const run = async (db: Kysely<GoalDatabase>): Promise<GoalAction> => {
+      await this.#requireGoal(db, input);
+      if (input.fencing_token !== undefined) {
+        await this.#requireLiveClaim(db, { goal_id: input.goal_id, fencing_token: input.fencing_token });
+      }
+      const timestamp = nowIso();
+      const action = GoalActionSchema.parse({
+        action_id: input.action_id ?? newId(),
+        goal_id: input.goal_id,
+        cycle_id: input.cycle_id,
+        expected_revision: input.expected_revision,
+        preconditions: input.preconditions,
+        tool_call_ref: input.tool_call_ref,
+        approval_ref: input.approval_ref,
+        execution_state: input.execution_state,
+        receipt_ref: input.receipt_ref,
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+      await db
+        .insertInto('goal_action')
+        .values({
+          action_id: action.action_id,
+          goal_id: action.goal_id,
+          cycle_id: action.cycle_id,
+          expected_revision: action.expected_revision,
+          preconditions: JSON.stringify(action.preconditions),
+          tool_call_ref: action.tool_call_ref,
+          approval_ref: action.approval_ref,
+          execution_state: action.execution_state,
+          receipt_ref: action.receipt_ref,
+          created_at: action.created_at,
+          updated_at: action.updated_at,
+        })
+        .execute();
+      return action;
+    };
+    return this.#runWrite({ fencing_token: input.fencing_token, transaction, run });
   }
 
   async updateAction(input: UpdateGoalActionInput, transaction?: Kysely<GoalDatabase>): Promise<GoalAction> {
-    const db = transaction ?? this.#db;
-    await this.#requireGoal(db, input);
-    const set: {
-      preconditions?: string;
-      tool_call_ref?: string | null;
-      approval_ref?: string | null;
-      execution_state?: string;
-      receipt_ref?: string | null;
-      updated_at: string;
-    } = { updated_at: nowIso() };
-    if (input.patch.preconditions !== undefined) {
-      set.preconditions = JSON.stringify(input.patch.preconditions);
-    }
-    if (input.patch.tool_call_ref !== undefined) {
-      set.tool_call_ref = input.patch.tool_call_ref;
-    }
-    if (input.patch.approval_ref !== undefined) {
-      set.approval_ref = input.patch.approval_ref;
-    }
-    if (input.patch.execution_state !== undefined) {
-      set.execution_state = input.patch.execution_state;
-    }
-    if (input.patch.receipt_ref !== undefined) {
-      set.receipt_ref = input.patch.receipt_ref;
-    }
-    const row = await db
-      .updateTable('goal_action')
-      .set(set)
-      .where('goal_id', '=', input.goal_id)
-      .where('action_id', '=', input.action_id)
-      .returningAll()
-      .executeTakeFirst();
-    if (row === undefined) {
-      throw new GoalRecordNotFoundError({ record: 'action', record_id: input.action_id, goal_id: input.goal_id });
-    }
-    return toAction(row);
+    const run = async (db: Kysely<GoalDatabase>): Promise<GoalAction> => {
+      await this.#requireGoal(db, input);
+      if (input.fencing_token !== undefined) {
+        await this.#requireLiveClaim(db, { goal_id: input.goal_id, fencing_token: input.fencing_token });
+      }
+      const set: {
+        preconditions?: string;
+        tool_call_ref?: string | null;
+        approval_ref?: string | null;
+        execution_state?: string;
+        receipt_ref?: string | null;
+        updated_at: string;
+      } = { updated_at: nowIso() };
+      if (input.patch.preconditions !== undefined) {
+        set.preconditions = JSON.stringify(input.patch.preconditions);
+      }
+      if (input.patch.tool_call_ref !== undefined) {
+        set.tool_call_ref = input.patch.tool_call_ref;
+      }
+      if (input.patch.approval_ref !== undefined) {
+        set.approval_ref = input.patch.approval_ref;
+      }
+      if (input.patch.execution_state !== undefined) {
+        set.execution_state = input.patch.execution_state;
+      }
+      if (input.patch.receipt_ref !== undefined) {
+        set.receipt_ref = input.patch.receipt_ref;
+      }
+      const row = await db
+        .updateTable('goal_action')
+        .set(set)
+        .where('goal_id', '=', input.goal_id)
+        .where('action_id', '=', input.action_id)
+        .returningAll()
+        .executeTakeFirst();
+      if (row === undefined) {
+        throw new GoalRecordNotFoundError({ record: 'action', record_id: input.action_id, goal_id: input.goal_id });
+      }
+      return toAction(row);
+    };
+    return this.#runWrite({ fencing_token: input.fencing_token, transaction, run });
   }
 
   async listActions(input: ListGoalActionsInput, transaction?: Kysely<GoalDatabase>): Promise<GoalPage<GoalAction>> {
@@ -1631,7 +1761,10 @@ export class GoalStore implements IGoalStore {
 
   async claimGoal(input: ClaimGoalInput, transaction?: Kysely<GoalDatabase>): Promise<GoalClaim | undefined> {
     const run = async (db: Kysely<GoalDatabase>): Promise<GoalClaim | undefined> => {
-      await this.#requireGoal(db, input);
+      const goal = toGoal(await this.#requireGoal(db, input));
+      if (goal.lifecycle !== 'active') {
+        throw new GoalClaimLifecycleError({ goal_id: input.goal_id, lifecycle: goal.lifecycle });
+      }
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const existing = await db
           .selectFrom('goal_claim')

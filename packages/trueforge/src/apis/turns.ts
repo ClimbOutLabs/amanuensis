@@ -27,6 +27,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  callReadsMemoryPages,
   callResultSource,
   chatSawOutsideText,
   existingSandboxIdForProvider,
@@ -1510,6 +1511,9 @@ async function runTurnEventDrain(params: {
   // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
   const outsideInput = createOutsideInputTracker({ attachedFiles: memory?.attachedFiles === true });
   const toolResults: TurnToolResult[] = [];
+  // What the turn read out of its own stored memory pages, kept apart from the findings: it is already
+  // memory, and the note pass is told it apart so a reply that only repeats it is not stored as new.
+  const recalledMemory: string[] = [];
   // A send is read from its call and saved as soon as its result says it went through, whichever turn ran it.
   const sentMailWrites: Promise<void>[] = [];
   let followUp: Promise<void> | undefined;
@@ -1544,15 +1548,24 @@ async function runTurnEventDrain(params: {
         }
       }
       if (readOutside && (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2)) {
-        // Kept for the note pass; a result that did not run cleanly holds no finding.
-        if (
-          (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') &&
-          toolResults.length < TURN_TOOL_RESULTS_KEPT
-        ) {
-          toolResults.push({
-            source: callResultSource(outsideInput.callOf(event)),
-            text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
-          });
+        // Kept for the note pass; a result that did not run cleanly holds no finding. A result read out
+        // of the stored memory pages is not kept as a finding: it is memory itself, not a finding of
+        // this turn, so the note pass must not store it again as one. It is kept apart instead, as what
+        // the turn recalled, so the pass can also tell a reply that only repeats it from a new
+        // statement. The turn still counts as having read outside content, exactly as the tracker
+        // above decided; only the note pass is kept from repeating what is already stored.
+        const call = outsideInput.callOf(event);
+        if (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') {
+          if (callReadsMemoryPages(call)) {
+            if (recalledMemory.length < TURN_TOOL_RESULTS_KEPT) {
+              recalledMemory.push(event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT));
+            }
+          } else if (toolResults.length < TURN_TOOL_RESULTS_KEPT) {
+            toolResults.push({
+              source: callResultSource(call),
+              text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
+            });
+          }
         }
       }
       // Dual-write before any client sink so subscribers can resume after disconnect.
@@ -1571,6 +1584,7 @@ async function runTurnEventDrain(params: {
           state: event.state,
           ingestedToolOutput: outsideInput.ingested,
           toolResults,
+          recalledMemory,
           markArtifactsCaptured,
         });
       } else if (event.type === EventType.TURN_DONE && memory !== undefined) {
@@ -1621,9 +1635,10 @@ async function runTurnFollowUp(params: {
   state: Extract<TerminalTurnState, { status: 'done' }>;
   ingestedToolOutput: boolean;
   toolResults: readonly TurnToolResult[];
+  recalledMemory: readonly string[];
   markArtifactsCaptured: () => void;
 }): Promise<void> {
-  const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
+  const { input, state, ingestedToolOutput, toolResults, recalledMemory, markArtifactsCaptured } = params;
   const {
     turnEventStream,
     sessionId,
@@ -1698,6 +1713,7 @@ async function runTurnFollowUp(params: {
         chatWrotePages: memory.chatWrotePages?.() === true,
         logger,
         toolResults,
+        recalledMemory,
         summarize: memory.summarize,
         profileLearning:
           profileLearning === undefined

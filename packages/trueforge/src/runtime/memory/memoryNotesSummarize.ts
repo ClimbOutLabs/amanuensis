@@ -12,7 +12,7 @@ import { redactSecretShapes } from '../../dataExport/secretScrub';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { TurnModelUsage } from '../modelUsage';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
-import { ASSISTANT_RESPONSE_SOURCE, type MemoryNoteSource } from './memoryNotes';
+import { ASSISTANT_RESPONSE_SOURCE, noteTextWithoutLabel, type MemoryNoteSource } from './memoryNotes';
 import {
   askSummaryModel,
   boundedText,
@@ -90,14 +90,17 @@ function notesSystemPrompt(): string {
     'Always reply with one JSON object and nothing else: {"findings": [{"result": 1, "text": "..."}], "responses": [2]}',
     'Most turns hold nothing worth keeping. Then reply exactly: {"findings": [], "responses": []}',
     '',
-    'findings: concrete facts that appear in the numbered tool results, such as who wants what by when, an appointment, or a researched fact.',
+    'findings: durable facts that appear in the numbered tool results, such as who wants what by when, an appointment, or a researched fact.',
     '- "result" is the number of the result the fact came from.',
     '- Write each finding as one complete sentence that names who or what it is about and any date. Turn "today" and "tomorrow" into real dates, using the date of the chat.',
     '- A finding must be stated in that result. Never add anything the result does not say.',
+    '- Keep a finding only when it is durable knowledge: a fact that will still be true, and still matter, after this conversation is forgotten.',
+    '- An observation about the work in front of the assistant is not durable knowledge: not a change made to the material under work or review, not a version a tool bumped or reported, not a field added to a type, and not the wording of a message in that material. Leave those out however exactly the result states them.',
     '',
-    'responses: the numbers of the sentences in the assistant reply that are advice, recommendations, answers or decisions worth keeping.',
+    'responses: the numbers of the sentences in the assistant reply that are worth keeping as notes.',
+    '- Pick a sentence only when it is a durable statement: advice, a recommendation or an answer that will still be true, and will still make sense read on its own, after this conversation is forgotten.',
+    '- A move in the conversation is never a note: not a request or an instruction for the task at hand, not a report of where the task stands, not an offer and not a question, however it is phrased. When a sentence only makes sense as part of getting this task done, leave it out.',
     '- Give only numbers from the list. Do not write the sentences out, and do not add anything else about the reply.',
-    '- Pick a sentence only when it states the advice itself and makes sense on its own.',
     '- A list in the reply is given one line per item, with its heading in front, such as "What to bring: a list of your medicines".',
     '',
     'Never keep:',
@@ -397,11 +400,224 @@ function selectedSentences({
   return picked;
 }
 
+/** A restated fact shorter than this is too little to tell apart from a new short statement of the reply's own. */
+const RESTATED_MIN_CHARACTERS = 20;
+
+/**
+ * The closed class of framing words: the words that can stand around a fact without adding to it.
+ * Articles, pronouns, conjunctions, prepositions and auxiliary verbs carry the grammar of a sentence
+ * rather than its content, and the reporting words only point back at where the fact was read. A word
+ * outside this class is content, however short the piece it stands in, so one content word left around
+ * a recalled text is enough for the sentence to count as carrying something of its own.
+ */
+const FRAMING_WORDS: ReadonlySet<string> = new Set([
+  // Articles and determiners.
+  'a',
+  'an',
+  'the',
+  'this',
+  'that',
+  'these',
+  'those',
+  // Pronouns.
+  'i',
+  'you',
+  'he',
+  'she',
+  'it',
+  'we',
+  'they',
+  'me',
+  'him',
+  'her',
+  'us',
+  'them',
+  'my',
+  'your',
+  'his',
+  'hers',
+  'its',
+  'our',
+  'their',
+  'mine',
+  'yours',
+  'ours',
+  'theirs',
+  'who',
+  'whom',
+  'whose',
+  'which',
+  'what',
+  // Conjunctions.
+  'and',
+  'or',
+  'but',
+  'nor',
+  'so',
+  'yet',
+  'as',
+  'if',
+  'when',
+  'while',
+  'although',
+  'though',
+  'because',
+  'since',
+  'unless',
+  'until',
+  'than',
+  'whether',
+  // Prepositions.
+  'about',
+  'above',
+  'across',
+  'after',
+  'against',
+  'along',
+  'among',
+  'around',
+  'at',
+  'before',
+  'behind',
+  'below',
+  'beneath',
+  'beside',
+  'between',
+  'beyond',
+  'by',
+  'during',
+  'for',
+  'from',
+  'in',
+  'inside',
+  'into',
+  'of',
+  'off',
+  'on',
+  'onto',
+  'out',
+  'outside',
+  'over',
+  'per',
+  'through',
+  'to',
+  'toward',
+  'towards',
+  'under',
+  'up',
+  'upon',
+  'via',
+  'with',
+  'within',
+  'without',
+  // Auxiliary and modal verbs.
+  'am',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'have',
+  'has',
+  'had',
+  'do',
+  'does',
+  'did',
+  'will',
+  'would',
+  'shall',
+  'should',
+  'can',
+  'could',
+  'may',
+  'might',
+  'must',
+  // Reporting words, which point back at the source the fact came from.
+  'according',
+  'already',
+  'earlier',
+  'previously',
+  'noted',
+  'notes',
+  'mentioned',
+  'mentions',
+  'said',
+  'says',
+  'say',
+  'stated',
+  'states',
+  'reported',
+  'reports',
+]);
+
+/** Whether every word left around a recalled text is framing: grammar and pointers back at the source, nothing of the sentence's own. */
+function leftoverIsOnlyFraming(leftover: string): boolean {
+  return leftover.split(' ').every(word => word === '' || FRAMING_WORDS.has(word));
+}
+
+/**
+ * Text compared by its words alone: any note label is taken off, and case, spacing and punctuation are
+ * flattened away, so two wordings of one fact compare by what they say. A sign on a number is the one
+ * mark kept, spelled out as a word, because it changes the fact: minus eighteen is not eighteen.
+ */
+function comparisonText(text: string): string {
+  return (
+    noteTextWithoutLabel(text)
+      // A minus sign (hyphen-minus, U+2212, en dash or non-breaking hyphen) or a plus sign directly
+      // before a digit becomes a word, so it survives the flattening below and every drawing of the
+      // same sign compares equal.
+      .replace(/[-\u2212\u2013\u2011](?=\d)/g, 'minus ')
+      .replace(/\+(?=\d)/g, 'plus ')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()
+  );
+}
+
+/**
+ * Whether a reply sentence only says again what the turn read out of its stored memory pages. The words
+ * must match whole on one side or the other: the sentence inside the recalled text, or the recalled text
+ * inside the sentence with nothing but framing words left around it. Either way the matched words
+ * must reach the minimum length, so a short sentence is never dropped over a few shared words. A
+ * sentence carrying even one word of its own outside the match is not a restatement and is kept.
+ */
+function restatesRecalledMemory({
+  text,
+  recalledMemory,
+}: {
+  text: string;
+  recalledMemory: readonly string[];
+}): boolean {
+  const note = comparisonText(text);
+  if (note.length < RESTATED_MIN_CHARACTERS) {
+    return false;
+  }
+  return recalledMemory.some(recalled => {
+    const stored = comparisonText(recalled);
+    if (stored.includes(note)) {
+      return true;
+    }
+    if (stored.length < RESTATED_MIN_CHARACTERS) {
+      return false;
+    }
+    const at = note.indexOf(stored);
+    if (at === -1) {
+      return false;
+    }
+    const leftover = `${note.slice(0, at)} ${note.slice(at + stored.length)}`.replace(/ +/g, ' ').trim();
+    return leftoverIsOnlyFraming(leftover);
+  });
+}
+
 /**
  * Turns the model's reply into notes. A finding must point at a real result, share its names, numbers or
  * words, and read as neither an instruction nor a statement about the person. A reply note is one of the
  * numbered reply sentences, stored as written, and must pass the same checks. Anything that reads as a
- * work plan or holds a secret is dropped. Exported for tests.
+ * work plan or holds a secret is dropped. A reply sentence that only repeats what the turn read out of
+ * its stored memory pages is dropped too: that fact is already kept, dated the day it was first saved.
+ * Exported for tests.
  */
 export function parseNotesReply({
   reply,
@@ -409,12 +625,15 @@ export function parseNotesReply({
   sentences,
   personName,
   assistantName,
+  recalledMemory,
 }: {
   reply: string;
   results: readonly TurnToolResult[];
   sentences: readonly string[];
   personName: string | undefined;
   assistantName?: string | undefined;
+  /** What the turn read out of its stored memory pages, kept apart from the findings. */
+  recalledMemory?: readonly string[] | undefined;
 }): TurnNote[] {
   const parsed = NotesReplySchema.safeParse(extractReplyJson(reply.trim()));
   if (!parsed.success) {
@@ -438,7 +657,12 @@ export function parseNotesReply({
   }
   const replies = selectedSentences({ responses: parsed.data.responses, sentences })
     .flatMap(sentence => usableNoteText({ text: sentence, assistantName }) ?? [])
-    .filter(text => !NEGATED_HEADER_ITEM.test(text) && !readsAsAboutThePerson({ text, personName }));
+    .filter(
+      text =>
+        !NEGATED_HEADER_ITEM.test(text) &&
+        !readsAsAboutThePerson({ text, personName }) &&
+        !restatesRecalledMemory({ text, recalledMemory: recalledMemory ?? [] }),
+    );
   for (const text of replies.slice(0, NOTES_MAX_REPLIES)) {
     notes.push({ source: ASSISTANT_RESPONSE_SOURCE, text });
   }
@@ -451,6 +675,8 @@ export function parseNotesReply({
  */
 export async function summarizeTurnNotes(params: {
   results: readonly TurnToolResult[];
+  /** What the turn read out of its stored memory pages, so a reply that only repeats it is not kept as a new note. */
+  recalledMemory?: readonly string[] | undefined;
   assistantText: string;
   turnDate: string;
   timeZone?: string | undefined;
@@ -503,5 +729,6 @@ export async function summarizeTurnNotes(params: {
     sentences,
     personName: params.personName,
     assistantName: params.assistantName,
+    recalledMemory: params.recalledMemory,
   });
 }
