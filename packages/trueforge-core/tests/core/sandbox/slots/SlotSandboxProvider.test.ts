@@ -8,7 +8,11 @@ import {
 } from '../../../../src/core/sandbox/SandboxErrors';
 import { buildHostAuthenticatedGitProbe } from '../../../../src/core/sandbox/hostAuthenticatedGit';
 import { SLOT_NOT_READY_MESSAGE } from '../../../../src/core/sandbox/slots/SlotDriver';
-import { SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
+import {
+  retiredSlotSourceIndex,
+  retiredSlotTargetIndex,
+  SlotSandboxProvider,
+} from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { makeSilentLogger } from '../../harnessMocks';
 import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
 
@@ -214,6 +218,19 @@ describe('SlotSandboxProvider', () => {
       SandboxNotAvailableError,
     );
     expect(started[0]?.requests).toHaveLength(1);
+  });
+
+  test('the retired slot mapping reads the same in both directions', () => {
+    // Zero-based indexes: slot 3 went to slot 1, and slot 4 went to slot 2.
+    expect(retiredSlotTargetIndex(2)).toBe(0);
+    expect(retiredSlotTargetIndex(3)).toBe(1);
+    expect(retiredSlotSourceIndex(0)).toBe(2);
+    expect(retiredSlotSourceIndex(1)).toBe(3);
+    // Working slots are not retired, and no slot retired into a slot past the first two.
+    expect(retiredSlotTargetIndex(0)).toBeUndefined();
+    expect(retiredSlotTargetIndex(1)).toBeUndefined();
+    expect(retiredSlotTargetIndex(4)).toBeUndefined();
+    expect(retiredSlotSourceIndex(2)).toBeUndefined();
   });
 
   test('a non-zero exit is still a successful call', async () => {

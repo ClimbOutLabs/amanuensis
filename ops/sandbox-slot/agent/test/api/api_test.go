@@ -27,10 +27,18 @@ const (
 	sessionID = "fedcba9876543210fedcba9876543210"
 )
 
-type fakeAttestor struct{ ok bool }
+type fakeAttestor struct {
+	ok bool
+	// freeBytes is the free space every collected report claims, however stale that claim is.
+	freeBytes int64
+}
 
 func (f fakeAttestor) Collect() attest.Report {
-	return attest.Report{OK: f.ok, Checks: []attest.Check{{Name: "apparmor", OK: f.ok, Detail: "wrong profile"}}}
+	return attest.Report{
+		OK:     f.ok,
+		Checks: []attest.Check{{Name: "apparmor", OK: f.ok, Detail: "wrong profile"}},
+		Facts:  attest.Facts{StoreFreeBytes: f.freeBytes},
+	}
 }
 
 // fakeRunner records the spec and optionally runs a hook that plays the guest.
@@ -141,6 +149,44 @@ func TestHealthCountsSessionTrees(t *testing.T) {
 	rec := e.do("GET", "/v1/health", nil)
 	if !strings.Contains(rec.Body.String(), `"sessions":2`) {
 		t.Fatalf("%s", rec.Body.String())
+	}
+}
+
+func TestHealthWhileBusyReportsFreshFreeSpace(t *testing.T) {
+	e := newEnv(t, true)
+	// Every collected report claims a single free byte, so a busy answer still carrying that
+	// number is carrying the stale reading taken when the running command started.
+	e.srv.Attestor = fakeAttestor{ok: true, freeBytes: 1}
+	e.runner.hold = make(chan struct{})
+	done := make(chan struct{})
+	go func() { e.do("POST", "/v1/run_code", runReq(nil)); close(done) }()
+	for {
+		e.runner.mu.Lock()
+		started := e.runner.spec.ID != ""
+		e.runner.mu.Unlock()
+		if started {
+			break
+		}
+	}
+	rec := e.do("GET", "/v1/health", nil)
+	close(e.runner.hold)
+	<-done
+	var health struct {
+		Busy        bool `json:"busy"`
+		Attestation struct {
+			Facts struct {
+				StoreFreeBytes int64 `json:"store_free_bytes"`
+			} `json:"facts"`
+		} `json:"attestation"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &health); err != nil {
+		t.Fatalf("health body is not the expected shape: %s", rec.Body.String())
+	}
+	if !health.Busy {
+		t.Fatal("health must say busy while a lease runs")
+	}
+	if health.Attestation.Facts.StoreFreeBytes <= 1 {
+		t.Fatalf("busy health reported the stale free space %d, want a fresh reading of the volume", health.Attestation.Facts.StoreFreeBytes)
 	}
 }
 
