@@ -14,6 +14,13 @@ export const GoalIdParamsSchema = z
   .object({ goal_id: z.string().min(1).max(64).describe('Immutable goal identifier.') })
   .openapi('GoalIDParams');
 
+export const GoalStepParamsSchema = z
+  .object({
+    goal_id: z.string().min(1).max(64).describe('Immutable goal identifier.'),
+    step_id: z.string().min(1).max(64).describe('Immutable step identifier.'),
+  })
+  .openapi('GoalStepParams');
+
 export const GoalLifecycleSchema = z.enum(['draft', 'active', 'paused', 'completed', 'ended']).openapi('GoalLifecycle');
 
 export const GoalStepStatusSchema = z

@@ -437,6 +437,66 @@ export function createGoalService(deps: GoalServiceDeps) {
     },
 
     /**
+     * The owner's word that a step is done. The step is marked owner_confirmed,
+     * steps waiting on it become ready, and the confirmation is recorded as an
+     * event naming who confirmed and which step. Confirming never completes
+     * the goal and never verifies any other step: finishing the goal stays a
+     * separate decision, and judging a step against its criteria stays with
+     * the work that reads content.
+     */
+    async confirmStep(actor: GoalActor, goal_id: string, step_id: string): Promise<GoalWithSteps> {
+      const { goal, steps } = await loadGoalWithSteps(actor, goal_id);
+      if (goal.lifecycle === 'draft') {
+        throw new GoalStateError('This goal is still a draft. Activate it before confirming one of its steps.');
+      }
+      if (goal.lifecycle === 'completed' || goal.lifecycle === 'ended') {
+        throw new GoalStateError('This goal has finished, so its steps can no longer be confirmed.');
+      }
+      const step = steps.find(candidate => candidate.step_id === step_id);
+      if (step === undefined) {
+        throw new GoalNotFoundError(goal_id);
+      }
+      if (step.status === 'owner_confirmed') {
+        throw new GoalStateError('This step is already confirmed. There is nothing more to do.');
+      }
+      if (step.status === 'verified') {
+        throw new GoalStateError('This step is already verified. There is nothing to confirm.');
+      }
+      const updated = await store.updateStep({
+        tenant_id: actor.tenant_id,
+        created_by: actor.subject_id,
+        goal_id,
+        step_id,
+        status: 'owner_confirmed',
+      });
+      if (updated === undefined) {
+        throw new GoalNotFoundError(goal_id);
+      }
+      // Steps this confirmation unblocks become ready, the same promotion a check runs.
+      const currentSteps = await store.listSteps({
+        tenant_id: actor.tenant_id,
+        created_by: actor.subject_id,
+        goal_id,
+      });
+      for (const unblocked of unblockedSteps(currentSteps)) {
+        await store.updateStep({
+          tenant_id: actor.tenant_id,
+          created_by: actor.subject_id,
+          goal_id,
+          step_id: unblocked.step_id,
+          status: 'ready',
+        });
+      }
+      await recordEvent({
+        actor,
+        goal_id,
+        event_type: 'goal_step_confirmed',
+        payload: { step_id, confirmed_by: actor.subject_id, from: step.status, to: 'owner_confirmed' },
+      });
+      return loadGoalWithSteps(actor, goal_id);
+    },
+
+    /**
      * The state a check may run from, with the pin verified against the saved agent:
      * a changed setup stops dispatch until the owner confirms an updated card.
      */
