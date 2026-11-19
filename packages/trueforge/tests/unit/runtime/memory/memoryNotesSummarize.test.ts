@@ -513,6 +513,78 @@ describe('parseNotesReply and what the turn recalled from its memory pages', () 
     ).toEqual([]);
   });
 
+  it('drops a sentence that says a recalled fact again word for word', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('drops a sentence that wraps a recalled fact in words pointing back at the person who raised it', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'As you mentioned, the venue is available on Friday.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('drops a sentence that follows a recalled fact with words pointing back at the person who raised it', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday, as you mentioned.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('keeps a sentence that moves a recalled time with a word of its own standing before it', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'After noon is the deadline for the form.',
+        recalledMemory: ['Noon is the deadline for the form.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'After noon is the deadline for the form.' }]);
+  });
+
+  it('keeps a sentence that softens a recalled fact with a word of its own inside it', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue might be available on Friday.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'The venue might be available on Friday.' }]);
+  });
+
+  it('keeps a sentence whose lead-in names the place the fact was read instead of pointing back at a speaker', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'As the page noted, the venue is available on Friday.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'As the page noted, the venue is available on Friday.' }]);
+  });
+
+  it('keeps a sentence that points back at the speaker and still adds a time of its own', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'As you mentioned, the venue is available on Friday after noon.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([
+      { source: 'assistant_response', text: 'As you mentioned, the venue is available on Friday after noon.' },
+    ]);
+  });
+
   it('keeps a sentence that states a recalled fact twice over', () => {
     expect(
       parse({

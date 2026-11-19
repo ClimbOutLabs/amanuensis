@@ -404,157 +404,67 @@ function selectedSentences({
 const RESTATED_MIN_CHARACTERS = 20;
 
 /**
- * The closed class of framing words: the words that can stand around a fact without adding to it.
- * Articles, pronouns, conjunctions, prepositions and auxiliary verbs carry the grammar of a sentence
- * rather than its content, and the reporting words only point back at where the fact was read. A word
- * outside this class is content, however short the piece it stands in, so one content word left around
- * a recalled text is enough for the sentence to count as carrying something of its own.
+ * The words a pointer back at the source is built from. A reply sentence that repeats a recalled text
+ * counts as a restatement only when the words around the repeated text do nothing but point back at
+ * where the fact was read: a lead word such as "as", a speaker such as "you", a reporting word such
+ * as "mentioned", and a time word such as "earlier". Any other word standing around the repeated text
+ * is the sentence's own, however short it is: a word like "after" or "might" can change the fact
+ * itself, so a sentence carrying one is kept.
  */
-const FRAMING_WORDS: ReadonlySet<string> = new Set([
-  // Articles and determiners.
-  'a',
-  'an',
-  'the',
-  'this',
-  'that',
-  'these',
-  'those',
-  // Pronouns.
-  'i',
-  'you',
-  'he',
-  'she',
-  'it',
-  'we',
-  'they',
-  'me',
-  'him',
-  'her',
-  'us',
-  'them',
-  'my',
-  'your',
-  'his',
-  'hers',
-  'its',
-  'our',
-  'their',
-  'mine',
-  'yours',
-  'ours',
-  'theirs',
-  'who',
-  'whom',
-  'whose',
-  'which',
-  'what',
-  // Conjunctions.
-  'and',
-  'or',
-  'but',
-  'nor',
-  'so',
-  'yet',
-  'as',
-  'if',
-  'when',
-  'while',
-  'although',
-  'though',
-  'because',
-  'since',
-  'unless',
-  'until',
-  'than',
-  'whether',
-  // Prepositions.
-  'about',
-  'above',
-  'across',
-  'after',
-  'against',
-  'along',
-  'among',
-  'around',
-  'at',
-  'before',
-  'behind',
-  'below',
-  'beneath',
-  'beside',
-  'between',
-  'beyond',
-  'by',
-  'during',
-  'for',
-  'from',
-  'in',
-  'inside',
-  'into',
-  'of',
-  'off',
-  'on',
-  'onto',
-  'out',
-  'outside',
-  'over',
-  'per',
-  'through',
-  'to',
-  'toward',
-  'towards',
-  'under',
-  'up',
-  'upon',
-  'via',
-  'with',
-  'within',
-  'without',
-  // Auxiliary and modal verbs.
-  'am',
-  'is',
-  'are',
-  'was',
-  'were',
-  'be',
-  'been',
-  'being',
-  'have',
-  'has',
-  'had',
-  'do',
-  'does',
-  'did',
-  'will',
-  'would',
-  'shall',
-  'should',
-  'can',
-  'could',
-  'may',
-  'might',
-  'must',
-  // Reporting words, which point back at the source the fact came from.
-  'according',
-  'already',
-  'earlier',
-  'previously',
-  'noted',
-  'notes',
+const ATTRIBUTION_LEAD_WORDS: ReadonlySet<string> = new Set(['as', 'like']);
+const ATTRIBUTION_SPEAKER_WORDS: ReadonlySet<string> = new Set(['you', 'i', 'we', 'they', 'he', 'she']);
+const ATTRIBUTION_REPORTING_WORDS: ReadonlySet<string> = new Set([
+  'said',
+  'say',
+  'says',
   'mentioned',
   'mentions',
-  'said',
-  'says',
-  'say',
+  'noted',
+  'notes',
   'stated',
   'states',
   'reported',
   'reports',
 ]);
+const ATTRIBUTION_TIME_WORDS: ReadonlySet<string> = new Set(['earlier', 'previously', 'already', 'before']);
 
-/** Whether every word left around a recalled text is framing: grammar and pointers back at the source, nothing of the sentence's own. */
-function leftoverIsOnlyFraming(leftover: string): boolean {
-  return leftover.split(' ').every(word => word === '' || FRAMING_WORDS.has(word));
+/**
+ * Whether one run of words only points back at where a fact was read. The words must form the whole
+ * run in order: a lead word or a speaker first, so the run is anchored to a source, then a reporting
+ * word, then a time word if there is one. A run that names anything else, such as "the page" in
+ * "as the page noted", carries words of its own and is not a pointer.
+ */
+function isAttributionRun(words: readonly string[]): boolean {
+  let index = 0;
+  let anchored = false;
+  const lead = words[index];
+  if (lead !== undefined && ATTRIBUTION_LEAD_WORDS.has(lead)) {
+    index += 1;
+    anchored = true;
+  }
+  const speaker = words[index];
+  if (speaker !== undefined && ATTRIBUTION_SPEAKER_WORDS.has(speaker)) {
+    index += 1;
+    anchored = true;
+  }
+  if (!anchored) {
+    return false;
+  }
+  const reporting = words[index];
+  if (reporting === undefined || !ATTRIBUTION_REPORTING_WORDS.has(reporting)) {
+    return false;
+  }
+  index += 1;
+  const time = words[index];
+  if (time !== undefined && ATTRIBUTION_TIME_WORDS.has(time)) {
+    index += 1;
+  }
+  return index === words.length;
+}
+
+/** Whether the words on each side of a recalled text are absent or only point back at where the fact was read. */
+function wrappedInAttribution({ before, after }: { before: string; after: string }): boolean {
+  return [before, after].every(side => side === '' || isAttributionRun(side.split(' ')));
 }
 
 /**
@@ -579,9 +489,11 @@ function comparisonText(text: string): string {
 /**
  * Whether a reply sentence only says again what the turn read out of its stored memory pages. The words
  * must match whole on one side or the other: the sentence inside the recalled text, or the recalled text
- * inside the sentence with nothing but framing words left around it. Either way the matched words
- * must reach the minimum length, so a short sentence is never dropped over a few shared words. A
- * sentence carrying even one word of its own outside the match is not a restatement and is kept.
+ * inside the sentence with nothing around it but a pointer back at where the fact was read, such as
+ * "as you mentioned". Either way the matched words must reach the minimum length, so a short sentence
+ * is never dropped over a few shared words. A sentence carrying any words of its own around the match
+ * is not a restatement and is kept, even when the added words are short: "after" standing before noon
+ * makes a different deadline, and "might" makes a different claim.
  */
 function restatesRecalledMemory({
   text,
@@ -606,8 +518,9 @@ function restatesRecalledMemory({
     if (at === -1) {
       return false;
     }
-    const leftover = `${note.slice(0, at)} ${note.slice(at + stored.length)}`.replace(/ +/g, ' ').trim();
-    return leftoverIsOnlyFraming(leftover);
+    const before = note.slice(0, at).trim();
+    const after = note.slice(at + stored.length).trim();
+    return wrappedInAttribution({ before, after });
   });
 }
 
