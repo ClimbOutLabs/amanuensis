@@ -224,7 +224,7 @@ describe('drainTurnEvents and the note pass', () => {
   it('hands a mail result to the note pass and stores its note', async () => {
     const items = await retainedItems(toolRound({ id: 'c1', name: 'gmail__read_email', result: MAIL_TEXT }));
     for (const results of mockNotePassResults) {
-      expect(results).toEqual([{ source: 'email', text: MAIL_TEXT }]);
+      expect(results).toEqual([{ source: 'email', text: MAIL_TEXT, disposition: 'executed_ok' }]);
     }
     for (const recalled of mockNotePassRecalled) {
       expect(recalled).toEqual([]);
@@ -243,7 +243,7 @@ describe('drainTurnEvents and the note pass', () => {
       }),
     );
     for (const results of mockNotePassResults) {
-      expect(results).toEqual([{ source: 'other', text: fieldPage }]);
+      expect(results).toEqual([{ source: 'other', text: fieldPage, disposition: 'executed_ok' }]);
     }
     for (const recalled of mockNotePassRecalled) {
       expect(recalled).toEqual([]);
@@ -258,7 +258,7 @@ describe('drainTurnEvents and the note pass', () => {
     ];
     const items = await retainedItems(earlier);
     for (const results of mockNotePassResults) {
-      expect(results).toEqual([{ source: 'email', text: MAIL_TEXT }]);
+      expect(results).toEqual([{ source: 'email', text: MAIL_TEXT, disposition: 'executed_ok' }]);
     }
     expect(noteItems(items).map(item => item.metadata[NOTE_SOURCE_METADATA_KEY])).toEqual(['email']);
   });

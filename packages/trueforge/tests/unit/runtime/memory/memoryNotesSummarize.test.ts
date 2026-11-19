@@ -2,6 +2,7 @@ import type { ILLM } from '@truefoundry/trueforge-core/core';
 import winston from 'winston';
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import {
+  boundedToolResults,
   buildNotesMessages,
   parseNotesReply,
   replySentences,
@@ -540,6 +541,22 @@ describe('parseNotesReply and what the turn recalled from its memory pages', () 
         recalledMemory: ['Priya asked for the signed form by 2026-11-03.'],
       }),
     ).toEqual([{ source: 'email', text: 'Priya asked for the signed form by 2026-11-03.' }]);
+  });
+});
+
+describe('boundedToolResults', () => {
+  it('keeps how each result\u2019s call ended, and leaves it off a result that carries none', () => {
+    const kept = boundedToolResults([
+      {
+        source: 'other',
+        text: 'Submitted the harbour festival entry form. Confirmation 412.',
+        disposition: 'executed_ok',
+      },
+      { source: 'email', text: 'An older result with no outcome recorded.' },
+    ]);
+    expect(kept).toHaveLength(2);
+    expect(kept[0]?.disposition).toBe('executed_ok');
+    expect(kept[1]?.disposition).toBeUndefined();
   });
 });
 

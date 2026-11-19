@@ -1569,6 +1569,9 @@ async function runTurnEventDrain(params: {
             toolResults.push({
               source: callResultSource(call),
               text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
+              // The outcome rides on the result, so the item check can tell a receipt that
+              // proves an action from one that cannot. The older response shape has none.
+              ...(event.type === EventType.TOOL_RESPONSE_V2 ? { disposition: event.disposition } : {}),
             });
           }
         }

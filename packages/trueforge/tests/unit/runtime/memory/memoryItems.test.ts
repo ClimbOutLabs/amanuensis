@@ -537,4 +537,177 @@ describe('eventsForItemFlags evidence bar', () => {
     expect(events.map(event => event.kind)).toEqual(['opened', 'noted']);
     expect(foldItemEvents(events)).toHaveLength(1);
   });
+
+  it('a completion the reply alone reports leaves the item open, recorded unconfirmed', () => {
+    const open = openedEvent();
+    const item = foldItemEvents([open])[0];
+    if (item === undefined) {
+      throw new Error('fixture item missing');
+    }
+    const flag: ItemFlag = {
+      kind: 'completion',
+      item: 1,
+      owner: 'the person',
+      action: 'Submit the harbour festival entry form',
+      citation: 'I submitted the harbour festival entry form this morning',
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      items: [item],
+      entries: itemListForPrompt([item]).entries,
+      flags: [flag],
+      sources: {
+        userText: 'Thanks. What else is on my list?',
+        results: [],
+        assistantText: 'I submitted the harbour festival entry form this morning.',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['completion_noted']);
+    const folded = foldItemEvents([open, ...events]);
+    expect(folded[0]?.state).toBe('open');
+    expect(folded[0]?.unconfirmedCompletions).toHaveLength(1);
+  });
+
+  it('a completion citing a result whose call failed leaves the item open', () => {
+    const open = openedEvent();
+    const item = foldItemEvents([open])[0];
+    if (item === undefined) {
+      throw new Error('fixture item missing');
+    }
+    const flag: ItemFlag = {
+      kind: 'completion',
+      item: 1,
+      result: 1,
+      owner: 'the person',
+      action: 'Submit the harbour festival entry form',
+      citation: 'Submission failed for the harbour festival entry form',
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      items: [item],
+      entries: itemListForPrompt([item]).entries,
+      flags: [flag],
+      sources: {
+        userText: '',
+        results: [
+          {
+            source: 'other',
+            text: 'Submission failed for the harbour festival entry form: the portal was unreachable.',
+            disposition: 'executed_nonzero',
+          },
+        ],
+        assistantText: 'The submission failed, so I will try again later.',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['completion_noted']);
+    const folded = foldItemEvents([open, ...events]);
+    expect(folded[0]?.state).toBe('open');
+    expect(folded[0]?.unconfirmedCompletions).toHaveLength(1);
+  });
+
+  it('a completion citing a result that ran cleanly closes the item', () => {
+    const open = openedEvent();
+    const item = foldItemEvents([open])[0];
+    if (item === undefined) {
+      throw new Error('fixture item missing');
+    }
+    const flag: ItemFlag = {
+      kind: 'completion',
+      item: 1,
+      result: 1,
+      owner: 'the person',
+      action: 'Submit the harbour festival entry form',
+      citation: 'Submitted the harbour festival entry form',
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      items: [item],
+      entries: itemListForPrompt([item]).entries,
+      flags: [flag],
+      sources: {
+        userText: '',
+        results: [
+          {
+            source: 'other',
+            text: 'Submitted the harbour festival entry form. Confirmation 412.',
+            disposition: 'executed_ok',
+          },
+        ],
+        assistantText: '',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['closed']);
+    expect(events[0]?.closeReason).toBe('completed');
+    const folded = foldItemEvents([open, ...events]);
+    expect(folded[0]?.state).toBe('closed');
+  });
+
+  it('a completion citing a result with no recorded outcome leaves the item open', () => {
+    const open = openedEvent();
+    const item = foldItemEvents([open])[0];
+    if (item === undefined) {
+      throw new Error('fixture item missing');
+    }
+    const flag: ItemFlag = {
+      kind: 'completion',
+      item: 1,
+      result: 1,
+      owner: 'the person',
+      action: 'Submit the harbour festival entry form',
+      citation: 'Submitted the harbour festival entry form',
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      items: [item],
+      entries: itemListForPrompt([item]).entries,
+      flags: [flag],
+      sources: {
+        userText: '',
+        results: [
+          {
+            source: 'other',
+            text: 'Submitted the harbour festival entry form. Confirmation 412.',
+          },
+        ],
+        assistantText: '',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['completion_noted']);
+    const folded = foldItemEvents([open, ...events]);
+    expect(folded[0]?.state).toBe('open');
+    expect(folded[0]?.unconfirmedCompletions).toHaveLength(1);
+  });
+
+  it('a completion in the person\u2019s own words closes the item', () => {
+    const open = openedEvent({
+      citation: 'I need to submit the entry form for the harbour festival',
+      source: 'person',
+    });
+    const item = foldItemEvents([open])[0];
+    if (item === undefined) {
+      throw new Error('fixture item missing');
+    }
+    const flag: ItemFlag = {
+      kind: 'completion',
+      item: 1,
+      owner: 'the person',
+      action: 'Submit the harbour festival entry form',
+      citation: 'I submitted the harbour festival entry form myself this morning',
+    };
+    const events = eventsForItemFlags({
+      ...base,
+      pass: 'person',
+      items: [item],
+      entries: itemListForPrompt([item]).entries,
+      flags: [flag],
+      sources: {
+        userText: 'I submitted the harbour festival entry form myself this morning.',
+        results: [],
+        assistantText: '',
+      },
+    });
+    expect(events.map(event => event.kind)).toEqual(['closed']);
+    const folded = foldItemEvents([open, ...events]);
+    expect(folded[0]?.state).toBe('closed');
+  });
 });

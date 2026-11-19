@@ -917,15 +917,14 @@ export function eventsForItemFlags(params: {
     if (item === undefined) {
       return;
     }
+    // A completion is proved by the person's own words, or by a result that ran cleanly and
+    // shows the action done. The assistant's reply is never proof: it only reports the work.
+    // A result with no recorded outcome (the older shape) proves nothing either.
+    const namedResult = flag.result === undefined ? undefined : params.sources.results[flag.result - 1];
     const cited =
       citationVerifies({ citation: flag.citation, sourceText: params.sources.userText }) ||
-      (flag.result !== undefined &&
-        params.sources.results[flag.result - 1] !== undefined &&
-        citationVerifies({
-          citation: flag.citation,
-          sourceText: params.sources.results[flag.result - 1]?.text ?? '',
-        })) ||
-      citationVerifies({ citation: flag.citation, sourceText: params.sources.assistantText });
+      (namedResult?.disposition === 'executed_ok' &&
+        citationVerifies({ citation: flag.citation, sourceText: namedResult.text }));
     const aboutItem = strengthOf(item) > 0;
     if (!cited || !aboutItem) {
       events.push({
