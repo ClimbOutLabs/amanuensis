@@ -69,7 +69,6 @@ function card(destination: string): InternalToolCallInfo['tier3_card'] {
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
   };
 }
 

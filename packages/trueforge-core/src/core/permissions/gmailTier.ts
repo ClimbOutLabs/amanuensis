@@ -101,7 +101,6 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
     email,
     // The draft was checked to send from the connected account, so the card names that account.
     mail_from: escapeDisplayText(content.fromAddress),

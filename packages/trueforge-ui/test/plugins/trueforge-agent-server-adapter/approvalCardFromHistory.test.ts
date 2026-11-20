@@ -31,7 +31,6 @@ const draftApproval = {
         parsed_command: null,
         outbound_text: null,
         destination_host: 'mail.example.test',
-        outbound_truncated: false,
         email: {
           action: 'save',
           to: [{ name: 'Robin Example', address: 'robin@example.test' }],

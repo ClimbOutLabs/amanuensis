@@ -1,8 +1,8 @@
 import type { Logger } from 'winston';
 import { RemoteMCP, ToolSet } from '../../../src/core';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
-import { InternalToolCallInfoSchema } from '../../../src/core/llm/LLMTypes';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
+import { InternalToolCallInfoSchema } from '../../../src/core/llm/LLMTypes';
 import {
   allowsChatApproval,
   allowsToolGrant,
@@ -263,7 +263,6 @@ describe('chat grant key', () => {
       parsed_command: null,
       outbound_text: null,
       destination_host: null,
-      outbound_truncated: false,
     });
     const keyA = approvalGrantKey({ ...base, tier3_card: card({ destination: 'https://a.example', recipient: null }) });
     const keyB = approvalGrantKey({ ...base, tier3_card: card({ destination: 'https://b.example', recipient: null }) });
@@ -294,7 +293,6 @@ describe('chat grant key', () => {
       parsed_command: null,
       outbound_text: null,
       destination_host: null,
-      outbound_truncated: false,
       ...overrides,
     });
     const keys = [
@@ -384,7 +382,6 @@ describe('a chat grant is tied to the target the card names', () => {
     parsed_command: null,
     outbound_text: null,
     destination_host: target.destination_host ?? null,
-    outbound_truncated: false,
   });
   const consequence = (reason: string): InternalToolCallInfo => ({
     ...toolInfo('tracker', 'archive_item'),
@@ -896,7 +893,6 @@ describe('grant policy carried by a classifier decision for a provider named now
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
   };
 
   it('refuses a standing grant when the invented mail provider decision bars one', () => {

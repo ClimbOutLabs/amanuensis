@@ -70,7 +70,6 @@ function calendarWriteCard(input: {
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
     calendar_event: {
       action: review.action,
       calendar: show(review.calendar),

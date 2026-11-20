@@ -13,12 +13,13 @@ import winston from 'winston';
 
 import type { TurnCustom } from '../../../../src/db/sessionCustom';
 import type { TelegramReplyOrigin } from '../../../../src/db/telegramStore';
+import { TELEGRAM_MAX_MESSAGE_CHARS } from '../../../../src/runtime/telegram/telegramClient';
 import {
   deliverPendingTelegramReplies,
   FROM_APP_APPROVAL_LINE,
+  TELEGRAM_LONG_TEXT_CHARS,
   TELEGRAM_SHOWN_CARD_FIELDS,
   TELEGRAM_SHOWN_SECTION_FIELDS,
-  TELEGRAM_SKILL_INSTRUCTIONS_CHARS,
   telegramAppAddress,
 } from '../../../../src/runtime/telegram/telegramReplies';
 import { createTelegramService } from '../../../../src/runtime/telegram/telegramService';
@@ -68,7 +69,6 @@ const APPROVAL_ACTION: ActionRequiredEvent = {
         parsed_command: null,
         outbound_text: null,
         destination_host: null,
-        outbound_truncated: false,
       },
     },
   ],
@@ -89,7 +89,6 @@ function cardWith(overrides: Partial<Card>): Card {
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
     ...overrides,
   };
 }
@@ -587,7 +586,7 @@ describe('telegram pending replies', () => {
   });
 
   it('cuts a skill whose instructions are too long for Telegram, and sends it with no buttons', async () => {
-    const instructions = `${'a'.repeat(TELEGRAM_SKILL_INSTRUCTIONS_CHARS)}THE-HIDDEN-END`;
+    const instructions = `${'a'.repeat(TELEGRAM_LONG_TEXT_CHARS)}THE-HIDDEN-END`;
     const card = cardWith({
       plain_what: 'Add the skill "long-one"?',
       skill: {
@@ -663,19 +662,30 @@ describe('telegram pending replies', () => {
     expect(store.pendingApprovals).toHaveLength(0);
   });
 
-  it('sends no buttons when the exact request text is cut, and points to the app', async () => {
+  it('sends no buttons when the exact request text is too long for Telegram, and points to the app', async () => {
     const card = cardWith({
       plain_what: 'Call the connector.',
-      outbound_text: 'query: a very long search',
-      outbound_truncated: true,
+      outbound_text: `query: ${'a'.repeat(TELEGRAM_LONG_TEXT_CHARS)}THE-HIDDEN-END`,
     });
     const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
     await deliverPendingTelegramReplies(deps);
-    expect(client.sent).toHaveLength(1);
-    expect(client.sent[0]?.text).toContain('Part of this request is not shown in full.');
-    expect(client.sent[0]?.text).toContain('This is too long to show here in full, so approve or deny it in Aman.');
-    expect(client.sent[0]?.inline_buttons).toBeUndefined();
+    const text = client.sent.map(message => message.text).join('\n');
+    expect(text).toContain('Part of this request is not shown in full.');
+    expect(text).not.toContain('THE-HIDDEN-END');
+    expect(text).toContain('This is too long to show here in full, so approve or deny it in Aman.');
+    expect(client.sent.every(message => message.inline_buttons === undefined)).toBe(true);
     expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('sends a long request whole with buttons when it fits Telegram', async () => {
+    const outbound_text = `body: ${'b'.repeat(TELEGRAM_MAX_MESSAGE_CHARS)}THE-END`;
+    const card = cardWith({ plain_what: 'Call the connector.', outbound_text });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent.map(message => message.text).join('\n');
+    expect(text).toContain('THE-END');
+    expect(text).not.toContain('Part of this request is not shown in full.');
+    expect(store.pendingApprovals).toHaveLength(1);
   });
 
   it('sends no buttons when the action has no card, and points to the app', async () => {

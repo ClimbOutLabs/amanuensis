@@ -48,7 +48,6 @@ function card(overrides: Partial<Tier3Card> = {}): Tier3Card {
     parsed_command: null,
     outbound_text: 'to: ana@example.com',
     destination_host: 'mail.example.com',
-    outbound_truncated: false,
     ...overrides,
   };
 }
@@ -428,11 +427,6 @@ describe('checkHeldReplay', () => {
       name: 'the connector that receives the call changed',
       shown: {},
       now: { destination_host: 'mail.elsewhere.test' },
-    },
-    {
-      name: 'part of what goes out is now cut short',
-      shown: { outbound_truncated: false },
-      now: { outbound_truncated: true },
     },
     {
       name: 'a calendar change gained a guest',

@@ -17,7 +17,6 @@ function haChangeDecision(grant_tool_name: string | null): TierDecision {
       parsed_command: null,
       outbound_text: 'entity_id: light.living_room_lamp',
       destination_host: null,
-      outbound_truncated: false,
     },
     reason: 'home_assistant_change',
     reason_detail: 'A change to your home asks first.',
