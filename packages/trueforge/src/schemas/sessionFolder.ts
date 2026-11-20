@@ -37,3 +37,10 @@ export const DeleteSessionFolderResponseSchema = z.object({}).openapi('DeleteSes
 export const SetSessionFolderResponseSchema = z.object({}).openapi('SetSessionFolderResponse');
 
 export type SessionFolder = z.infer<typeof SessionFolderSchema>;
+
+export const SetSessionArchiveRequestSchema = z
+  .object({ archived: z.boolean() })
+  .strict()
+  .openapi('SetSessionArchiveRequest');
+
+export const SetSessionArchiveResponseSchema = z.object({}).openapi('SetSessionArchiveResponse');

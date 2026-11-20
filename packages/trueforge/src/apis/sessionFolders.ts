@@ -10,6 +10,7 @@ import {
   deleteSessionFolderRoute,
   listSessionFoldersRoute,
   putSessionFolderRoute,
+  setSessionArchiveRoute,
   setSessionFolderRoute,
 } from '../routes/sessionFolderRoutes';
 import { PRIVATE_CHAT_FOLDER_MESSAGE, sessionKeepsNothing } from '../runtime/privateChat';
@@ -160,7 +161,40 @@ export function createSessionFolderAssignmentsRouter(deps: {
     return c.json({}, 200);
   };
 
+  const archiveHandler: RouteHandler<typeof setSessionArchiveRoute> = async c => {
+    const { session_id: sessionId } = c.req.valid('param');
+    const owner = deps.resolveRequestContext(c);
+    const ownership = await requireOwnedSession(sessionId, owner.subject.id);
+    if (ownership.error === 'not_found') {
+      return c.json({ error: { message: 'Chat not found. Refresh the chat list and try again.' } }, 404);
+    }
+    if (ownership.error === 'forbidden') {
+      return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    if (sessionKeepsNothing({ session: ownership.session })) {
+      return c.json(
+        { error: { message: 'Incognito chats cannot be archived. Start a regular chat to keep it.' } },
+        422,
+      );
+    }
+    try {
+      await deps.sessionStore.mergeSessionMetadata({
+        tenant_id: TENANT_ID,
+        session_id: sessionId,
+        key: 'archived',
+        value: c.req.valid('json').archived ? 'true' : 'false',
+      });
+    } catch (error) {
+      if (error instanceof SessionNotFoundError) {
+        return c.json({ error: { message: 'Chat not found. Refresh the chat list and try again.' } }, 404);
+      }
+      throw error;
+    }
+    return c.json({}, 200);
+  };
+
   const router = new OpenAPIHono();
+  router.openapi(setSessionArchiveRoute, archiveHandler);
   router.openapi(setSessionFolderRoute, setHandler);
   router.openapi(clearSessionFolderRoute, clearHandler);
   return router;

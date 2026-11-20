@@ -7,6 +7,7 @@ interface SessionWire {
   updated_at: string;
   agentName: string | null;
   isMutable: boolean;
+  archived: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -96,6 +97,7 @@ function readSessionPage(value: unknown): { sessions: SessionWire[]; nextPageTok
       updated_at: item.updated_at,
       agentName: agent.agentName,
       isMutable: agent.isMutable,
+      archived: isRecord(item.metadata) && item.metadata.archived === 'true',
     };
   });
   const pagination = isRecord(value) && 'pagination' in value ? value.pagination : undefined;
@@ -148,8 +150,18 @@ export function createChatFolderStore(fetcher: typeof fetch): ChatFolderStore {
   }
 
   return {
+    async setSessionArchived({ sessionId, archived }) {
+      await readJson(
+        await fetcher(`/api/v1/sessions/${encodeURIComponent(sessionId)}/archive`, {
+          method: 'PUT',
+          headers: jsonHeaders,
+          body: JSON.stringify({ archived }),
+        }),
+      );
+    },
     async load() {
       const folders = readFolders(await readJson(await fetcher('/api/v1/session-folders')));
+      const archivedSessionIds: string[] = [];
       const assignments: { sessionId: string; folderId: string }[] = [];
       const folderSessions: { folderId: string; sessions: ChatFolderSession[] }[] = [];
       // Each folder's chats come from the server by folder, so a folder is complete
@@ -157,6 +169,9 @@ export function createChatFolderStore(fetcher: typeof fetch): ChatFolderStore {
       for (const folder of folders) {
         const sessions: ChatFolderSession[] = [];
         for (const session of await listAllSessions({ folder_id: folder.id })) {
+          if (session.archived) {
+            archivedSessionIds.push(session.id);
+          }
           assignments.push({ sessionId: session.id, folderId: folder.id });
           sessions.push(toFolderSession(session));
         }
@@ -164,8 +179,14 @@ export function createChatFolderStore(fetcher: typeof fetch): ChatFolderStore {
       }
       // Chats with no folder come from their own query for the same reason: the
       // recent chats list only covers its loaded pages.
-      const unfiledSessions = (await listAllSessions({ no_folder: 'true' })).map(toFolderSession);
-      return { folders, assignments, folderSessions, unfiledSessions };
+      const unfiled = await listAllSessions({ no_folder: 'true' });
+      for (const session of unfiled) {
+        if (session.archived) {
+          archivedSessionIds.push(session.id);
+        }
+      }
+      const unfiledSessions = unfiled.map(toFolderSession);
+      return { folders, assignments, folderSessions, unfiledSessions, archivedSessionIds };
     },
 
     async createFolder({ name }) {
