@@ -157,21 +157,22 @@ That script sets `STANDALONE=false` and uses `POSTGRES_*` from `packages/truefor
 
 Workspace tasks go through `package.json` scripts - if a repeatable workflow is missing, add a script rather than documenting an ad hoc command.
 
-| Script                                               | Purpose                                               |
-| ---------------------------------------------------- | ----------------------------------------------------- |
-| `pnpm standalone:dev` / `pnpm dev`                   | Local UI + API (see modes above)                      |
-| `pnpm standalone:dev:no-watch` / `pnpm dev:no-watch` | Same, but the server does not restart on file changes |
-| `pnpm dev:server:ui`                                 | Packed UI + watched API (no Vite)                     |
-| `pnpm build`                                         | Build all packages                                    |
-| `pnpm test` / `pnpm typecheck`                       | Workspace checks                                      |
-| `pnpm lint` / `pnpm format`                          | ESLint (with fixes) / Prettier                        |
-| `pnpm smoke` / `pnpm smoke:down`                     | Full Docker Compose stack + health check              |
-| `pnpm ui:sweep`                                      | Picture and measure every screen (see below)          |
-| `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`         |
-| `pnpm smoke:npx:amanuensis`                          | Pack `amanuensis` and start it with `npx`; CI runs it |
-| `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                               |
-| `pnpm clean` / `pnpm clean:all`                      | Remove build outputs (+ `node_modules` for `:all`)    |
-| `pnpm licenses:check`                                | Check dependency licenses (see below)                 |
+| Script                                               | Purpose                                                         |
+| ---------------------------------------------------- | --------------------------------------------------------------- |
+| `pnpm standalone:dev` / `pnpm dev`                   | Local UI + API (see modes above)                                |
+| `pnpm standalone:dev:no-watch` / `pnpm dev:no-watch` | Same, but the server does not restart on file changes           |
+| `pnpm dev:server:ui`                                 | Packed UI + watched API (no Vite)                               |
+| `pnpm build`                                         | Build all packages                                              |
+| `pnpm verify`                                        | Every check CI runs: secrets, format, types, lint, build, tests |
+| `pnpm test` / `pnpm typecheck`                       | Workspace checks                                                |
+| `pnpm lint` / `pnpm format`                          | ESLint (with fixes) / Prettier                                  |
+| `pnpm smoke` / `pnpm smoke:down`                     | Full Docker Compose stack + health check                        |
+| `pnpm ui:sweep`                                      | Picture and measure every screen (see below)                    |
+| `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`                   |
+| `pnpm smoke:npx:amanuensis`                          | Pack `amanuensis` and start it with `npx`; CI runs it           |
+| `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                                         |
+| `pnpm clean` / `pnpm clean:all`                      | Remove build outputs (+ `node_modules` for `:all`)              |
+| `pnpm licenses:check`                                | Check dependency licenses (see below)                           |
 
 ## Testing
 
