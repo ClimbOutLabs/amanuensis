@@ -11627,6 +11627,127 @@ await client.settings.mcpServers.delete("name");
 </dl>
 </details>
 
+## Settings MemoryItemTracking
+<details><summary><code>client.settings.memoryItemTracking.<a href="/src/api/resources/settings/resources/memoryItemTracking/client/Client.ts">get</a>() -> TrueForge.GetMemoryItemTrackingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The stored override for item tracking, or the default (on) when none is stored.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryItemTracking.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryItemTrackingClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryItemTracking.<a href="/src/api/resources/settings/resources/memoryItemTracking/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryItemTrackingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the item-tracking override: `true`/`false` turns tracking of open items on/off; `null` clears the override back to the default. Turning it off leaves the diary and the items already recorded untouched.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryItemTracking.createOrUpdate({
+    enabled: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryItemTrackingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryItemTrackingClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings MemoryNightly
 <details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">get</a>() -> TrueForge.GetMemoryNightlyResponse</code></summary>
 <dl>

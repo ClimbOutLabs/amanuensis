@@ -320,6 +320,8 @@
   "In this chat": "packages/trueforge-ui/src/components/RailDesk.tsx",
   "Use memories in replies": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySettings.tsx",
   "Turn summaries": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySettings.tsx",
+  "Open items": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySettings.tsx",
+  "Track open items": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySettings.tsx",
   "Recall screening": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySettings.tsx",
   "Tool-output screening": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySettings.tsx",
   "About you": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",

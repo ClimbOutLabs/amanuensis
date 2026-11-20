@@ -323,6 +323,10 @@
       "set": "connectors",
       "tests": []
     },
+    "route:memoryItemTracking": {
+      "set": "memory",
+      "tests": []
+    },
     "route:memoryNightly": {
       "set": "memory",
       "tests": []
@@ -843,6 +847,7 @@
     "route:help",
     "route:mcpOAuth",
     "route:mcpServer",
+    "route:memoryItemTracking",
     "route:memoryNightly",
     "route:memoryPageSorting",
     "route:memoryPages",
