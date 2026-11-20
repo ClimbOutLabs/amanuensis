@@ -112,6 +112,22 @@ What it can do today:
   puts the copy back if anything fails. Opening the backup happens in
   there too, so no tool it needs has to be on Windows.
 
+On a first install with a person at the computer, the questions are
+asked in a setup window instead of on the terminal. The window is
+drawn by Windows PowerShell, started by its full path inside the
+Windows folder with a fixed script that is fed to it on standard
+input and never written to disk. The program and the window talk only
+over the window process's input and output: there is no server, no
+port and no file. The program keeps the order of the screens (Welcome,
+Check this computer, About you, Options, Review, Install, Done), and
+the window only draws what it is sent and sends back answers. The
+password leaves the window as bytes in a frame of its own, is never
+made into text on either side, and is wiped once the installer has
+read it. `aman install --console` asks on the terminal instead, and
+the terminal is also used when the window cannot be opened, for
+example where Windows PowerShell is restricted. The code is in
+`src/window/`.
+
 On Windows, a window that a double-click or a Start menu entry opened
 stays open at the end until the person presses Enter, so the result and
 any problem can be read; a successful `aman open` closes at once, and a

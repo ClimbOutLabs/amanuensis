@@ -40,6 +40,9 @@ import {
   INSTALL_YES_OR_NO_LINE,
   installPasswordProblem,
   problemText,
+  WINDOW_EMAIL_PROBLEM,
+  WINDOW_FALLBACK_LINE,
+  WINDOW_OPEN_LINE,
 } from '../messages.ts';
 import type { FetchBytes } from '../release/download.ts';
 import { fetchLatestManifest, fetchReleaseFile, sourceArchiveName } from '../release/download.ts';
@@ -78,10 +81,42 @@ export interface InstallDeps extends DoctorDeps {
   // The network step's wiring, the same main wires for aman network.
   interfaces: Readonly<Record<string, readonly NetworkInterfaceInfo[] | undefined>>;
   hostName: string;
+  // Told when each stage of the install starts and how it ends, for a
+  // caller that shows progress. The console flow leaves it unset.
+  report?: (progress: InstallProgress) => void;
   // Only a test sets this; the shipped command checks downloads
   // against the release key compiled into the executable.
   releasePublicKey?: string;
 }
+
+// The stages of a first install, in the order they run.
+export type InstallStage =
+  'docker' | 'checks' | 'download' | 'install' | 'shortcuts' | 'update' | 'private' | 'open' | 'phone';
+
+export interface InstallProgress {
+  stage: InstallStage;
+  state: 'started' | 'done' | 'failed';
+}
+
+// Runs one stage and reports how it went to whoever shows progress.
+async function staged<T>(
+  deps: InstallDeps,
+  options: { stage: InstallStage; run: () => Promise<T>; ok: (result: T) => boolean },
+): Promise<T> {
+  deps.report?.({ stage: options.stage, state: 'started' });
+  let result: T;
+  try {
+    result = await options.run();
+  } catch (error) {
+    deps.report?.({ stage: options.stage, state: 'failed' });
+    throw error;
+  }
+  deps.report?.({ stage: options.stage, state: options.ok(result) ? 'done' : 'failed' });
+  return result;
+}
+
+const isZero = (code: number): boolean => code === 0;
+const isTrue = (ok: boolean): boolean => ok;
 
 // How long the first install waits for Docker Desktop to answer after
 // it is started: it is installing, or showing its terms, or the
@@ -229,10 +264,33 @@ async function ensureDockerReady(deps: InstallDeps, options: { resumed: boolean 
   return true;
 }
 
-interface Answers {
+// What a first install needs from the person. The password is kept
+// as the bytes the installer is handed (UTF-8), never as text, so it
+// can be wiped once the installer has read it.
+export interface InstallAnswers {
   email: string;
-  password: string;
+  password: Uint8Array;
   phone: boolean;
+}
+
+// How a first install shown in the setup window ended: it ran to an
+// end with an exit code, it found Aman already installed, or the
+// window could not be used and the questions go to the terminal.
+export type WindowOutcome = { kind: 'finished'; code: number } | { kind: 'installed' } | { kind: 'fallback' };
+
+// The email as the window takes it: something before and after one @,
+// no spaces or control characters, and no leading dash, because the
+// installer is handed it as one word after --email.
+export function installEmailProblem(email: string): string | null {
+  const trimmed = email.trim();
+  if (trimmed.length > 254 || trimmed.startsWith('-') || !/^[^\s\p{Cc}@]+@[^\s\p{Cc}@]+$/u.test(trimmed)) {
+    return WINDOW_EMAIL_PROBLEM;
+  }
+  return null;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
 
 // The three questions, one at a time, each prompt ending with a colon.
@@ -241,7 +299,7 @@ interface Answers {
 // a password that falls short is asked again before it is typed a
 // second time. Nothing else is asked: ports are picked, the instance
 // is main, backups are daily, and the model is added in Aman itself.
-async function askQuestions(deps: InstallDeps): Promise<Answers | null> {
+async function askQuestions(deps: InstallDeps): Promise<InstallAnswers | null> {
   const { print } = deps;
   let email = '';
   while (email === '') {
@@ -251,22 +309,30 @@ async function askQuestions(deps: InstallDeps): Promise<Answers | null> {
     }
     email = answer.trim();
   }
-  let password: string | null = null;
+  const encoder = new TextEncoder();
+  let password: Uint8Array | null = null;
   while (password === null) {
-    const first = await deps.askSecret(INSTALL_PASSWORD_QUESTION);
-    if (first === null) {
+    const typed = await deps.askSecret(INSTALL_PASSWORD_QUESTION);
+    if (typed === null) {
       return null;
     }
+    const first = encoder.encode(typed);
     const problem = installPasswordProblem(first);
     if (problem !== null) {
+      first.fill(0);
       print(problem);
       continue;
     }
-    const second = await deps.askSecret(INSTALL_PASSWORD_AGAIN_QUESTION);
-    if (second === null) {
+    const typedAgain = await deps.askSecret(INSTALL_PASSWORD_AGAIN_QUESTION);
+    if (typedAgain === null) {
+      first.fill(0);
       return null;
     }
-    if (first !== second) {
+    const second = encoder.encode(typedAgain);
+    const same = sameBytes(first, second);
+    second.fill(0);
+    if (!same) {
+      first.fill(0);
       print(INSTALL_PASSWORD_MISMATCH_LINE);
       continue;
     }
@@ -367,7 +433,7 @@ async function unpackNewestSource(deps: InstallDeps): Promise<boolean> {
 // on: the password, on one line. It is never on the command line and
 // never printed here; the
 // shell's own output is shown as it stands.
-async function runContainerInstall(deps: InstallDeps, answers: Answers): Promise<number> {
+async function runContainerInstall(deps: InstallDeps, answers: InstallAnswers): Promise<number> {
   const { jobs, print } = deps;
   let ports: { appPort: number; loginPort: number };
   try {
@@ -384,45 +450,59 @@ async function runContainerInstall(deps: InstallDeps, answers: Answers): Promise
     appPort: ports.appPort,
     loginPort: ports.loginPort,
   });
-  const stdin = `${answers.password}\n`;
-  const result = await deps.runner.runBytes(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '-i',
-      '-v',
-      '/var/run/docker.sock:/var/run/docker.sock',
-      '-v',
-      `${STATE_VOLUME}:${VOLUME_HOME}`,
-      '-v',
-      `${SOURCE_VOLUME}:${SOURCE_DIR}`,
-      '-w',
-      SOURCE_DIR,
-      SETUP_IMAGE,
-      ...args,
-    ],
-    new TextEncoder().encode(stdin),
-  );
+  // Judged again here, whoever asked: the installer reads the password
+  // as one line, so nothing with a line break in it may reach it.
+  const problem = installPasswordProblem(answers.password);
+  if (problem !== null) {
+    answers.password.fill(0);
+    print(problem);
+    return 1;
+  }
+  const stdin = new Uint8Array(answers.password.length + 1);
+  stdin.set(answers.password);
+  stdin[answers.password.length] = 0x0a;
+  // The installer's own lines are shown as they arrive.
+  const shown: string[] = [];
+  const result = await deps.runner
+    .runBytes(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '-i',
+        '-v',
+        '/var/run/docker.sock:/var/run/docker.sock',
+        '-v',
+        `${STATE_VOLUME}:${VOLUME_HOME}`,
+        '-v',
+        `${SOURCE_VOLUME}:${SOURCE_DIR}`,
+        '-w',
+        SOURCE_DIR,
+        SETUP_IMAGE,
+        ...args,
+      ],
+      stdin,
+      line => {
+        if (line.trim() !== '') {
+          shown.push(line);
+          print(line);
+        }
+      },
+    )
+    .finally(() => {
+      // The installer has read the password, or never will: no copy
+      // of it is kept here either way.
+      stdin.fill(0);
+      answers.password.fill(0);
+    });
   if (!result.started) {
     print(problemText(INSTALL_DOCKER_NOT_ANSWERING));
     return 1;
   }
-  const stdout = new TextDecoder().decode(result.stdout);
-  for (const line of stdout.split('\n')) {
-    if (line.trim() !== '') {
-      print(line);
-    }
-  }
-  for (const line of result.stderr.split('\n')) {
-    if (line.trim() !== '') {
-      print(line);
-    }
-  }
   if (result.exitCode === 0) {
     return 0;
   }
-  const combined = `${stdout}\n${result.stderr}`;
+  const combined = shown.join('\n');
   if (combined.includes('Another install is running right now')) {
     print(problemText(INSTALL_BUSY));
     return 1;
@@ -466,38 +546,58 @@ async function installedAddress(deps: InstallDeps): Promise<string | null> {
 // without it.
 async function finishInstall(deps: InstallDeps, options: { phone: boolean; page: boolean }): Promise<number> {
   const { jobs, print } = deps;
-  const adoptCode = await runAdopt({ host: deps.host, store: deps.store, jobs, print });
+  const adoptCode = await staged(deps, {
+    stage: 'shortcuts',
+    run: () => runAdopt({ host: deps.host, store: deps.store, jobs, print }),
+    ok: isZero,
+  });
   if (adoptCode !== 0) {
     return adoptCode;
   }
-  const upgradeCode = await runUpgrade({
-    ...deps,
-    jobs,
-    programsDir: deps.programsDir ?? win32.dirname(jobs.programsExePath),
-    ...(deps.releasePublicKey === undefined ? {} : { releasePublicKey: deps.releasePublicKey }),
+  const upgradeCode = await staged(deps, {
+    stage: 'update',
+    run: () =>
+      runUpgrade({
+        ...deps,
+        jobs,
+        programsDir: deps.programsDir ?? win32.dirname(jobs.programsExePath),
+        ...(deps.releasePublicKey === undefined ? {} : { releasePublicKey: deps.releasePublicKey }),
+      }),
+    ok: isZero,
   });
   if (upgradeCode !== 0) {
     return upgradeCode;
   }
-  try {
-    await jobs.makeFolderPrivate(jobs.dataDir);
-    print(FILES_MADE_PRIVATE_LINE);
-  } catch (error) {
-    if (error instanceof WindowsJobError) {
-      print(problemText(FILES_COULD_NOT_FIX));
-      return 1;
-    }
-    throw error;
+  const madePrivate = await staged(deps, {
+    stage: 'private',
+    run: async () => {
+      try {
+        await jobs.makeFolderPrivate(jobs.dataDir);
+        print(FILES_MADE_PRIVATE_LINE);
+        return true;
+      } catch (error) {
+        if (error instanceof WindowsJobError) {
+          print(problemText(FILES_COULD_NOT_FIX));
+          return false;
+        }
+        throw error;
+      }
+    },
+    ok: isTrue,
+  });
+  if (!madePrivate) {
+    return 1;
   }
-  const openCode = await runOpen({ ...deps, jobs });
+  const openCode = await staged(deps, { stage: 'open', run: () => runOpen({ ...deps, jobs }), ok: isZero });
   if (openCode !== 0) {
     return openCode;
   }
   if (options.phone) {
-    const networkCode = await runNetwork(
-      { ...deps, jobs, interfaces: deps.interfaces, hostName: deps.hostName },
-      { mode: 'open' },
-    );
+    const networkCode = await staged(deps, {
+      stage: 'phone',
+      run: () => runNetwork({ ...deps, jobs, interfaces: deps.interfaces, hostName: deps.hostName }, { mode: 'open' }),
+      ok: isZero,
+    });
     if (networkCode !== 0) {
       return networkCode;
     }
@@ -533,8 +633,17 @@ async function finishInstall(deps: InstallDeps, options: { phone: boolean; page:
 // run in their order, and a getting started page opens at the end.
 // A run that finds Aman already installed finishes those same stages
 // instead of asking anything.
-export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }): Promise<number> {
-  const { host, jobs, store, print } = deps;
+export async function runInstall(
+  deps: InstallDeps,
+  options: {
+    dryRun: boolean;
+    // Shows the first install in the setup window. Answers null when
+    // no window can be opened on this computer. Left out, the
+    // questions are asked on the terminal.
+    window?: (deps: InstallDeps) => Promise<WindowOutcome | null>;
+  },
+): Promise<number> {
+  const { host, print } = deps;
   if (host.kind !== 'windows') {
     print(problemText(INSTALL_NOT_WINDOWS));
     return 1;
@@ -545,37 +654,22 @@ export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }
     }
     return 0;
   }
-  // An earlier removal's note that Docker is cleared stops being true
-  // the moment this install puts anything there, finished or not.
-  try {
-    await jobs.clearDockerSideRemoved();
-  } catch {
-    print(problemText(INSTALL_REMOVAL_NOTE_STUCK));
-    return 1;
-  }
-  const resumed = await jobs.runOnceResumePending().catch(() => false);
-  if (resumed) {
-    print(INSTALL_CONTINUING_LINE);
-  }
-  if (!(await ensureDockerReady(deps, { resumed }))) {
-    return 1;
-  }
-  if ((await checkDocker(deps)) !== 0) {
-    return 1;
-  }
-  let summary: StateSummary | null = null;
-  try {
-    summary = await store.readSummary();
-  } catch (error) {
-    if (error instanceof StateImageError) {
-      print(problemText(INSTALL_IMAGE_UNAVAILABLE));
-      return 1;
+  if (options.window !== undefined) {
+    print(WINDOW_OPEN_LINE);
+    const outcome = await options.window(deps);
+    if (outcome !== null && outcome.kind === 'finished') {
+      return outcome.code;
     }
-    if (!(error instanceof StateDockerError)) {
-      throw error;
+    if (outcome !== null && outcome.kind === 'installed') {
+      return finishInstall(deps, { phone: false, page: false });
     }
+    print(WINDOW_FALLBACK_LINE);
   }
-  if (summary !== null && !summary.releaseUnreadable && (summary.release !== null || summary.instances.length > 0)) {
+  const prepared = await prepareInstall(deps);
+  if (prepared === 'failed') {
+    return 1;
+  }
+  if (prepared === 'installed') {
     return finishInstall(deps, { phone: false, page: false });
   }
   const answers = await askQuestions(deps);
@@ -583,11 +677,73 @@ export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }
     print(problemText(INSTALL_NO_ANSWER));
     return 1;
   }
-  if (!(await unpackNewestSource(deps))) {
+  return installWithAnswers(deps, answers);
+}
+
+// Everything a first install does before it asks anything: Docker is
+// made ready and checked, and the computer is read for an Aman that
+// is already there. Whoever asks the questions, on the terminal or in
+// a window, asks them only after this says the computer is fresh.
+export async function prepareInstall(deps: InstallDeps): Promise<'fresh' | 'installed' | 'failed'> {
+  const { jobs, store, print } = deps;
+  // An earlier removal's note that Docker is cleared stops being true
+  // the moment this install puts anything there, finished or not.
+  try {
+    await jobs.clearDockerSideRemoved();
+  } catch {
+    print(problemText(INSTALL_REMOVAL_NOTE_STUCK));
+    return 'failed';
+  }
+  const resumed = await jobs.runOnceResumePending().catch(() => false);
+  if (resumed) {
+    print(INSTALL_CONTINUING_LINE);
+  }
+  if (!(await staged(deps, { stage: 'docker', run: () => ensureDockerReady(deps, { resumed }), ok: isTrue }))) {
+    return 'failed';
+  }
+  if ((await staged(deps, { stage: 'checks', run: () => checkDocker(deps), ok: isZero })) !== 0) {
+    return 'failed';
+  }
+  let summary: StateSummary | null = null;
+  try {
+    summary = await store.readSummary();
+  } catch (error) {
+    if (error instanceof StateImageError) {
+      print(problemText(INSTALL_IMAGE_UNAVAILABLE));
+      return 'failed';
+    }
+    if (!(error instanceof StateDockerError)) {
+      throw error;
+    }
+  }
+  if (summary !== null && !summary.releaseUnreadable && (summary.release !== null || summary.instances.length > 0)) {
+    return 'installed';
+  }
+  return 'fresh';
+}
+
+// The install itself, once the answers are in: the newest source is
+// fetched and checked, the shell's installer runs in the setup
+// container, and the finishing steps run in their order. The password
+// in the answers is wiped by the time this returns.
+export async function installWithAnswers(deps: InstallDeps, answers: InstallAnswers): Promise<number> {
+  const { jobs, store } = deps;
+  const unpacked = await staged(deps, { stage: 'download', run: () => unpackNewestSource(deps), ok: isTrue }).catch(
+    (error: unknown) => {
+      answers.password.fill(0);
+      throw error;
+    },
+  );
+  if (!unpacked) {
+    answers.password.fill(0);
     return 1;
   }
   await jobs.keepComputerAwake().catch(() => undefined);
-  const installCode = await runContainerInstall(deps, answers);
+  const installCode = await staged(deps, {
+    stage: 'install',
+    run: () => runContainerInstall(deps, answers),
+    ok: isZero,
+  });
   if (installCode !== 0) {
     return installCode;
   }

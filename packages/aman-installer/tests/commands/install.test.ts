@@ -1,14 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { runInstall, type InstallDeps } from '../../src/commands/install.ts';
-import { FakeHost } from '../../src/host/fakeHost.ts';
-import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWindowsJobs.ts';
-import { DOCKER_DESKTOP_DOWNLOAD_URL } from '../../src/host/windowsJobs.ts';
+import { installWithAnswers, prepareInstall, runInstall, type InstallProgress } from '../../src/commands/install.ts';
 import {
   ADOPTED_LINE,
   FILES_MADE_PRIVATE_LINE,
@@ -19,6 +13,7 @@ import {
   INSTALL_DRY_RUN_LINES,
   INSTALL_NOT_WINDOWS,
   INSTALL_NO_ANSWER,
+  INSTALL_PASSWORD_CONTROL_LINE,
   INSTALL_PASSWORD_MISMATCH_LINE,
   INSTALL_RELEASE_NOT_THERE,
   INSTALL_RESTART_NEEDED,
@@ -31,347 +26,18 @@ import {
   openReadyLine,
   problemText,
 } from '../../src/messages.ts';
-import type { FetchBytesResult } from '../../src/release/download.ts';
-import { buildManifest, manifestToBytes, type SourceIds } from '../../src/release/manifest.ts';
-import { signMinisign } from '../../src/release/minisign.ts';
 import {
-  RecordingProcessRunner,
-  commandLine,
   okBytesResult,
   okResult,
   type ProcessBytesResult,
   type ProcessResult,
   type ProcessRunner,
 } from '../../src/runner/processRunner.ts';
-import {
-  createStateStore,
-  parseRegistry,
-  renderRelease,
-  type StateStore,
-  type StateSummary,
-} from '../../src/state/state.ts';
+import { createStateStore, renderRelease } from '../../src/state/state.ts';
 import { buildTar, parseTar } from '../../src/state/tar.ts';
 import { STATE_VOLUME, VOLUME_HOME, volumeBackend } from '../../src/state/volumeBackend.ts';
-import { TEST_PUBLIC_KEY_MINISIGN, testKeyNum, testPrivateKeyDer } from '../release/testKeys.ts';
 
-const NOW = 1791633600;
-const GIB = 1024 * 1024 * 1024;
-const RELEASE_TAG = 'v9.9.9';
-const ASSET_NAME = 'aman-windows-x64.exe';
-const ARCHIVE_NAME = 'amanuensis-v9.9.9.tar.gz';
-const PROGRAM = new TextEncoder().encode('the aman program');
-const ARCHIVE = new TextEncoder().encode('the source archive bytes');
-const DOCKER_INSTALLER = new TextEncoder().encode('the docker desktop installer');
-const PASSWORD = 'Password1!';
-const IDS: SourceIds = {
-  'aman-app': 'aman-app:0123456789ab',
-  'aman-stt': 'aman-stt:0123456789cd',
-  'aman-tts': 'aman-tts:0123456789cd',
-  'aman-calendar-caldav': 'aman-calendar-caldav:0123456789ef',
-  'aman-browser': 'aman-browser:0123456789ef',
-};
-const RELEASE_BASE = 'https://github.com/ClimbOutLabs/amanuensis/releases';
-const MANIFEST_URL = `${RELEASE_BASE}/latest/download/manifest.json`;
-const SIGNATURE_URL = `${RELEASE_BASE}/latest/download/manifest.json.minisig`;
-const ARCHIVE_URL = `${RELEASE_BASE}/download/${RELEASE_TAG}/${ARCHIVE_NAME}`;
-const LOCAL_APP_DATA = 'C:\\Users\\Friend\\AppData\\Local';
-const START_MENU_DIR = 'C:\\Users\\Friend\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs';
-const CERT = '-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n';
-
-function emptySummary(): StateSummary {
-  return {
-    release: null,
-    releaseUnreadable: false,
-    previousRelease: null,
-    instances: [],
-    backups: [],
-    backupEntries: [],
-    backupsMode: null,
-    backupsModeTimeSeconds: null,
-    certificateAuthority: { certPresent: false, keyMode: null, fingerprint: null, fingerprintHasContent: false },
-    sourceCheckout: null,
-    installedAppImage: null,
-  };
-}
-
-function installedSummary(): StateSummary {
-  return {
-    ...emptySummary(),
-    instances: [
-      {
-        name: 'main',
-        entries: parseRegistry(
-          [
-            'name=main',
-            'app_port=8791',
-            'login_port=5556',
-            'tls=local',
-            'tls_port=8443',
-            'origins=http://127.0.0.1:8791,https://localhost:8443',
-            'public_url=https://localhost:8443',
-          ].join('\n'),
-        ),
-      },
-    ],
-  };
-}
-
-// The state store the flow reads: an install the container step made
-// appears once the step has run, as it does on a real computer.
-class WorldStore implements StateStore {
-  installed = false;
-  modes: string[] = [];
-
-  readSummary(): Promise<StateSummary> {
-    return Promise.resolve(this.installed ? installedSummary() : emptySummary());
-  }
-
-  readCaCertificate(): Promise<string | null> {
-    return Promise.resolve(this.installed ? CERT : null);
-  }
-
-  refreshCache(): void {
-    // This store holds nothing back: every read answers from the
-    // world as it stands, so there is no cache to drop.
-  }
-
-  writeInstance(): Promise<boolean> {
-    return Promise.resolve(false);
-  }
-
-  setInstanceValue(): Promise<boolean> {
-    return Promise.resolve(false);
-  }
-
-  removeInstance(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  writeRelease(): Promise<boolean> {
-    return Promise.resolve(false);
-  }
-
-  setBackupsMode(mode: 'daily' | 'off'): Promise<boolean> {
-    this.modes.push(mode);
-    return Promise.resolve(true);
-  }
-}
-
-interface WorldOptions {
-  kind?: 'windows' | 'darwin';
-  dockerInstalled?: boolean;
-  dockerRunning?: boolean;
-  dockerNeverRuns?: boolean;
-  lowMemory?: boolean;
-  installerSigner?: string | null;
-  runOncePending?: boolean;
-  runOnceValueName?: string;
-  failRunOnceSet?: boolean;
-  storeInstalled?: boolean;
-  askAnswers?: readonly (string | null)[];
-  secretAnswers?: readonly (string | null)[];
-  containerStdout?: string;
-  containerExit?: number;
-  tamperManifest?: boolean;
-  noDockerDownload?: boolean;
-}
-
-// The computer the flow runs on: Docker in the state the test asks
-// for, the release server answering from a table, and the container
-// install making the install appear in the store when it succeeds.
-class WorldRunner implements ProcessRunner {
-  private readonly options: WorldOptions;
-  private readonly jobs: FakeWindowsJobs;
-  private readonly store: WorldStore;
-  dockerInstalled: boolean;
-  installRuns: { args: readonly string[]; stdin: Uint8Array }[] = [];
-  installerRuns: (readonly string[])[] = [];
-
-  constructor(options: WorldOptions, jobs: FakeWindowsJobs, store: WorldStore) {
-    this.options = options;
-    this.jobs = jobs;
-    this.store = store;
-    this.dockerInstalled = options.dockerInstalled ?? true;
-  }
-
-  private dockerRunning(): boolean {
-    if (this.options.dockerNeverRuns === true) {
-      return false;
-    }
-    return (this.options.dockerRunning ?? true) || this.jobs.dockerDesktopStarts > 0;
-  }
-
-  run(command: string, args: readonly string[]): Promise<ProcessResult> {
-    if (command === this.jobs.dockerDesktopInstallerPath) {
-      this.installerRuns.push(args);
-      this.dockerInstalled = true;
-      return Promise.resolve(okResult(''));
-    }
-    if (command !== 'docker') {
-      return Promise.resolve({ exitCode: 1, stdout: '', stderr: '', started: false });
-    }
-    const line = commandLine(command, args);
-    if (line === 'docker --version') {
-      return Promise.resolve(
-        this.dockerInstalled
-          ? okResult('Docker version 27.3.1, build 0a1b2c3\n')
-          : { exitCode: 1, stdout: '', stderr: '', started: false },
-      );
-    }
-    if (line === 'docker info --format {{.ServerVersion}}') {
-      return Promise.resolve(
-        this.dockerInstalled && this.dockerRunning()
-          ? okResult('27.3.1\n')
-          : { exitCode: 1, stdout: '', stderr: 'docker is not running\n', started: true },
-      );
-    }
-    if (line === 'docker compose version') {
-      return Promise.resolve(okResult('Docker Compose version v2.29.1\n'));
-    }
-    if (line === 'docker info --format {{.MemTotal}}') {
-      return Promise.resolve(okResult(`${String(this.options.lowMemory === true ? 4 * GIB : 8 * GIB)}\n`));
-    }
-    if (args.includes('refresh')) {
-      return Promise.resolve(okResult('Aman is reachable on your home network.\n'));
-    }
-    return Promise.resolve({ exitCode: 1, stdout: '', stderr: '', started: false });
-  }
-
-  runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
-    void command;
-    if (args.includes('sh')) {
-      return Promise.resolve(okBytesResult(new Uint8Array()));
-    }
-    if (args.includes('installer/install.sh')) {
-      this.installRuns.push({ args, stdin });
-      const exit = this.options.containerExit ?? 0;
-      if (exit === 0) {
-        this.store.installed = true;
-      }
-      return Promise.resolve({
-        exitCode: exit,
-        stdout: new TextEncoder().encode(this.options.containerStdout ?? 'Instance main is ready.\n'),
-        stderr: '',
-        started: true,
-      });
-    }
-    return Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: '', started: false });
-  }
-}
-
-interface World {
-  deps: InstallDeps;
-  printed: string[];
-  recording: RecordingProcessRunner;
-  jobs: FakeWindowsJobs;
-  store: WorldStore;
-  runner: WorldRunner;
-  asked: { kind: 'ask' | 'secret'; question: string }[];
-}
-
-async function makeWorld(options: WorldOptions = {}): Promise<World> {
-  const programsDir = await mkdtemp(join(tmpdir(), 'aman-install-programs-'));
-  await writeFile(join(programsDir, 'aman.exe'), PROGRAM);
-  const jobs = new FakeWindowsJobs({
-    localAppDataDir: LOCAL_APP_DATA,
-    selfExePath: 'C:\\Users\\Friend\\Downloads\\Aman-Setup.exe',
-    startMenuProgramsDir: START_MENU_DIR,
-    ...(options.installerSigner === undefined ? {} : { installerSigner: options.installerSigner }),
-    ...(options.runOncePending === undefined ? {} : { runOncePending: options.runOncePending }),
-    ...(options.runOnceValueName === undefined ? {} : { runOnceValueName: options.runOnceValueName }),
-    ...(options.failRunOnceSet === true ? { failSteps: new Set<FakeWindowsJobStep>(['runOnceSet']) } : {}),
-  });
-  const store = new WorldStore();
-  store.installed = options.storeInstalled ?? false;
-  const runner = new WorldRunner(options, jobs, store);
-  const recording = new RecordingProcessRunner(runner);
-  const manifest = buildManifest({
-    release: RELEASE_TAG,
-    files: [
-      { name: ASSET_NAME, data: PROGRAM },
-      { name: ARCHIVE_NAME, data: ARCHIVE },
-    ],
-    sourceIds: IDS,
-  });
-  let manifestBytes = manifestToBytes(manifest);
-  if (options.tamperManifest === true) {
-    manifestBytes = new Uint8Array(manifestBytes);
-    manifestBytes[10] = (manifestBytes[10] ?? 0) + 1;
-  }
-  const signatureText = signMinisign({
-    data: manifestToBytes(manifest),
-    privateKeyDer: testPrivateKeyDer(),
-    keyNum: testKeyNum(),
-  });
-  const fetchBytes = (url: string): Promise<FetchBytesResult> => {
-    if (url === MANIFEST_URL) {
-      return Promise.resolve({ data: manifestBytes });
-    }
-    if (url === SIGNATURE_URL) {
-      return Promise.resolve({ data: new TextEncoder().encode(signatureText) });
-    }
-    if (url === ARCHIVE_URL) {
-      return Promise.resolve({ data: ARCHIVE });
-    }
-    if (url === DOCKER_DESKTOP_DOWNLOAD_URL) {
-      return Promise.resolve(options.noDockerDownload === true ? { unreachable: true } : { data: DOCKER_INSTALLER });
-    }
-    return Promise.resolve({ unreachable: true });
-  };
-  const printed: string[] = [];
-  const asked: World['asked'] = [];
-  const askQueue = [...(options.askAnswers ?? ['friend@example.com', 'yes'])];
-  const secretQueue = [...(options.secretAnswers ?? [PASSWORD, PASSWORD])];
-  let nowValue = NOW;
-  const personHome = await mkdtemp(join(tmpdir(), 'aman-install-person-'));
-  const deps: InstallDeps = {
-    host: new FakeHost({ kind: options.kind ?? 'windows', memoryBytes: 16 * GIB }),
-    runner: recording,
-    store,
-    jobs,
-    print: (line: string) => {
-      printed.push(line);
-    },
-    now: () => nowValue,
-    homeDir: personHome,
-    stateHome: null,
-    osReleasePath: join(personHome, 'os-release'),
-    dockerConfigDir: join(personHome, '.docker'),
-    appService: 'app',
-    probeHealth: () => Promise.resolve(true),
-    sleep: (ms: number) => {
-      nowValue += Math.floor(ms / 1000);
-      return Promise.resolve();
-    },
-    ask: (question: string) => {
-      asked.push({ kind: 'ask', question });
-      return Promise.resolve(askQueue.shift() ?? null);
-    },
-    askSecret: (question: string) => {
-      asked.push({ kind: 'secret', question });
-      return Promise.resolve(secretQueue.shift() ?? null);
-    },
-    confirm: () => Promise.resolve(true),
-    fetchBytes,
-    programsDir,
-    arch: 'x64',
-    interfaces: {
-      Ethernet: [
-        {
-          address: '192.168.1.20',
-          netmask: '255.255.255.0',
-          family: 'IPv4',
-          mac: 'aa:bb:cc:dd:ee:ff',
-          internal: false,
-          cidr: '192.168.1.20/24',
-        },
-      ],
-    },
-    hostName: 'FRIEND-PC',
-    releasePublicKey: TEST_PUBLIC_KEY_MINISIGN,
-  };
-  return { deps, printed, recording, jobs, store, runner, asked };
-}
+import { CERT, DOCKER_INSTALLER, IDS, PASSWORD, RELEASE_TAG, makeWorld } from './installWorld.ts';
 
 const PAGE_URL = 'file:///C:/Users/Friend/AppData/Local/Amanuensis/Getting started.html';
 
@@ -522,7 +188,12 @@ class FreshVolumeRunner implements ProcessRunner {
     return this.inner.run(command, args);
   }
 
-  async runBytes(command: string, args: readonly string[], stdin: Uint8Array): Promise<ProcessBytesResult> {
+  async runBytes(
+    command: string,
+    args: readonly string[],
+    stdin: Uint8Array,
+    onLine?: (line: string) => void,
+  ): Promise<ProcessBytesResult> {
     if (args.includes('cat')) {
       const path = args[args.length - 1];
       const rel = typeof path === 'string' ? path.replace(`${VOLUME_HOME}/`, '') : '';
@@ -553,7 +224,7 @@ class FreshVolumeRunner implements ProcessRunner {
       return okBytesResult(tar);
     }
     if (args.includes('installer/install.sh')) {
-      const result = await this.inner.runBytes(command, args, stdin);
+      const result = await this.inner.runBytes(command, args, stdin, onLine);
       if (result.exitCode === 0) {
         this.writeInstall();
       }
@@ -800,8 +471,11 @@ test('the password rule counts accented letters in bytes, as the shell counts th
   // Each accented letter here is two bytes: the first password is six
   // letters but nine bytes, past the shell's eight; the second is
   // seven bytes, short of it, though both have a number and a symbol.
-  assert.equal(installPasswordProblem('ééé1!a'), null);
-  assert.equal(installPasswordProblem('éé1!a'), 'That password still needs at least 8 characters.');
+  assert.equal(installPasswordProblem(new TextEncoder().encode('ééé1!a')), null);
+  assert.equal(
+    installPasswordProblem(new TextEncoder().encode('éé1!a')),
+    'That password still needs at least 8 characters.',
+  );
 });
 
 test('an accented password at the byte boundary is accepted at the question', async () => {
@@ -879,4 +553,84 @@ test('a run that finds Aman already installed finishes the later steps and opens
   assert.deepEqual(world.jobs.browserUrls, ['https://localhost:8443']);
   assert.ok(world.printed.includes(ADOPTED_LINE));
   assert.ok(!world.printed.includes(INSTALL_DONE_LINE));
+});
+
+test('the password is wiped once the installer has read it', async () => {
+  const world = await makeWorld();
+  assert.equal(await prepareInstall(world.deps), 'fresh');
+  const password = new TextEncoder().encode(PASSWORD);
+  const code = await installWithAnswers(world.deps, { email: 'friend@example.com', password, phone: false });
+  assert.equal(code, 0);
+  assert.ok(password.every(byte => byte === 0));
+  const run = world.runner.installRuns[0];
+  assert.ok(run !== undefined);
+  assert.equal(new TextDecoder().decode(run.stdin), `${PASSWORD}\n`);
+});
+
+test('the password is wiped when the install stops before the installer runs', async () => {
+  const world = await makeWorld({ tamperManifest: true });
+  const password = new TextEncoder().encode(PASSWORD);
+  const code = await installWithAnswers(world.deps, { email: 'friend@example.com', password, phone: false });
+  assert.equal(code, 1);
+  assert.ok(password.every(byte => byte === 0));
+  assert.equal(world.runner.installRuns.length, 0);
+});
+
+test('a password with a line break in it never reaches the installer', async () => {
+  const world = await makeWorld();
+  const password = new TextEncoder().encode(`${PASSWORD}\nsecond line`);
+  const code = await installWithAnswers(world.deps, { email: 'friend@example.com', password, phone: false });
+  assert.equal(code, 1);
+  assert.equal(world.runner.installRuns.length, 0);
+  assert.ok(password.every(byte => byte === 0));
+  assert.ok(world.printed.includes(INSTALL_PASSWORD_CONTROL_LINE));
+});
+
+test('the password rule refuses every control character and takes letters from other alphabets', () => {
+  const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
+  for (const bad of ['\n', '\r', '\t', '\u0000', '\u001b', '\u007f']) {
+    assert.equal(installPasswordProblem(encode(`Good1!pass${bad}`)), INSTALL_PASSWORD_CONTROL_LINE);
+  }
+  assert.equal(installPasswordProblem(encode('пароль1!')), null);
+});
+
+test('each stage of a first install is reported as it starts and ends, in order', async () => {
+  const world = await makeWorld();
+  const seen: string[] = [];
+  world.deps.report = (progress: InstallProgress) => {
+    seen.push(`${progress.stage}:${progress.state}`);
+  };
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
+  assert.deepEqual(seen, [
+    'docker:started',
+    'docker:done',
+    'checks:started',
+    'checks:done',
+    'download:started',
+    'download:done',
+    'install:started',
+    'install:done',
+    'shortcuts:started',
+    'shortcuts:done',
+    'update:started',
+    'update:done',
+    'private:started',
+    'private:done',
+    'open:started',
+    'open:done',
+    'phone:started',
+    'phone:done',
+  ]);
+});
+
+test('a stage that fails is reported as failed and nothing after it starts', async () => {
+  const world = await makeWorld({ containerExit: 1 });
+  const seen: string[] = [];
+  world.deps.report = (progress: InstallProgress) => {
+    seen.push(`${progress.stage}:${progress.state}`);
+  };
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 1);
+  assert.deepEqual(seen.slice(-2), ['install:started', 'install:failed']);
 });

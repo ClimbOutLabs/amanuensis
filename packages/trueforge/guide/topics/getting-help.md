@@ -76,6 +76,7 @@ When one of these opens a window, the window stays open until you press Enter, s
 
 - Backups happen every night on their own. [Back up and restore](../../../../docs/backup.md) shows where they are and how to make one now.
 - On Windows, Docker Desktop asks for a restart the first time it's installed. Restart the computer. Aman Setup opens again by itself and carries on. If it doesn't, open the Aman Setup download again from your Downloads folder.
+- On Windows, Aman Setup asks its questions in its own window. If that window can't open, which happens mostly on computers managed by an employer, it asks the same questions in the black window instead. The install is the same.
 - Aman answers on your home network, not on Tailscale or another VPN. To use one, run `aman address add` on the computer that runs Aman, with the address you open. If you open Aman at an address it doesn't know, its page shows the exact command.
 - If other devices can't reach Aman after your router gave the computer a new address, run `aman doctor network --fix` on that computer. Reserving the address in your router stops it changing.
 - When you ask for help, say what you were doing and what you saw on the screen.

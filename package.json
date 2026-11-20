@@ -91,6 +91,7 @@
     "test:help-coverage": "node scripts/check-help-coverage.mjs",
     "test:docs-site": "node --test tests/docs-site-build.test.mjs tests/collect-test-screenshots.test.mjs",
     "test:aman-installer": "pnpm --filter @truefoundry/aman-installer test",
+    "test:aman-installer:window": "pnpm --filter @truefoundry/aman-installer test:window",
     "test:chart-version": "bash tests/scripts/resolve-chart-version.test.sh",
     "test:installer": "bash installer/tests/run.sh",
     "test:licenses": "node --test tests/scripts/dependency-license-policy.test.mjs",
