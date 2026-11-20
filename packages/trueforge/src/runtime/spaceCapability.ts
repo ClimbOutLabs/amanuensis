@@ -71,6 +71,7 @@ import { browserCapability } from './browserCapability';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
 import { connectionOfferCapability } from './connectionOfferCapability';
 import { OFFERABLE_CONNECTORS } from './connectionOfferRegistry';
+import { goalCapability, type GoalTurnContext } from './goals/goalCapability';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
@@ -2832,6 +2833,8 @@ export interface SpaceTurnContext {
   logger: Logger;
   /** Present only where schedules run (standalone); absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
+  /** Present only where goals run (standalone with a goal store); absent, no goal tools mount. */
+  goals?: GoalTurnContext | undefined;
   /** Present where the chat has a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
   /** Present where this app keeps the skills itself; absent, no skill tools mount. */
@@ -2904,6 +2907,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const notesFolder = await this.#notesFolder(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
+    const goals = this.#space.goals;
     const personas = this.#space.personas;
     const skills = this.#space.skills;
     const keepsNothing = this.keepsNothing;
@@ -2967,6 +2971,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
                 timeZone: this.clientTimezone,
                 sentinel,
                 now: () => new Date(),
+                keepsNothing,
+              }),
+            ]),
+        ...(goals === undefined
+          ? []
+          : [
+              goalCapability({
+                ...goals,
+                tracing: input.tracing,
                 keepsNothing,
               }),
             ]),

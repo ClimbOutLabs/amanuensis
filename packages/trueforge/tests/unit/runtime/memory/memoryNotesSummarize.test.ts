@@ -76,9 +76,10 @@ const unusedStore: IModelProviderStore = {
   deleteProvider: jest.fn(),
 };
 
-function run(overrides: { results: TurnToolResult[]; assistantText: string; llm: ILLM }) {
+function run(overrides: { results: TurnToolResult[]; assistantText: string; llm: ILLM; recalledMemory?: string[] }) {
   return summarizeTurnNotes({
     results: overrides.results,
+    recalledMemory: overrides.recalledMemory,
     assistantText: overrides.assistantText,
     turnDate: '2026-10-29T12:00:00.000Z',
     tenantId: 't1',
@@ -98,6 +99,7 @@ function parse(input: {
   reply?: string;
   personName?: string;
   assistantName?: string;
+  recalledMemory?: string[];
 }) {
   return parseNotesReply({
     reply: JSON.stringify({ findings: input.findings ?? [], responses: input.responses ?? [] }),
@@ -105,6 +107,7 @@ function parse(input: {
     sentences: replySentences(input.reply ?? ''),
     personName: input.personName,
     assistantName: input.assistantName,
+    recalledMemory: input.recalledMemory,
   });
 }
 
@@ -402,6 +405,144 @@ describe('parseNotesReply reply notes', () => {
   });
 });
 
+describe('parseNotesReply and what the turn recalled from its memory pages', () => {
+  const PAGE = '# Allotment\n\n## Now\n- The shed key hangs by the back door.';
+  const REPLY =
+    'The shed key hangs by the back door. Since Tom waters the beds on Tuesdays, leave the hose where he can reach it without the key, so a locked shed never leaves the beds dry.';
+  const NEW_STATEMENT =
+    'Since Tom waters the beds on Tuesdays, leave the hose where he can reach it without the key, so a locked shed never leaves the beds dry.';
+
+  it('drops a reply sentence that only says again what the recalled page said, and keeps the new statement beside it', () => {
+    expect(parse({ responses: [1, 2], reply: REPLY, recalledMemory: [PAGE] })).toEqual([
+      { source: 'assistant_response', text: NEW_STATEMENT },
+    ]);
+  });
+
+  it('keeps the same sentence when the turn recalled nothing', () => {
+    expect(parse({ responses: [1], reply: REPLY })).toEqual([
+      { source: 'assistant_response', text: 'The shed key hangs by the back door.' },
+    ]);
+  });
+
+  it('drops a restatement however its case differs from the page', () => {
+    const shouted = REPLY.replace('The shed key hangs', 'THE SHED KEY HANGS');
+    expect(parse({ responses: [1], reply: shouted, recalledMemory: [PAGE] })).toEqual([]);
+  });
+
+  it('keeps a sentence that wraps a recalled text whole when its tail carries words of its own', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The ferry leaves from pier 4 on weekdays, as the timetable page says.',
+        recalledMemory: ['The ferry leaves from pier 4 on weekdays.'],
+      }),
+    ).toEqual([
+      { source: 'assistant_response', text: 'The ferry leaves from pier 4 on weekdays, as the timetable page says.' },
+    ]);
+  });
+
+  it('keeps a reply sentence that corrects the sign of a number the recalled text stated without one', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The freezer target is −18 °C.',
+        recalledMemory: ['The freezer target is 18 °C.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'The freezer target is −18 °C.' }]);
+  });
+
+  it('drops the same signed fact however the minus sign is drawn', () => {
+    const page = 'The freezer target is −18 °C.';
+    expect(parse({ responses: [1], reply: 'The freezer target is -18 °C.', recalledMemory: [page] })).toEqual([]);
+    expect(parse({ responses: [1], reply: 'The freezer target is –18 °C.', recalledMemory: [page] })).toEqual([]);
+    expect(parse({ responses: [1], reply: 'The freezer target is ‑18 °C.', recalledMemory: [page] })).toEqual([]);
+  });
+
+  it('keeps a sentence that repeats a recalled fact whole and adds a clause of its own', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The ferry leaves from pier 4 on weekdays, and the last sailing now leaves at nine instead of eight.',
+        recalledMemory: ['The ferry leaves from pier 4 on weekdays.'],
+      }),
+    ).toEqual([
+      {
+        source: 'assistant_response',
+        text: 'The ferry leaves from pier 4 on weekdays, and the last sailing now leaves at nine instead of eight.',
+      },
+    ]);
+  });
+
+  it('drops a sentence that wraps a recalled fact whole with only a short lead-in of its own', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'As noted, the ferry leaves from pier 4 on weekdays.',
+        recalledMemory: ['The ferry leaves from pier 4 on weekdays.'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('keeps a sentence that narrows a recalled fact with a short qualifier of its own', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday after noon.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'The venue is available on Friday after noon.' }]);
+  });
+
+  it('keeps a sentence that adds a short time of its own to a recalled fact', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday at noon.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([{ source: 'assistant_response', text: 'The venue is available on Friday at noon.' }]);
+  });
+
+  it('drops a sentence whose only words around a recalled fact point back at where it was read', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'As noted, the venue is available on Friday.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('keeps a sentence that states a recalled fact twice over', () => {
+    expect(
+      parse({
+        responses: [1],
+        reply: 'The venue is available on Friday, and the venue is available on Friday.',
+        recalledMemory: ['The venue is available on Friday.'],
+      }),
+    ).toEqual([
+      { source: 'assistant_response', text: 'The venue is available on Friday, and the venue is available on Friday.' },
+    ]);
+  });
+
+  it('keeps a short sentence even when its words appear in the recalled text', () => {
+    const page = '# Beds\n\n## Now\n- Water them weekly, early in the morning before the sun is on the beds.';
+    expect(parse({ responses: [1], reply: 'Water them weekly.', recalledMemory: [page] })).toEqual([
+      { source: 'assistant_response', text: 'Water them weekly.' },
+    ]);
+  });
+
+  it('leaves a finding from a tool result alone, even when the recalled text says the same', () => {
+    expect(
+      parse({
+        findings: [{ result: 1, text: 'Priya asked for the signed form by 2026-11-03.' }],
+        results: [EMAIL],
+        recalledMemory: ['Priya asked for the signed form by 2026-11-03.'],
+      }),
+    ).toEqual([{ source: 'email', text: 'Priya asked for the signed form by 2026-11-03.' }]);
+  });
+});
+
 describe('buildNotesMessages', () => {
   it('numbers each result with its source and each reply sentence, and asks for sentence numbers', () => {
     const messages = buildNotesMessages({
@@ -416,6 +557,22 @@ describe('buildNotesMessages', () => {
     expect(messages[1]?.content).toContain('Date of the chat: 2026-10-29');
     expect(messages[1]?.content).toContain('[3] Leave by 08:55 for the GP visit so that parking is not a rush.');
     expect(messages[1]?.content).toContain('[4] Shall I set a reminder?');
+  });
+
+  it('states the eligibility rule for both channels as durable knowledge, not as shapes to avoid', () => {
+    const messages = buildNotesMessages({
+      results: [EMAIL],
+      replySentences: replySentences(LONG_REPLY),
+      turnDate: '2026-10-29T12:00:00.000Z',
+      timeZone: undefined,
+    });
+    const system = messages[0]?.content ?? '';
+    expect(system).toContain('Keep a finding only when it is durable knowledge');
+    expect(system).toContain('An observation about the work in front of the assistant is not durable knowledge');
+    expect(system).toContain('not a version a tool bumped or reported');
+    expect(system).toContain('Pick a sentence only when it is a durable statement');
+    expect(system).toContain('A move in the conversation is never a note');
+    expect(system).toContain('not a request or an instruction for the task at hand');
   });
 });
 
@@ -438,6 +595,19 @@ describe('summarizeTurnNotes', () => {
       { source: 'assistant_response', text: 'Leave by 08:55 for the GP visit so that parking is not a rush.' },
     ]);
     expect(lastPrompt()).toContain('[1] I found one email from Priya.');
+  });
+
+  it('does not save a reply sentence that only repeats what the turn read out of its memory pages', async () => {
+    const { llm } = scriptedLlm('{"findings": [], "responses": [1, 2]}');
+    const page = '# Allotment\n\n## Now\n- The shed key hangs by the back door.';
+    const reply =
+      'The shed key hangs by the back door. Since Tom waters the beds on Tuesdays, leave the hose where he can reach it without the key, so a locked shed never leaves the beds dry.';
+    expect(await run({ results: [], assistantText: reply, llm, recalledMemory: [page] })).toEqual([
+      {
+        source: 'assistant_response',
+        text: 'Since Tom waters the beds on Tuesdays, leave the hose where he can reach it without the key, so a locked shed never leaves the beds dry.',
+      },
+    ]);
   });
 
   it('makes no model call for a turn with no tool results and a short reply', async () => {

@@ -32,6 +32,7 @@ import {
   MAIL_CONNECTOR_NAME,
   MAIL_FORWARD_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
+import { GOALS_SERVER_ID, isGoalReadToolName } from '../goals/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import { isMemoryPagesReadToolName, isMemoryPagesToolName, MEMORY_PAGES_SERVER_ID } from '../memory/pagesToolContract';
@@ -3939,7 +3940,7 @@ function incognitoRefusal(): TierDecision {
 
 /**
  * A call on one of the assistant's own lasting things that is not a known read of it: a schedule, a reminder, a
- * persona, a skill, a space, the notes folder or a memory page. Switching this chat's persona changes only the chat.
+ * persona, a skill, a space, a goal, the notes folder or a memory page. Switching this chat's persona changes only the chat.
  */
 function changesOwnLastingThing(action: SentinelAction): boolean {
   if (action.tool_type !== 'truefoundry-system') {
@@ -3959,6 +3960,8 @@ function changesOwnLastingThing(action: SentinelAction): boolean {
       return !isNotesFolderReadToolName(name);
     case MEMORY_PAGES_SERVER_ID:
       return !isMemoryPagesReadToolName(name);
+    case GOALS_SERVER_ID:
+      return !isGoalReadToolName(name);
     default:
       return false;
   }

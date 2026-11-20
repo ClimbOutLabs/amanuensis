@@ -30,6 +30,7 @@ import {
   NOTE_SOURCE_METADATA_KEY,
   noteLabel,
   noteRetainContent,
+  noteTextWithoutLabel,
   REPLY_READ_NOTHING_METADATA_KEY,
   type MemoryNoteSource,
 } from './memoryNotes';
@@ -210,6 +211,11 @@ export interface SubmitRetainParams {
   /** What the turn's tools returned, so concrete findings can be saved as labeled notes. */
   toolResults?: readonly TurnToolResult[] | undefined;
   /**
+   * What the turn read out of its own stored memory pages, kept apart from the findings: a reply that
+   * only repeats it is not saved as a new note, since the fact is already kept.
+   */
+  recalledMemory?: readonly string[] | undefined;
+  /**
    * Context for LLM summarization of the turn. Present only when turn summarization was
    * enabled for the turn (the Settings toggle's persisted override, else the
    * `MEMORY_SUMMARIZE` env default, resolved once per turn by `resolveTurnSummarizeContext`);
@@ -331,6 +337,7 @@ async function decideNotes({
 }): Promise<LabeledNote[]> {
   const notes = await summarizeTurnNotes({
     results: params.toolResults ?? [],
+    recalledMemory: params.recalledMemory,
     assistantText: params.assistantText,
     turnDate: params.completedAt,
     timeZone: params.timeZone,
@@ -550,9 +557,13 @@ function logTurnMemoryNotSaved(
 }
 
 /**
- * Retain items for the turn's notes. They carry the untrusted origin, so recall holds them to the strict
- * screening posture: a finding is what something outside the chat said, and a reply note is the assistant's
- * own words, neither of them the person's voice.
+ * Retain items for the turn's notes: one item for each source the notes came from, so everything a
+ * turn's note pass kept from one place is stored as one memory, its points as lines inside it, rather
+ * than one memory per point. Notes of one source in one turn share their label, so the first line
+ * carries it and the rest follow without it. One source per item keeps the source an item is stamped
+ * with true of every line it holds, which recall and page sorting both read per item. They carry the
+ * untrusted origin, so recall holds them to the strict screening posture: a finding is what something
+ * outside the chat said, and a reply note is the assistant's own words, neither of them the person's voice.
  */
 function noteRetainItems({
   params,
@@ -561,16 +572,33 @@ function noteRetainItems({
   params: SubmitRetainParams;
   notes: readonly LabeledNote[];
 }): RetainItem[] {
-  return notes.map((note, index) =>
-    noteRetainItem({
-      sessionId: params.sessionId,
-      turnId: params.turnId,
-      completedAt: params.completedAt,
-      note,
-      documentId: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
-      chatReadNothing: params.chatReadNothing === true && params.origin === USER_STATED_ORIGIN,
-    }),
-  );
+  const bySource = new Map<MemoryNoteSource, LabeledNote[]>();
+  for (const note of notes) {
+    const group = bySource.get(note.source) ?? [];
+    group.push(note);
+    bySource.set(note.source, group);
+  }
+  const items: RetainItem[] = [];
+  let index = 0;
+  for (const group of bySource.values()) {
+    const [first] = group;
+    if (first === undefined) {
+      continue;
+    }
+    const text = [first.text, ...group.slice(1).map(note => noteTextWithoutLabel(note.text))].join('\n');
+    items.push(
+      noteRetainItem({
+        sessionId: params.sessionId,
+        turnId: params.turnId,
+        completedAt: params.completedAt,
+        note: { source: first.source, date: first.date, text },
+        documentId: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+        chatReadNothing: params.chatReadNothing === true && params.origin === USER_STATED_ORIGIN,
+      }),
+    );
+    index += 1;
+  }
+  return items;
 }
 
 /** One note ready for the provider, carrying the untrusted origin like every note. */
