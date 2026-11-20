@@ -43,6 +43,7 @@ function Probe({ capture }: { capture: (value: FolderContextValue) => void }) {
     <>
       <div data-testid="unfiled">{(value?.unfiledSessions ?? []).map(session => session.sessionId).join(',')}</div>
       <div data-testid="folders">{(value?.folders ?? []).map(folder => folder.name).join(',')}</div>
+      <div data-testid="titles">{(value?.unfiledSessions ?? []).map(session => session.title).join(',')}</div>
     </>
   );
 }
@@ -236,5 +237,51 @@ describe('ChatFolderProvider local edits', () => {
     });
 
     expect(screen.getByTestId('folders').textContent).toBe('');
+  });
+
+  it('keeps a renamed chat title when a load started before the rename lands after it', async () => {
+    const before: ChatFolderSnapshot = {
+      folders: [],
+      assignments: [],
+      folderSessions: [],
+      unfiledSessions: [
+        {
+          sessionId: 'session-1',
+          title: 'Old title',
+          updatedAt: new Date('2026-11-18T00:00:00.000Z'),
+          agentName: null,
+          isMutable: true,
+        },
+      ],
+    };
+    const { store, releaseLoad } = deferredLaterLoads(before);
+    let captured: FolderContextValue = null;
+    render(
+      <ChatFolderProvider store={store}>
+        <Probe
+          capture={value => {
+            captured = value;
+          }}
+        />
+      </ChatFolderProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('titles')).toHaveTextContent('Old title');
+    });
+
+    act(() => {
+      captured?.reload();
+    });
+    act(() => {
+      captured?.updateFolderSessionTitle({ sessionId: 'session-1', title: 'New title' });
+    });
+    expect(screen.getByTestId('titles')).toHaveTextContent('New title');
+
+    await act(async () => {
+      releaseLoad(before);
+    });
+
+    expect(screen.getByTestId('titles')).toHaveTextContent('New title');
   });
 });

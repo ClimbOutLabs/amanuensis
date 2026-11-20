@@ -188,28 +188,38 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
     [folderSessions, store],
   );
 
-  const updateFolderSessionTitle = useCallback(({ sessionId, title }: { sessionId: string; title: string }) => {
-    setFolderSessions(current => {
-      let changed = false;
-      const next = new Map<string, readonly ChatFolderSession[]>();
-      for (const [folderId, sessions] of current) {
-        if (sessions.some(session => session.sessionId === sessionId)) {
-          changed = true;
-          next.set(
-            folderId,
-            sessions.map(session => (session.sessionId === sessionId ? { ...session, title } : session)),
-          );
-        } else {
-          next.set(folderId, sessions);
+  const updateFolderSessionTitle = useCallback(
+    ({ sessionId, title }: { sessionId: string; title: string }) => {
+      // A chat the lists do not hold has no shown title to keep in step, so its
+      // sync retires nothing.
+      const listed =
+        unfiledSessions.some(session => session.sessionId === sessionId) ||
+        [...folderSessions.values()].some(sessions => sessions.some(session => session.sessionId === sessionId));
+      if (!listed) return;
+      loadGenerationRef.current++;
+      setFolderSessions(current => {
+        let changed = false;
+        const next = new Map<string, readonly ChatFolderSession[]>();
+        for (const [folderId, sessions] of current) {
+          if (sessions.some(session => session.sessionId === sessionId)) {
+            changed = true;
+            next.set(
+              folderId,
+              sessions.map(session => (session.sessionId === sessionId ? { ...session, title } : session)),
+            );
+          } else {
+            next.set(folderId, sessions);
+          }
         }
-      }
-      return changed ? next : current;
-    });
-    setUnfiledSessions(current => {
-      if (!current.some(session => session.sessionId === sessionId)) return current;
-      return current.map(session => (session.sessionId === sessionId ? { ...session, title } : session));
-    });
-  }, []);
+        return changed ? next : current;
+      });
+      setUnfiledSessions(current => {
+        if (!current.some(session => session.sessionId === sessionId)) return current;
+        return current.map(session => (session.sessionId === sessionId ? { ...session, title } : session));
+      });
+    },
+    [folderSessions, unfiledSessions],
+  );
 
   const removeFolderSession = useCallback(({ sessionId }: { sessionId: string }) => {
     removedSessionIdsRef.current.add(sessionId);
