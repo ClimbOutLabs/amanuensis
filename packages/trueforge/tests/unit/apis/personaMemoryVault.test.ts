@@ -54,6 +54,7 @@ async function createPersona(server: ApprovalTestServer, displayName: string): P
         aliases: [],
         instructions: 'Answer as a careful archivist.',
         model_name: ALT_MODEL_FQN,
+        voice: null,
       },
     }),
   );

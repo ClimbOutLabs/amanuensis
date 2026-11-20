@@ -17,6 +17,7 @@ import {
   deletePersonaRoute,
   getPersonaContextRoute,
   getSessionPersonaRoute,
+  getTurnPersonaRoute,
   listPersonasRoute,
   listSessionPersonaActivationsRoute,
   setSessionPersonaRoute,
@@ -36,6 +37,7 @@ function toWirePersona(persona: Persona): PersonaWire {
     aliases: persona.aliases,
     instructions: persona.instructions,
     model_name: persona.model_name,
+    voice: persona.voice,
     created_by: persona.created_by,
     created_at: persona.created_at,
     updated_at: persona.updated_at,
@@ -287,8 +289,41 @@ export function createSessionPersonasRouter(deps: SessionPersonasRouterDeps) {
     return c.json({ data: activations.map(toWireActivation) }, 200);
   };
 
+  const getTurnHandler: RouteHandler<typeof getTurnPersonaRoute> = async c => {
+    const { session_id: sessionId, turn_id: turnId } = c.req.valid('param');
+    const session = await deps.sessionStore.getSession({ tenant_id: TENANT_ID, session_id: sessionId });
+    if (!session) {
+      return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
+    }
+    if (
+      !checkSessionAccess({
+        userRef: deps.resolveRequestContext(c).subject.id,
+        createdBy: session.created_by_subject.subject_id,
+      })
+    ) {
+      return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    const turn = await deps.sessionStore.getTurn({ session_id: sessionId, turn_id: turnId });
+    if (turn === undefined) {
+      return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
+    }
+    // The snapshot taken when the turn was admitted is the answer. Turns written before the
+    // snapshot existed fall back to the decision log row recorded for that exact turn.
+    const custom = turn.custom;
+    if (custom !== null && Object.hasOwn(custom, 'persona')) {
+      return c.json({ data: { persona_id: custom.persona?.persona_id ?? null } }, 200);
+    }
+    const activation = await deps.personaStore.getTurnPersonaActivation({
+      tenant_id: TENANT_ID,
+      session_id: sessionId,
+      turn_id: turnId,
+    });
+    return c.json({ data: { persona_id: activation?.persona_id ?? null } }, 200);
+  };
+
   const router = new OpenAPIHono();
   router.openapi(getSessionPersonaRoute, getHandler);
+  router.openapi(getTurnPersonaRoute, getTurnHandler);
   router.openapi(setSessionPersonaRoute, setHandler);
   router.openapi(listSessionPersonaActivationsRoute, listActivationsHandler);
   return router;

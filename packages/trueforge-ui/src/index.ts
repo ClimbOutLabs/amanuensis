@@ -274,6 +274,7 @@ export type {
   PersonaKnowledgeEmbeddingModel,
   PersonaKnowledgeSourceKind,
   SessionPersona,
+  TurnPersona,
 } from './components/PersonaContext.js';
 export {
   EMPTY_PERSONALIZATION_PROFILE,

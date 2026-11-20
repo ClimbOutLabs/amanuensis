@@ -14,7 +14,7 @@ import type {
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { AgentUIServer } from '@/server/types.js';
-import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
+import { personaApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 function stubShell() {
@@ -271,6 +271,7 @@ describe('Memory explorer with several collections', () => {
     aliases: [],
     instructions: 'Answer as a careful archivist.',
     model_name: 'anthropic/haiku',
+    voice: null,
   };
 
   const SHARED_PENDING_LINE =
@@ -290,7 +291,7 @@ describe('Memory explorer with several collections', () => {
       deletePersona: async () => {},
       getSessionPersona: async () => null,
       setSessionPersona: async () => null,
-      ...personaKnowledgeApiStubs,
+      ...personaApiStubs,
     };
   }
 

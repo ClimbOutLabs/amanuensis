@@ -28,6 +28,7 @@ function personaApi(): PersonaApi & { listCalls: () => number } {
     deletePersona: unused,
     getSessionPersona: () => Promise.resolve(null),
     setSessionPersona: unused,
+    getTurnPersona: unused,
     listPersonaKnowledge: () => Promise.resolve([]),
     createPersonaKnowledge: unused,
     deletePersonaKnowledge: unused,

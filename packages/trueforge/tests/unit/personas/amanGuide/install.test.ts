@@ -220,6 +220,7 @@ describe('ensureAmanGuide', () => {
       aliases: [],
       instructions: 'Instructions from an older build.',
       model_name: MODEL,
+      voice: null,
     });
     enqueue.mockClear();
 
@@ -250,6 +251,7 @@ describe('ensureAmanGuide', () => {
       aliases: ['helper'],
       instructions: 'Old instructions.',
       model_name: 'tokenfactory/my-own-model',
+      voice: null,
     });
 
     await install({ modelName: MODEL });
@@ -275,6 +277,7 @@ describe('ensureAmanGuide', () => {
       aliases: [],
       instructions: 'Mine.',
       model_name: MODEL,
+      voice: null,
     });
 
     await install();

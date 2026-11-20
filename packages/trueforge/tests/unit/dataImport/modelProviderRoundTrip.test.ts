@@ -143,6 +143,7 @@ async function seedSource(source: Instance): Promise<void> {
     aliases: [],
     instructions: 'Help carefully.',
     model_name: 'openai/gpt-test',
+    voice: null,
     updated_by: 'alice',
   });
   await source.stores.personalizationStore.upsertProfile({

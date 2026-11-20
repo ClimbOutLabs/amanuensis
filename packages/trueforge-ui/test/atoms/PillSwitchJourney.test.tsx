@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ActivePersonaIndicator } from '@/atoms/ActivePersonaIndicator.js';
 import { PersonaProvider, type Persona, type PersonaApi, type SessionPersona } from '@/components/PersonaContext.js';
 import { awaitPendingPersonaMutation } from '@/personaMutationGate.js';
-import { personaKnowledgeApiStubs } from '../personaApiStubs.js';
+import { personaApiStubs } from '../personaApiStubs.js';
 
 const useThreadIsRunning = vi.fn(() => false);
 const useAuiState = vi.fn();
@@ -27,6 +27,7 @@ const SQUIDWARD: Persona = {
   aliases: [],
   instructions: 'You are Squidward.',
   model_name: 'scripted/scripted-alt-model',
+  voice: null,
 };
 const SPONGEBOB: Persona = {
   id: 'p-spongebob',
@@ -34,6 +35,7 @@ const SPONGEBOB: Persona = {
   aliases: [],
   instructions: 'You are Spongebob.',
   model_name: 'scripted/scripted-model',
+  voice: null,
 };
 
 type PutRecord = { url: string; body: unknown };
@@ -53,18 +55,19 @@ function toPersona(value: unknown): Persona {
   if (!isRecord(value)) {
     throw new Error('bad persona shape');
   }
-  const { id, display_name, aliases, instructions, model_name } = value;
+  const { id, display_name, aliases, instructions, model_name, voice } = value;
   if (typeof id !== 'string') throw new Error('bad persona.id');
   if (typeof display_name !== 'string') throw new Error('bad persona.display_name');
   if (typeof instructions !== 'string') throw new Error('bad persona.instructions');
   if (typeof model_name !== 'string') throw new Error('bad persona.model_name');
+  if (voice !== null && typeof voice !== 'string') throw new Error('bad persona.voice');
   if (!Array.isArray(aliases)) throw new Error('bad persona.aliases');
   const cleanAliases: string[] = [];
   for (const alias of aliases) {
     if (typeof alias !== 'string') throw new Error('bad persona.aliases');
     cleanAliases.push(alias);
   }
-  return { id, display_name, aliases: cleanAliases, instructions, model_name };
+  return { id, display_name, aliases: cleanAliases, instructions, model_name, voice };
 }
 
 function toSessionPersona(value: unknown): SessionPersona | null {
@@ -116,7 +119,7 @@ function testPersonaApi(baseUrl: string): PersonaApi {
     return readDataEnvelope(await response.json());
   }
   return {
-    ...personaKnowledgeApiStubs,
+    ...personaApiStubs,
     listPersonas: async () => {
       const data = await readData('/api/v1/personas');
       if (!Array.isArray(data)) {

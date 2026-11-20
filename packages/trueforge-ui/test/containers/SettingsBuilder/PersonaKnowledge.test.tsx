@@ -47,6 +47,7 @@ function renderSection(overrides?: {
     deletePersona: async () => {},
     getSessionPersona: async () => null,
     setSessionPersona: async () => null,
+    getTurnPersona: async () => ({ persona_id: null }),
     listPersonaKnowledge: overrides?.listPersonaKnowledge ?? (async () => []),
     createPersonaKnowledge:
       overrides?.createPersonaKnowledge ??

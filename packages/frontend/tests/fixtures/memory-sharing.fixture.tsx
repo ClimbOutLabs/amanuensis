@@ -13,6 +13,7 @@ const agents: Persona[] = AGENT_NAMES.map((name, index) => ({
   aliases: [],
   instructions: '',
   model_name: 'local/qwen3-8b',
+  voice: null,
 }));
 
 const notUsedHere = async (): Promise<never> => {
@@ -26,6 +27,7 @@ const agentApi: PersonaApi = {
   deletePersona: notUsedHere,
   getSessionPersona: async () => null,
   setSessionPersona: async () => null,
+  getTurnPersona: notUsedHere,
   listPersonaKnowledge: async () => [],
   createPersonaKnowledge: notUsedHere,
   deletePersonaKnowledge: notUsedHere,

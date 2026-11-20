@@ -384,6 +384,7 @@ describe('demo seed against the real stores', () => {
         aliases: [],
         instructions: 'A real persona.',
         model_name: MODEL_NAME,
+        voice: null,
       });
       await stores.knowledge.addTextDocument({
         personaId: 'real-persona',
@@ -496,6 +497,7 @@ describe('demo seed against the real stores', () => {
         aliases: [],
         instructions: 'June is the life-admin assistant of Maya, a fictional demo user.',
         model_name: MODEL_NAME,
+        voice: null,
       });
       await stores.knowledge.addTextDocument({
         personaId: 'demo-synthetic-persona-june',
