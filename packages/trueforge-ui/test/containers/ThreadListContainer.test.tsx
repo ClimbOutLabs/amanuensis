@@ -1463,4 +1463,53 @@ describe('ThreadListContainer', () => {
     expect(commits).toBe(settledCommits);
     expect(commits).toBeLessThan(50);
   });
+
+  it('shows a chat created elsewhere while the list stays open, on the periodic refresh', async () => {
+    vi.useFakeTimers();
+    try {
+      let loads = 0;
+      const chatFolders: ChatFolderStore = {
+        load: async () => {
+          loads++;
+          return {
+            folders: [],
+            assignments: [],
+            folderSessions: [],
+            unfiledSessions:
+              loads === 1
+                ? []
+                : [
+                    {
+                      sessionId: 'session-scheduled',
+                      title: 'Scheduled chat',
+                      updatedAt: new Date('2026-11-18T12:00:00.000Z'),
+                      agentName: null,
+                      isMutable: true,
+                    },
+                  ],
+          };
+        },
+        createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+        renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+        deleteFolder: async () => {},
+        setSessionFolder: async () => {},
+      };
+
+      renderThreadList({ adapter: { threads: [] }, chatFolders });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(screen.queryByTestId('thread-row-Scheduled chat')).not.toBeInTheDocument();
+      expect(loads).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+
+      expect(loads).toBeGreaterThan(1);
+      expect(screen.getByTestId('thread-row-Scheduled chat')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
