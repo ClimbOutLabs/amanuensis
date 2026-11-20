@@ -247,6 +247,7 @@ The repository-wide rules live in [`AGENTS.md`](AGENTS.md) (some packages have t
 - Wire shapes (HTTP/OpenAPI) and database identifiers use `snake_case`.
 - Server env reads go through `packages/trueforge/src/config.ts`, never `process.env` directly.
 - Remove dead code in the same change that makes it dead.
+- Keep source files at 1,000 lines or fewer (`pnpm check:file-sizes`). Tests, generated code and vendored code are not checked. Files that were already longer are listed in `scripts/file-size-baseline.json` and may not grow past their listed length. When a change has to add to one of them, put the new code in its own file. Making one shorter needs no edit to the list; a maintainer runs `pnpm check:file-sizes --update` from time to time in its own small PR to lower the numbers. Raising a number by hand needs a reason in the PR description.
 
 Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 
@@ -254,7 +255,7 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 
 1. Fork (or branch) and create a topic branch: `git checkout -b my-fix`.
 2. Make your change, with tests where it makes sense. Do not commit generated OpenAPI/SDK output (forks: source only; `main` regenerates after merge).
-3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass. CI also runs the root script tests (`pnpm test:repo-policy`, `pnpm lint:theme` and the other root `test:*` scripts), the layout rules (`pnpm check:repo-rules`), a check that the PR adds no `as T` or non-null `!` assertions (`pnpm check:new-assertions`), and, when `installer/` changes, `pnpm lint:installer` and `pnpm test:installer`. If you added or changed a dependency, also run `pnpm licenses:check`.
+3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass. CI also runs the root script tests (`pnpm test:repo-policy`, `pnpm lint:theme` and the other root `test:*` scripts), the layout rules (`pnpm check:repo-rules`), the file size limit (`pnpm check:file-sizes`), a check that the PR adds no `as T` or non-null `!` assertions (`pnpm check:new-assertions`), and, when `installer/` changes, `pnpm lint:installer` and `pnpm test:installer`. If you added or changed a dependency, also run `pnpm licenses:check`.
    CI also installs, typechecks and builds on arm64, runs each changed package's tests on both x64 and arm64, and builds the Docker images the installer builds natively for arm64 (the app image is also started and must become healthy). An arm64-only failure usually means a native dependency, Python wheel, downloaded binary or base image without an arm64 build.
 4. If the PR changes a screen people see, update the help topic that covers it under `packages/trueforge/guide/topics`. When no topic needs to change, add the label `help: no change needed` and say why in the PR. The **Help changed with screens** check enforces this.
 5. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
