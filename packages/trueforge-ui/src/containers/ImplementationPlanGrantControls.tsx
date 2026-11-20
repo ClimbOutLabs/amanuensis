@@ -11,8 +11,20 @@ import {
   type ImplementationPlanGrantApi,
 } from '../components/ImplementationPlanGrantContext.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
+import { isNetworkFailureError } from '../utils/liveConnection.js';
 
 const POLL_INTERVAL_MS = 2_000;
+// After a failed read the list tries again on its own, even between replies, so a restart or a
+// dropped connection heals without the person doing anything.
+const RETRY_AFTER_FAILURE_MS = 5_000;
+
+const STILL_APPROVED_OFFLINE =
+  'The app could not be reached, so this plan is still approved. Try again when the connection is back.';
+
+function revokeErrorMessage(error: unknown): string {
+  if (isNetworkFailureError(error)) return STILL_APPROVED_OFFLINE;
+  return getErrorMessage(error, 'Could not stop this plan. Try again in a moment.');
+}
 
 /** Grants are immutable once minted, so the same ids and plan hashes in order mean nothing changed. */
 function sameGrants({
@@ -41,15 +53,19 @@ function ImplementationPlanGrantControlsWithApi({
   isRunning = false,
 }: ImplementationPlanGrantControlsProps & { api: ImplementationPlanGrantApi }) {
   const [grants, setGrants] = useState<ImplementationPlanGrant[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // A failed read never shows on its own: the app's connection notice already covers a dropped
+  // connection, and an empty list has nothing to protect. Only a list already on screen says it
+  // may be out of date.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
   const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null);
   const sessionIdRef = useRef(sessionId);
   const requestVersionRef = useRef(0);
   sessionIdRef.current = sessionId;
   // What is on screen, so a poll that changes nothing dispatches no state update at all.
-  const shownRef = useRef({ grants, loadError });
+  const shownRef = useRef({ grants, refreshFailed });
   useEffect(() => {
-    shownRef.current = { grants, loadError };
+    shownRef.current = { grants, refreshFailed };
   });
 
   const { listImplementationPlanGrants, revokeImplementationPlanGrant } = api;
@@ -57,7 +73,8 @@ function ImplementationPlanGrantControlsWithApi({
   useEffect(() => {
     requestVersionRef.current += 1;
     setGrants([]);
-    setLoadError(null);
+    setRefreshFailed(false);
+    setRevokeError(null);
     setRevokingGrantId(null);
   }, [sessionId]);
 
@@ -68,6 +85,16 @@ function ImplementationPlanGrantControlsWithApi({
 
     let cancelled = false;
     let inFlight = false;
+    let lastReadFailed = false;
+    let retryId: ReturnType<typeof setTimeout> | undefined;
+    const scheduleRetry = () => {
+      // While a reply runs the poll already retries; a hidden tab retries when it is shown again.
+      if (isRunning || retryId !== undefined) return;
+      retryId = setTimeout(() => {
+        retryId = undefined;
+        if (document.visibilityState === 'visible') refresh();
+      }, RETRY_AFTER_FAILURE_MS);
+    };
     const refresh = () => {
       // A tick that lands while the previous read is still out skips rather than stacking requests.
       if (inFlight) {
@@ -79,13 +106,17 @@ function ImplementationPlanGrantControlsWithApi({
       void listImplementationPlanGrants(sessionId)
         .then(next => {
           if (!cancelled && requestVersionRef.current === requestVersion) {
+            lastReadFailed = false;
             if (!sameGrants({ shown: shownRef.current.grants, next })) setGrants(next);
-            if (shownRef.current.loadError !== null) setLoadError(null);
+            if (shownRef.current.refreshFailed) setRefreshFailed(false);
           }
         })
-        .catch(error => {
-          if (!cancelled && requestVersionRef.current === requestVersion) {
-            setLoadError(getErrorMessage(error, 'Could not load implementation-plan grants.'));
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          lastReadFailed = true;
+          scheduleRetry();
+          if (requestVersionRef.current === requestVersion && !isNetworkFailureError(error)) {
+            if (!shownRef.current.refreshFailed) setRefreshFailed(true);
           }
         })
         .finally(() => {
@@ -101,13 +132,14 @@ function ImplementationPlanGrantControlsWithApi({
         }, POLL_INTERVAL_MS)
       : undefined;
     const handleVisibilityChange = () => {
-      if (isRunning && document.visibilityState === 'visible') refresh();
+      if ((isRunning || lastReadFailed) && document.visibilityState === 'visible') refresh();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (intervalId !== undefined) clearInterval(intervalId);
+      if (retryId !== undefined) clearTimeout(retryId);
     };
   }, [isRunning, listImplementationPlanGrants, sessionId]);
 
@@ -118,7 +150,7 @@ function ImplementationPlanGrantControlsWithApi({
       }
       const requestedSessionId = sessionId;
       requestVersionRef.current += 1;
-      setLoadError(null);
+      setRevokeError(null);
       setRevokingGrantId(grant.grant_id);
       void revokeImplementationPlanGrant({ sessionId: requestedSessionId, grantId: grant.grant_id })
         .then(() => {
@@ -126,9 +158,9 @@ function ImplementationPlanGrantControlsWithApi({
             setGrants(current => current.filter(item => item.grant_id !== grant.grant_id));
           }
         })
-        .catch(error => {
+        .catch((error: unknown) => {
           if (sessionIdRef.current === requestedSessionId) {
-            setLoadError(getErrorMessage(error, 'Could not revoke the implementation-plan grant.'));
+            setRevokeError(revokeErrorMessage(error));
           }
         })
         .finally(() => {
@@ -140,27 +172,34 @@ function ImplementationPlanGrantControlsWithApi({
     [revokeImplementationPlanGrant, sessionId],
   );
 
-  if (grants.length === 0 && loadError == null) {
+  // Stopping a plan removes it from the list, so an empty list has nothing to show.
+  if (grants.length === 0) {
     return null;
   }
 
   return (
     <section
-      aria-label="Active implementation plans"
+      aria-label="Approved plans for code changes"
       className="rounded-lg border border-border bg-card-bg px-3 py-2.5 shadow-sm"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="font-sans text-xs font-semibold text-text-primary">Approved implementation plans</h2>
+          <h2 className="font-sans text-xs font-semibold text-text-primary">Approved plans for code changes</h2>
           <p className="mt-0.5 font-sans text-[0.6875rem] leading-relaxed text-text-secondary">
-            Only the listed edits and checks can be admitted. Revoke a plan to stop future dispatches.
+            The assistant can only change the files and run the checks listed here. Stop a plan to block any more
+            changes under it.
           </p>
         </div>
       </div>
 
-      {loadError ? (
+      {revokeError ? (
         <p className="mt-2 font-sans text-xs text-failure-bg" role="alert">
-          {loadError}
+          {revokeError}
+        </p>
+      ) : null}
+      {refreshFailed ? (
+        <p className="mt-2 font-sans text-[0.6875rem] text-text-secondary" role="status">
+          This list could not be refreshed, so it may be out of date. It tries again on its own.
         </p>
       ) : null}
 
@@ -172,22 +211,22 @@ function ImplementationPlanGrantControlsWithApi({
                 <div className="min-w-0">
                   <p className="font-sans text-xs font-medium leading-snug text-text-primary">{grant.plan.approach}</p>
                   <p className="mt-0.5 font-mono text-[0.6875rem] text-text-secondary">
-                    {grant.plan.branch} @ {grant.plan.head_sha.slice(0, 8)} · revision {grant.plan.repository_revision}
+                    {grant.plan.branch} · {grant.plan.head_sha.slice(0, 8)}
                   </p>
                 </div>
                 <Button
                   type="button"
                   size="small"
                   variant="secondary"
-                  aria-label={`Revoke ${grant.plan.approach}`}
+                  aria-label={`Stop plan: ${grant.plan.approach}`}
                   disabled={revokingGrantId !== null}
                   onClick={() => revoke(grant)}
                 >
-                  {revokingGrantId === grant.grant_id ? 'Revoking…' : 'Revoke'}
+                  {revokingGrantId === grant.grant_id ? 'Stopping…' : 'Stop plan'}
                 </Button>
               </div>
 
-              <div className="mt-2 flex flex-wrap gap-1" aria-label="Allowed paths">
+              <div className="mt-2 flex flex-wrap gap-1" aria-label="Files it may change">
                 {grant.plan.file_globs.map(path => (
                   <span
                     key={path}
@@ -198,7 +237,7 @@ function ImplementationPlanGrantControlsWithApi({
                 ))}
               </div>
               {grant.plan.verify_command_ids.length > 0 ? (
-                <div className="mt-1 flex flex-wrap gap-1" aria-label="Allowed checks">
+                <div className="mt-1 flex flex-wrap gap-1" aria-label="Checks it may run">
                   {grant.plan.verify_command_ids.map(commandId => (
                     <span
                       key={commandId}

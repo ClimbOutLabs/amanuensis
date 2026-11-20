@@ -42,8 +42,8 @@ describe('ImplementationPlanGrantControls', () => {
       </ImplementationPlanGrantProvider>,
     );
 
-    expect(await screen.findByRole('region', { name: 'Active implementation plans' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: `Revoke ${grant.plan.approach}` }));
+    expect(await screen.findByRole('region', { name: 'Approved plans for code changes' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: `Stop plan: ${grant.plan.approach}` }));
     expect(revokeImplementationPlanGrant).toHaveBeenCalledWith({
       sessionId: 'session-1',
       grantId: grant.grant_id,
@@ -60,21 +60,21 @@ describe('ImplementationPlanGrantControls', () => {
       </ImplementationPlanGrantProvider>,
     );
 
-    expect(await screen.findByRole('region', { name: 'Active implementation plans' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Approved plans for code changes' })).toBeInTheDocument();
     expect(screen.getByText(grant.plan.approach)).toBeInTheDocument();
-    expect(screen.getByText('feature/plan-grants @ 01234567 · revision 4')).toBeInTheDocument();
+    expect(screen.getByText('feature/plan-grants · 01234567')).toBeInTheDocument();
     expect(screen.getByText('src/exact.ts')).toBeInTheDocument();
     expect(screen.getByText('test:focused')).toBeInTheDocument();
     expect(listImplementationPlanGrants).toHaveBeenCalledWith('session-1');
 
-    fireEvent.click(screen.getByRole('button', { name: `Revoke ${grant.plan.approach}` }));
+    fireEvent.click(screen.getByRole('button', { name: `Stop plan: ${grant.plan.approach}` }));
 
     expect(revokeImplementationPlanGrant).toHaveBeenCalledWith({
       sessionId: 'session-1',
       grantId: grant.grant_id,
     });
     await waitFor(() => {
-      expect(screen.queryByRole('region', { name: 'Active implementation plans' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Approved plans for code changes' })).not.toBeInTheDocument();
     });
   });
 
@@ -315,5 +315,110 @@ describe('ImplementationPlanGrantControls', () => {
     } finally {
       visibility.restore();
     }
+  });
+
+  describe('when the app cannot be reached', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function renderControls({
+      listImplementationPlanGrants,
+      revokeImplementationPlanGrant = vi.fn().mockResolvedValue(undefined),
+      isRunning,
+    }: {
+      listImplementationPlanGrants: (sessionId: string) => Promise<ImplementationPlanGrant[]>;
+      revokeImplementationPlanGrant?: (options: { sessionId: string; grantId: string }) => Promise<void>;
+      isRunning: boolean;
+    }) {
+      return render(
+        <ImplementationPlanGrantProvider api={{ listImplementationPlanGrants, revokeImplementationPlanGrant }}>
+          <ImplementationPlanGrantControls sessionId="session-1" isRunning={isRunning} />
+        </ImplementationPlanGrantProvider>,
+      );
+    }
+
+    it('shows nothing when the first read fails, then retries on its own while idle', async () => {
+      vi.useFakeTimers();
+      const listImplementationPlanGrants = vi
+        .fn<(sessionId: string) => Promise<ImplementationPlanGrant[]>>()
+        .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+        .mockResolvedValue([grant]);
+      const { container } = renderControls({ listImplementationPlanGrants, isRunning: false });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(container).toBeEmptyDOMElement();
+      expect(screen.queryByText('Failed to fetch')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(2);
+      expect(screen.getByText(grant.plan.approach)).toBeInTheDocument();
+    });
+
+    it('stays hidden when a server error comes back and nothing is approved', async () => {
+      const listImplementationPlanGrants = vi.fn().mockRejectedValue(new Error('Request failed (502).'));
+      const { container } = renderControls({ listImplementationPlanGrants, isRunning: false });
+
+      await waitFor(() => {
+        expect(listImplementationPlanGrants).toHaveBeenCalled();
+      });
+      expect(container).toBeEmptyDOMElement();
+    });
+
+    it('keeps listed plans quietly through a dropped connection', async () => {
+      vi.useFakeTimers();
+      const listImplementationPlanGrants = vi
+        .fn<(sessionId: string) => Promise<ImplementationPlanGrant[]>>()
+        .mockResolvedValueOnce([grant])
+        .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+        .mockResolvedValue([grant]);
+      renderControls({ listImplementationPlanGrants, isRunning: true });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(2);
+      expect(screen.getByText(grant.plan.approach)).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('says a listed plan may be out of date when the server answers with an error', async () => {
+      vi.useFakeTimers();
+      const listImplementationPlanGrants = vi
+        .fn<(sessionId: string) => Promise<ImplementationPlanGrant[]>>()
+        .mockResolvedValueOnce([grant])
+        .mockRejectedValueOnce(new Error('Request failed (500).'))
+        .mockResolvedValue([grant]);
+      renderControls({ listImplementationPlanGrants, isRunning: true });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(screen.getByRole('status')).toHaveTextContent('may be out of date');
+      expect(screen.queryByText('Request failed (500).')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('explains in plain words when stopping a plan cannot reach the app', async () => {
+      const listImplementationPlanGrants = vi.fn().mockResolvedValue([grant]);
+      const revokeImplementationPlanGrant = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+      renderControls({ listImplementationPlanGrants, revokeImplementationPlanGrant, isRunning: false });
+
+      fireEvent.click(await screen.findByRole('button', { name: `Stop plan: ${grant.plan.approach}` }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'The app could not be reached, so this plan is still approved. Try again when the connection is back.',
+      );
+      expect(screen.getByText(grant.plan.approach)).toBeInTheDocument();
+    });
   });
 });
