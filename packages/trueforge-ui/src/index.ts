@@ -312,6 +312,12 @@ export type {
 export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
 export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
 export { SpokenReplyProvider, useSpokenReply } from './components/SpokenReplyContext.js';
+export { TerminalPairingProvider, useOptionalTerminalPairing } from './components/TerminalPairingContext.js';
+export type {
+  PairedTerminal,
+  TerminalPairingApi,
+  TerminalPairingConfirmation,
+} from './components/TerminalPairingContext.js';
 export type { TourCapabilities } from './components/tourPrompts.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
 export type {
@@ -342,6 +348,7 @@ export {
 export type { ImplementationPlanGrantControlsProps } from './containers/ImplementationPlanGrantControls.js';
 export { McpAuthContainer } from './containers/McpAuthContainer.js';
 export { default as PostMcpOauthScreen } from './containers/McpOauthContainer/PostMcpOauthScreen.js';
+export { default as PairTerminalPage } from './containers/PairTerminalPage.js';
 export { ReasoningContainer } from './containers/ReasoningContainer.js';
 export { ResumeUnavailableContainer } from './containers/ResumeUnavailableContainer.js';
 export { Thread } from './containers/Thread.js';

@@ -47,6 +47,8 @@
   "Telegram": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Pair": "packages/trueforge-ui/src/containers/SettingsBuilder/TelegramSetupPanel.tsx",
   "Cancel pairing": "packages/trueforge-ui/src/containers/SettingsBuilder/TelegramSetupPanel.tsx",
+  "Confirm pairing": "packages/trueforge-ui/src/containers/PairTerminalPage.tsx",
+  "Paired terminals": "packages/trueforge-ui/src/containers/SettingsBuilder/PairedTerminalsSection.tsx",
   "Approve": "packages/trueforge/src/runtime/telegram/telegramReplies.ts",
   "Deny": "packages/trueforge/src/runtime/telegram/telegramReplies.ts",
   "Connect": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",

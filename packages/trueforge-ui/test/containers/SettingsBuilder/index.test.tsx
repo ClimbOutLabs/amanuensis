@@ -7,6 +7,7 @@ import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { PersonaProvider, type PersonaApi } from '@/components/PersonaContext.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { RunCodeStatusProvider } from '@/components/RunCodeStatusContext.js';
+import { TerminalPairingProvider, type TerminalPairingApi } from '@/components/TerminalPairingContext.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
@@ -46,6 +47,10 @@ vi.mock('@/containers/SettingsBuilder/AboutSettings.js', () => ({
   default: () => <div>About settings content</div>,
 }));
 
+vi.mock('@/containers/SettingsBuilder/AccountSettings.js', () => ({
+  default: () => <div>Account settings content</div>,
+}));
+
 vi.mock('@/containers/SettingsBuilder/PersonaSettings.js', () => ({
   default: () => <div>Persona settings content</div>,
 }));
@@ -64,7 +69,7 @@ const skillCatalog: SkillCatalogServer = {
   createSkill: unavailable,
 };
 
-function createServer(options: { catalog?: boolean; skills?: boolean } = {}): AgentUIServer {
+function createServer(options: { catalog?: boolean; skills?: boolean; signInMode?: 'oidc' } = {}): AgentUIServer {
   if (options.catalog === false) {
     return createMockAgentUIServer();
   }
@@ -72,8 +77,29 @@ function createServer(options: { catalog?: boolean; skills?: boolean } = {}): Ag
     catalog: createMockCatalog({
       ...(options.skills ? { skillCatalog } : {}),
     }),
+    ...(options.signInMode !== undefined
+      ? {
+          getCapabilities: async () => ({
+            data: {
+              sandbox: { enabled: true },
+              skill: { enabled: true },
+              settings: { enabled: true },
+              memoryScreen: { enabled: false },
+              toolOutputScreen: { enabled: false },
+              signIn: { mode: options.signInMode },
+            },
+          }),
+        }
+      : {}),
   });
 }
+
+const terminalPairingStub: TerminalPairingApi = {
+  lookupPairing: async () => null,
+  confirmPairing: async () => ({ device_name: 'Pippa', paired_at: '2026-11-14T09:15:00.000Z' }),
+  listPairedTerminals: async () => [],
+  revokePairedTerminal: async () => {},
+};
 
 function SettingsControls() {
   const { setSettingsOpen } = useShellMode();
@@ -81,6 +107,9 @@ function SettingsControls() {
     <>
       <button type="button" onClick={() => setSettingsOpen(true)}>
         Open settings
+      </button>
+      <button type="button" onClick={() => setSettingsOpen(true, 'account')}>
+        Open account settings
       </button>
       <button type="button" onClick={() => setSettingsOpen(false)}>
         Switch to agent
@@ -95,12 +124,14 @@ function TestShell({
   personalization = false,
   personas = false,
   runCodeStatus = false,
+  pairing = false,
 }: {
   server?: AgentUIServer;
   children?: ReactNode;
   personalization?: boolean;
   personas?: boolean;
   runCodeStatus?: boolean;
+  pairing?: boolean;
 }) {
   const content = (
     <DraftCatalogProvider>
@@ -145,7 +176,12 @@ function TestShell({
   ) : (
     personaContent
   );
-  return server === undefined ? runCodeContent : <ServerProvider server={server}>{runCodeContent}</ServerProvider>;
+  const pairingContent = pairing ? (
+    <TerminalPairingProvider api={terminalPairingStub}>{runCodeContent}</TerminalPairingProvider>
+  ) : (
+    runCodeContent
+  );
+  return server === undefined ? pairingContent : <ServerProvider server={server}>{pairingContent}</ServerProvider>;
 }
 
 async function openSettings() {
@@ -247,6 +283,39 @@ describe('TruefoundrySettingsBuilder', () => {
       expect(screen.getByText('Personalization settings content')).toBeInTheDocument();
     });
     expect(screen.getByRole('tab', { name: 'Personalization' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('shows the Account section on a sign-in-service install when the host offers pairing', async () => {
+    render(<TestShell server={createServer({ signInMode: 'oidc' })} pairing />);
+    await openSettings();
+
+    // There is no local account here, so the password card has no surface. The section
+    // still has to open: its other half is the paired terminals list, and the host
+    // offers the pairing surface in both sign-in modes.
+    fireEvent.click(screen.getByRole('tab', { name: 'Account' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Account settings content')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('keeps a stored Account section when pairing is offered, and resets it when neither surface is', async () => {
+    const { unmount } = render(<TestShell server={createServer({ signInMode: 'oidc' })} pairing />);
+    await openSettings();
+    fireEvent.click(screen.getByRole('button', { name: 'Open account settings' }));
+    await waitFor(() => {
+      expect(screen.getByText('Account settings content')).toBeInTheDocument();
+    });
+    unmount();
+
+    render(<TestShell server={createServer({ signInMode: 'oidc' })} />);
+    await openSettings();
+    fireEvent.click(screen.getByRole('button', { name: 'Open account settings' }));
+    await waitFor(() => {
+      expect(screen.getByText('Model settings content')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('tab', { name: 'Account' })).not.toBeInTheDocument();
   });
 
   it('resets a stale optional section when its catalog disappears', async () => {
