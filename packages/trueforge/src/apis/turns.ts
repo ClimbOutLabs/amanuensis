@@ -111,6 +111,7 @@ import {
 } from '../runtime/chatTitle';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { effectiveGitCommitIdentity, readStoredGitCommitIdentity } from '../runtime/gitCommitIdentitySettings';
+import type { GoalTurnAccess, GoalTurnContext } from '../runtime/goals/goalCapability';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
 import { placeOfModelHost } from '../runtime/localModels';
@@ -346,6 +347,8 @@ export interface TurnsRouterDeps {
   authorizer: Authorizer;
   /** Present only where schedules run (standalone): chat turns then get the schedule tools. */
   schedules?: ScheduleStoreAccess | undefined;
+  /** Present only where goals run (standalone with a goal store): chat turns then get the goal tools. */
+  goals?: GoalTurnAccess | undefined;
 }
 
 /** Names only, bounded: enough for the model to know the host's catalog exists without inflating the prompt. */
@@ -489,6 +492,8 @@ function createTurnResolver(deps: {
   modelUsage: TurnModelUsage;
   /** Chat turns where schedules run; absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
+  /** Chat turns where goals run; absent, no goal tools mount. */
+  goals?: GoalTurnContext | undefined;
   /** Chat turns that have a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
   /** Chat turns where this app keeps the skills itself; absent, no skill tools mount. */
@@ -540,6 +545,7 @@ function createTurnResolver(deps: {
     chatDeletionStore,
     modelUsage,
     schedules,
+    goals,
     personas,
     skills,
   } = deps;
@@ -1089,6 +1095,7 @@ function createTurnResolver(deps: {
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
+      goals,
       personas,
       skills,
       logger,
@@ -3090,6 +3097,42 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               }),
               logger: deps.logger,
               // A reminder set in this chat fires back into this chat.
+              session_id: session.session_id,
+            },
+      goals:
+        deps.goals === undefined || chatRunner === undefined
+          ? undefined
+          : {
+              store: deps.goals.goalStore,
+              agentStore,
+              skillStore,
+              spaceStore: deps.spaceStore,
+              tenant_id: requestContext.tenant_id,
+              owner: scheduleOwner,
+              persona_id: persona?.kind === 'persona' ? persona.persona.id : null,
+              // A goal made here runs as whatever runs this turn: the chat's agent or setup.
+              resolve_chat_agent_id: async () => {
+                if (chatRunner.kind === 'saved') {
+                  return chatRunner.agent.id;
+                }
+                const assistant = resolveChatAssistant({
+                  tenant_id: requestContext.tenant_id,
+                  owner: scheduleOwner,
+                  runner: chatRunner,
+                  persona: persona?.kind === 'persona' ? persona.persona : undefined,
+                  agentStore,
+                  scheduleAgentChoices: scheduleAgentChoices({
+                    tenant_id: requestContext.tenant_id,
+                    modelProviderStore,
+                    mcpServerStore,
+                    skillStore,
+                    sandboxProviderStore,
+                    searchProviderPresetNames: deps.mcpCatalog.searchProviderPresetNames(),
+                  }),
+                });
+                return (await assistant.agent()).id;
+              },
+              logger: deps.logger,
               session_id: session.session_id,
             },
     });
