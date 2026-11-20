@@ -179,9 +179,9 @@ export default function NotesFolderSetupPanel({ open, onOpenChange, port, onChan
                 : 'The folder is checked before anything is saved.'}
             </p>
             <p className="text-text-secondary">
-              The Docker install cannot use a notes folder yet, because Aman runs in a container there and cannot reach
-              a folder on your computer. Aman Setup on Windows uses Docker, so it cannot use a notes folder yet either.
-              A notes folder works on the npx install and on an install built from the source.
+              A notes folder works on the npx install and on an install built from the source. The Docker install and
+              Aman Setup on Windows cannot use one, because Aman runs in a container there and cannot see your folders.
+              On those, connect Obsidian instead: Help, Your notes folder, shows how.
             </p>
             <div>
               <label htmlFor="notes-folder-path" className={LABEL_CLASS}>
