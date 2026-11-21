@@ -71,6 +71,11 @@ ENV MEMORY_MARKDOWN_DIR=/data/memory \
 # Voice mode's listening model (Silero VAD v5.1.2, MIT), fetched at build time and checked against its
 # SHA-256, so the build fails on any other file and the running server never downloads it. The server
 # pins the same hash in packages/trueforge/src/voice/vad/sileroVad.ts; a test keeps the two equal.
+# The folder is created first, the same way as the memory search model's folder below: when the fetch
+# creates the folder itself, the folder takes the file's permissions, which let the server list the
+# model file but never open it, so the server reports the model missing on every installed instance.
+RUN mkdir -p /opt/aman-voice \
+  && chown -R 10001:10001 /opt/aman-voice
 ADD --chmod=0644 --checksum=sha256:2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx /opt/aman-voice/silero_vad.onnx
 
 # Memory search model (Xenova/multilingual-e5-small, MIT upstream), fetched at build time from the pinned
