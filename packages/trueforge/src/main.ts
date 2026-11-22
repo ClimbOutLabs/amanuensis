@@ -114,6 +114,7 @@ import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import { DeliveryStore, type IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
+import { GoalStore } from './db/goalStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { ILocalUserStore } from './db/localUserStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
@@ -171,6 +172,8 @@ import { createDeliveryService, type DeliveryService } from './runtime/delivery/
 import { createTelegramSender } from './runtime/delivery/telegramSender';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { createGoalStoreAdapter } from './runtime/goals/goalStoreAdapter';
+import type { IGoalStore } from './runtime/goals/goalStorePort';
 import { instanceOwnerSubjectId } from './runtime/instanceOwner';
 import { getMailAccountState, registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
@@ -278,6 +281,8 @@ interface ServerPersistence<TTransaction> {
   briefItemStore: IBriefItemCompletionStore;
   recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
+  /** The goal store behind the port the goal service runs on; its presence is what mounts the goals API. */
+  goalStore: IGoalStore<TTransaction>;
   reachSettingsStore: IReachSettingsStore;
   personTimezoneStore: IPersonTimezoneStore;
   textContactStore: ITextContactStore;
@@ -528,6 +533,7 @@ async function createStandalonePersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
+    goalStore: createGoalStoreAdapter({ store: new GoalStore(db), db }),
     reachSettingsStore: new ReachSettingsStore(db),
     personTimezoneStore: new PersonTimezoneStore(db),
     textContactStore: new TextContactStore(db),
@@ -722,6 +728,7 @@ async function createDistributedPersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
+    goalStore: createGoalStoreAdapter({ store: new GoalStore(db), db }),
     reachSettingsStore: new ReachSettingsStore(db),
     personTimezoneStore: new PersonTimezoneStore(db),
     textContactStore: new TextContactStore(db),
@@ -773,6 +780,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelSettingsStore,
     briefItemStore,
     deliveryStore,
+    goalStore,
     reachSettingsStore,
     personTimezoneStore,
     textContactStore,
@@ -1247,6 +1255,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelSettingsStore,
     briefItemStore,
     deliveryStore,
+    goalStore,
     pushSubscriptionStore,
     telegramStore,
     telegramService,

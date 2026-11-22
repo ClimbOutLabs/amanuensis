@@ -7,7 +7,7 @@ import {
   useAui,
   useAuiState,
 } from '@assistant-ui/react';
-import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 
 import { AgentHistoryFilterButton } from '../atoms/AgentHistoryFilterButton.js';
 import { cn } from '../atoms/lib/cn.js';
@@ -20,6 +20,7 @@ import {
 } from '../atoms/lib/threadListMeta.js';
 import { useOptionalChatAnswerMarks } from '../chatAnswers/ChatAnswerMarksContext.js';
 import { useOptionalDeliveries } from '../deliveries/DeliveriesContext.js';
+import { useChatListRefresh } from '../hooks/useChatListRefresh.js';
 import { useOpenChatById } from '../hooks/useOpenChatById.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
 import { Icon } from '../icons/Icon.js';
@@ -636,6 +637,19 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
       }
     }
   }, [chatFolders, isLoading, isLoadingMore, loadedRemoteSessionIds]);
+
+  // One refresh for both stores: the runtime list reloads and the folder store loads
+  // again, so a chat created or deleted elsewhere shows up without a page refresh.
+  const reloadFolders = chatFolders?.reload;
+  const refreshChatList = useCallback(() => {
+    // A failed reload keeps the list on screen as it is; the next refresh tries again.
+    void auiRef.current
+      .threads()
+      .reload()
+      .catch(() => undefined);
+    reloadFolders?.();
+  }, [reloadFolders]);
+  useChatListRefresh({ onRefresh: refreshChatList });
 
   const { allows } = useResourcePermissions({ resourceType: 'session', resourceIds: remoteSessionIds });
   const canDeleteResource = (sessionId: string) => allows(sessionId, 'DELETE');

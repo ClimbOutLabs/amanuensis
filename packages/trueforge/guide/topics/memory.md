@@ -1,7 +1,7 @@
 ---
 id: memory
 title: Memory
-covers: settings:memory, route:memoryRecall, route:memoryScreen, route:memorySummarize, route:memoryPageSorting, route:memoryNightly, route:memoryVault, route:memoryPages, route:chatSearch, route:toolOutputScreen
+covers: settings:memory, route:memoryRecall, route:memoryScreen, route:memorySummarize, route:memoryItemTracking, route:memoryPageSorting, route:memoryNightly, route:memoryVault, route:memoryPages, route:chatSearch, route:toolOutputScreen
 ---
 
 Aman remembers useful facts from your chats, such as who people are, your plans and what you prefer. Next time, you don't have to explain them again.
@@ -106,6 +106,7 @@ The **Settings** tab also has these:
 
 - **Use memories in replies**: when this is off, Aman stops bringing saved memories into its replies. Your memories are kept.
 - **Turn summaries**: when this is on, Aman saves only the lasting facts from each chat. When it is off, Aman saves each message word for word.
+- **Open items**: when this is on, Aman keeps a short list of what you still have to do, from what you were asked for and what you said you would do. An item leaves the list only when finishing it is clear, so a brief never reminds you about something already done. Turn the **Track open items** switch off to stop the tracking. Your saved memories are not changed.
 - **Recall screening** and **Tool-output screening**: optional safety checks that look for hidden instructions in what Aman reads. They only work when your Aman has a checking service set up.
 
 ## Good to know

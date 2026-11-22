@@ -236,6 +236,7 @@ export function ThreadListItemActions({
 }) {
   const compact = useCompactLayout();
   const isMobile = useIsMobile();
+  const aui = useAui();
   const chatFolders = useOptionalChatFolders();
   // A private chat is never kept, so it is never filed either.
   const isPrivate = useIsPrivateChat(sessionId);
@@ -306,8 +307,18 @@ export function ThreadListItemActions({
       onRenamed={onRenamed}
     />
   ) : null;
+  // The folder store keeps its own copy of a chat, filed or not. A delete through the
+  // runtime has to drop that copy too, or the row comes straight back from the merge.
+  const deleteRow = async () => {
+    if (onDelete !== undefined) {
+      await onDelete();
+      return;
+    }
+    await aui.threadListItem().delete();
+    chatFolders?.removeFolderSession({ sessionId });
+  };
   const deleteDialog = canDelete ? (
-    <ChatDeleteDialog title={title} open={deleteOpen} onOpenChange={setDeleteOpen} onDelete={onDelete} />
+    <ChatDeleteDialog title={title} open={deleteOpen} onOpenChange={setDeleteOpen} onDelete={deleteRow} />
   ) : null;
 
   if (useSheet) {

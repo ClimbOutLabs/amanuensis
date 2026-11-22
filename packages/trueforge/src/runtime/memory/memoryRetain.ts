@@ -12,6 +12,7 @@ import type { Logger } from 'winston';
 import configuration from '../../config';
 import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
+import { resolveMemoryItemTrackingEnabled } from '../memoryItemTrackingSettings';
 import { readMemoryPageSortingSetting } from '../memoryPageSortingSettings';
 import type { TurnModelUsage } from '../modelUsage';
 import { sessionKeepsNothing } from '../privateChat';
@@ -24,16 +25,29 @@ import { trackMemoryBackgroundWork } from './memoryBackgroundWork';
 import type { MemoryClient, RetainItem, WrittenEntry } from './memoryClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './memoryClient';
 import {
+  appendItemEvents,
+  eventsForItemFlags,
+  foldItemEvents,
+  foldMoreItemEvents,
+  itemListForPrompt,
+  readItemEvents,
+  type ItemEvent,
+  type ItemFlag,
+  type ItemListEntry,
+  type TrackedItem,
+} from './memoryItems';
+import {
   ASSISTANT_RESPONSE_SOURCE,
   labeledNoteText,
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,
   noteLabel,
   noteRetainContent,
+  noteTextWithoutLabel,
   REPLY_READ_NOTHING_METADATA_KEY,
   type MemoryNoteSource,
 } from './memoryNotes';
-import { summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
+import { boundedToolResults, summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
 import {
   MEMORY_ORIGIN_METADATA_KEY,
   TOOL_INGESTED_ORIGIN,
@@ -210,6 +224,11 @@ export interface SubmitRetainParams {
   /** What the turn's tools returned, so concrete findings can be saved as labeled notes. */
   toolResults?: readonly TurnToolResult[] | undefined;
   /**
+   * What the turn read out of its own stored memory pages, kept apart from the findings: a reply that
+   * only repeats it is not saved as a new note, since the fact is already kept.
+   */
+  recalledMemory?: readonly string[] | undefined;
+  /**
    * Context for LLM summarization of the turn. Present only when turn summarization was
    * enabled for the turn (the Settings toggle's persisted override, else the
    * `MEMORY_SUMMARIZE` env default, resolved once per turn by `resolveTurnSummarizeContext`);
@@ -306,15 +325,106 @@ function formatFacts(facts: readonly string[]): string {
  * an unsummarized turn, or "nothing durable" stores nothing. Every outcome is logged at debug so
  * the effective state stays observable.
  */
+/**
+ * What item tracking needs from one turn: the folder the items file lives in, the folded state
+ * the turn started from, the numbered list both passes are shown, and the flags they raised.
+ * Absent when tracking is off for the turn or the backend keeps no memory files.
+ */
+interface TurnItemContext {
+  dir: string;
+  items: readonly TrackedItem[];
+  entries: readonly ItemListEntry[];
+  lines: readonly string[];
+  flags: { pass: 'person' | 'notes'; flags: readonly ItemFlag[] }[];
+}
+
+/**
+ * The turn's item context, when item tracking is on. The setting is read now, at retain time,
+ * so a change in Settings applies to the very next turn. Never throws: a state that cannot be
+ * read means no tracking this turn, and the diary still holds the evidence.
+ */
+async function itemContextForTurn(
+  params: SubmitRetainParams,
+  summarize: SummarizeTurnContext,
+): Promise<TurnItemContext | undefined> {
+  try {
+    const enabled = await resolveMemoryItemTrackingEnabled({
+      globalSettingsStore: summarize.globalSettingsStore,
+      logger: params.logger,
+    });
+    const dir = enabled ? params.client.pagesWriteDir?.() : undefined;
+    if (dir === undefined) {
+      return undefined;
+    }
+    const items = foldItemEvents(await readItemEvents({ dir, logger: params.logger }));
+    const { lines, entries } = itemListForPrompt(items);
+    return { dir, items, entries, lines, flags: [] };
+  } catch (error) {
+    params.logger.debug('Item tracking could not read its state for this turn', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      ...extractErrorLogFields(error),
+    });
+    return undefined;
+  }
+}
+
+/**
+ * Records what the turn's two passes flagged for the item list. Each pass is judged against
+ * the state the passes before it in the same turn produced, so a request both passes flag
+ * opens once; the numbered entries stay the turn-start list both passes were shown, so a
+ * number means the same item in each. Runs once per decision, and the events carry ids minted
+ * from the turn, so a resubmitted decision appends nothing twice. Never throws: item tracking
+ * must never fail or delay the turn's memory.
+ */
+async function applyTurnItemFlags(params: SubmitRetainParams, items: TurnItemContext): Promise<void> {
+  try {
+    const sources = {
+      userText: params.userText,
+      results: boundedToolResults(params.toolResults ?? []),
+    };
+    const events: ItemEvent[] = [];
+    let current = items.items;
+    for (const { pass, flags } of items.flags) {
+      const produced = eventsForItemFlags({
+        flags,
+        pass,
+        sessionId: params.sessionId,
+        turnId: params.turnId,
+        at: params.completedAt,
+        items: current,
+        entries: items.entries,
+        sources,
+        personName: params.summarize?.personName,
+      });
+      events.push(...produced);
+      if (produced.length > 0) {
+        current = foldMoreItemEvents(current, produced);
+      }
+    }
+    await appendItemEvents({ dir: items.dir, events, logger: params.logger });
+  } catch (error) {
+    params.logger.warn('Item flags from a turn could not be recorded', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      ...extractErrorLogFields(error),
+    });
+  }
+}
+
 async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory> {
   const summarize = params.summarize;
   if (summarize === undefined) {
     return decidePersonFacts(params);
   }
+  const items = await itemContextForTurn(params, summarize);
   // One after the other: both ask the same model, and a model server that shares its speed between
   // requests would run each at half speed, so both could run out of time together.
-  const person = await decidePersonFacts(params);
-  const notes = await decideNotes({ params, summarize });
+  const person = await decidePersonFacts(params, items);
+  const notes = await decideNotes({ params, summarize, items });
+  if (items !== undefined) {
+    await applyTurnItemFlags(params, items);
+  }
   if (notes.length === 0) {
     return person;
   }
@@ -325,12 +435,15 @@ async function decideTurnMemory(params: SubmitRetainParams): Promise<TurnMemory>
 async function decideNotes({
   params,
   summarize,
+  items,
 }: {
   params: SubmitRetainParams;
   summarize: SummarizeTurnContext;
+  items: TurnItemContext | undefined;
 }): Promise<LabeledNote[]> {
   const notes = await summarizeTurnNotes({
     results: params.toolResults ?? [],
+    recalledMemory: params.recalledMemory,
     assistantText: params.assistantText,
     turnDate: params.completedAt,
     timeZone: params.timeZone,
@@ -342,6 +455,14 @@ async function decideNotes({
     tokenFactoryBudget: summarize.tokenFactoryBudget,
     modelUsage: summarize.modelUsage,
     logger: params.logger,
+    resolveLlm: summarize.resolveLlm,
+    itemLines: items?.lines,
+    onItemFlags:
+      items === undefined
+        ? undefined
+        : flags => {
+            items.flags.push({ pass: 'notes', flags });
+          },
   });
   const date = turnDay(params);
   const assistantName = usablePersonName(summarize.assistantName);
@@ -375,7 +496,7 @@ function fullReplyNotes(params: SubmitRetainParams): LabeledNote[] {
 }
 
 /** What the person said that is worth keeping, decided as it always was; notes are decided apart from it. */
-async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory> {
+async function decidePersonFacts(params: SubmitRetainParams, items?: TurnItemContext): Promise<TurnMemory> {
   const summarize = params.summarize;
   if (summarize === undefined) {
     params.logger.debug('Turn summarization context not provided; retaining the full exchange', {
@@ -403,6 +524,13 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       profileLines: params.profileLearning?.knownLines,
       vaultDir: params.client.pagesWriteDir?.(),
       resolveLlm: summarize.resolveLlm,
+      itemLines: items?.lines,
+      onItemFlags:
+        items === undefined
+          ? undefined
+          : flags => {
+              items.flags.push({ pass: 'person', flags });
+            },
     });
     params.profileLearning?.onAnswered(result.status === 'summarized' ? (result.profileLines ?? []) : []);
     switch (result.status) {
@@ -550,9 +678,13 @@ function logTurnMemoryNotSaved(
 }
 
 /**
- * Retain items for the turn's notes. They carry the untrusted origin, so recall holds them to the strict
- * screening posture: a finding is what something outside the chat said, and a reply note is the assistant's
- * own words, neither of them the person's voice.
+ * Retain items for the turn's notes: one item for each source the notes came from, so everything a
+ * turn's note pass kept from one place is stored as one memory, its points as lines inside it, rather
+ * than one memory per point. Notes of one source in one turn share their label, so the first line
+ * carries it and the rest follow without it. One source per item keeps the source an item is stamped
+ * with true of every line it holds, which recall and page sorting both read per item. They carry the
+ * untrusted origin, so recall holds them to the strict screening posture: a finding is what something
+ * outside the chat said, and a reply note is the assistant's own words, neither of them the person's voice.
  */
 function noteRetainItems({
   params,
@@ -561,16 +693,33 @@ function noteRetainItems({
   params: SubmitRetainParams;
   notes: readonly LabeledNote[];
 }): RetainItem[] {
-  return notes.map((note, index) =>
-    noteRetainItem({
-      sessionId: params.sessionId,
-      turnId: params.turnId,
-      completedAt: params.completedAt,
-      note,
-      documentId: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
-      chatReadNothing: params.chatReadNothing === true && params.origin === USER_STATED_ORIGIN,
-    }),
-  );
+  const bySource = new Map<MemoryNoteSource, LabeledNote[]>();
+  for (const note of notes) {
+    const group = bySource.get(note.source) ?? [];
+    group.push(note);
+    bySource.set(note.source, group);
+  }
+  const items: RetainItem[] = [];
+  let index = 0;
+  for (const group of bySource.values()) {
+    const [first] = group;
+    if (first === undefined) {
+      continue;
+    }
+    const text = [first.text, ...group.slice(1).map(note => noteTextWithoutLabel(note.text))].join('\n');
+    items.push(
+      noteRetainItem({
+        sessionId: params.sessionId,
+        turnId: params.turnId,
+        completedAt: params.completedAt,
+        note: { source: first.source, date: first.date, text },
+        documentId: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+        chatReadNothing: params.chatReadNothing === true && params.origin === USER_STATED_ORIGIN,
+      }),
+    );
+    index += 1;
+  }
+  return items;
 }
 
 /** One note ready for the provider, carrying the untrusted origin like every note. */

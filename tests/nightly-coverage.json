@@ -11,6 +11,7 @@
     "connectors": "Connectors",
     "data": "Export and import",
     "email": "Email",
+    "goals": "Goals",
     "help": "Help",
     "home": "Home",
     "install": "Install and upgrade",
@@ -302,6 +303,10 @@
       "set": "code",
       "tests": []
     },
+    "route:goal": {
+      "set": "goals",
+      "tests": []
+    },
     "route:google": {
       "set": "connectors",
       "tests": []
@@ -316,6 +321,10 @@
     },
     "route:mcpServer": {
       "set": "connectors",
+      "tests": []
+    },
+    "route:memoryItemTracking": {
+      "set": "memory",
       "tests": []
     },
     "route:memoryNightly": {
@@ -833,10 +842,12 @@
     "route:emailAccount",
     "route:firstRunGuide",
     "route:gitCommitIdentity",
+    "route:goal",
     "route:google",
     "route:help",
     "route:mcpOAuth",
     "route:mcpServer",
+    "route:memoryItemTracking",
     "route:memoryNightly",
     "route:memoryPageSorting",
     "route:memoryPages",

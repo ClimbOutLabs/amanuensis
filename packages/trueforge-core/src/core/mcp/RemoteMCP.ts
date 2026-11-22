@@ -21,7 +21,9 @@ import {
   connectRemoteMcp,
   DEFAULT_MAX_MCP_RESPONSE_BYTES,
   isSessionExpiredError,
+  McpAuthChallengeError,
   transportFailureDetail,
+  type McpAuthChallenge,
   type RemoteMcpConnection,
   type RemoteMcpTransportType,
 } from './remoteMcpClient';
@@ -56,7 +58,8 @@ function canonicalHeadersKey(headers: Record<string, string>): string {
 export type ResolveHeadersResult = { headers: Record<string, string> } | { authRequired: MCPAuthRequired };
 
 /** Static headers, or a resolver (invoked at connect) returning headers or signalling auth-required. */
-export type RemoteMcpHeaders = Record<string, string> | (() => Promise<ResolveHeadersResult>);
+export type RemoteMcpHeaders =
+  Record<string, string> | ((challenge?: McpAuthChallenge) => Promise<ResolveHeadersResult>);
 
 type ExecuteResult<T> = { result: T; wasInitialized: MCPServerInitInfo | undefined } | AuthRequiredResponse;
 
@@ -236,6 +239,26 @@ export class RemoteMCP implements ToolSource {
       this.inflight += 1;
       return { result: await operation(connection), wasInitialized: initInfo };
     } catch (error) {
+      if (canRetry && typeof this.headers === 'function') {
+        let current: unknown = error;
+        const seen = new Set<unknown>();
+        while (current instanceof Error && !seen.has(current)) {
+          seen.add(current);
+          if (current instanceof McpAuthChallengeError) {
+            const result = await this.headers(current.challenge);
+            if ('authRequired' in result) {
+              return { authRequired: result.authRequired };
+            }
+            if (used !== undefined) {
+              throw new McpConnectionError(`The ${this.name} connector signed in again. Try the action again.`, 401, {
+                cause: error,
+              });
+            }
+            return await this.connectAndRun(result.headers, operation, false);
+          }
+          current = current.cause;
+        }
+      }
       if (!(canRetry && isSessionExpiredError(error))) {
         throw this.toTransportError(error) ?? error;
       }
@@ -355,9 +378,7 @@ export class RemoteMCP implements ToolSource {
    * session-expired connect keeps its existing path: it is rethrown untouched, so the
    * session-expired retry in connectAndRun handles it exactly as before.
    */
-  private async connectWithOneTransportRetry(
-    headers: Record<string, string>,
-  ): Promise<MCPServerInitInfo | undefined> {
+  private async connectWithOneTransportRetry(headers: Record<string, string>): Promise<MCPServerInitInfo | undefined> {
     try {
       return await this.connectIfNeeded(headers);
     } catch (error) {

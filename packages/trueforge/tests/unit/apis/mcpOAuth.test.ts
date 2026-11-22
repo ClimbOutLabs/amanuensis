@@ -22,6 +22,11 @@ import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
 // address, and every other name does not resolve. The authorize flow and the sign-in dials are
 // judged by the address check, so the suite's answer cannot depend on the DNS of the machine
 // running it, and no real lookup leaves the suite.
+jest.mock('node:os', () => ({
+  ...jest.requireActual<typeof import('node:os')>('node:os'),
+  networkInterfaces: () => ({}),
+}));
+
 jest.mock('node:dns/promises', () => {
   const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
   return {
@@ -270,6 +275,61 @@ describe('MCP OAuth authorize + callback', () => {
     expect(await denied.json()).toEqual({ error: { message: 'Unknown or expired OAuth state' } });
   });
 
+  it('rejects a callback missing a required issuer', async () => {
+    const state = await pendingState('oauth-missing-issuer');
+    const server = await mcpServerStore.getServer({
+      tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,
+      name: 'oauth-missing-issuer',
+    });
+    if (!server) throw new Error('missing server');
+    const client = await mcpServerStore.getClient({ id: server.id });
+    if (!client) throw new Error('missing client');
+    await mcpServerStore.saveClient({
+      id: server.id,
+      record: { ...client, server: { ...client.server, issuerResponseRequired: true } },
+    });
+    const response = await oauthRouter.request(`/callback?state=${encodeURIComponent(state)}&code=code`);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: 'Sign-in could not be verified. Try connecting again.' },
+    });
+  });
+
+  it('accepts a callback with its required issuer', async () => {
+    const state = await pendingState('oauth-valid-issuer');
+    const server = await mcpServerStore.getServer({
+      tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,
+      name: 'oauth-valid-issuer',
+    });
+    if (!server) throw new Error('missing server');
+    const client = await mcpServerStore.getClient({ id: server.id });
+    if (!client) throw new Error('missing client');
+    await mcpServerStore.saveClient({
+      id: server.id,
+      record: { ...client, server: { ...client.server, issuerResponseRequired: true } },
+    });
+    const response = await oauthRouter.request(
+      `/callback?state=${encodeURIComponent(state)}&code=code&iss=${encodeURIComponent(AS_ORIGIN)}`,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true });
+  });
+
+  it('rejects a callback from a different issuer before exchanging its code', async () => {
+    const state = await pendingState('oauth-wrong-issuer');
+    const fetchBeforeCallback = globalThis.fetch;
+    const fetchSpy = jest.fn(fetchBeforeCallback);
+    globalThis.fetch = fetchSpy;
+    const response = await oauthRouter.request(
+      `/callback?state=${encodeURIComponent(state)}&code=code&iss=${encodeURIComponent('https://other.example.com')}`,
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: 'Sign-in could not be verified. Try connecting again.' },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('callback redirects with the failure reason when the IdP denies consent', async () => {
     const landing = '/mcp/connected?tab=mcp';
     const state = await pendingState('oauth-mcp-denied', landing);
@@ -278,7 +338,9 @@ describe('MCP OAuth authorize + callback', () => {
       `/callback?state=${encodeURIComponent(state)}&error=access_denied&error_description=user%20denied`,
     );
     expect(denied.status).toBe(302);
-    expect(denied.headers.get('location')).toBe(`${landing}&isSuccess=false&reason=access_denied`);
+    expect(denied.headers.get('location')).toBe(
+      `${landing}&isSuccess=false&reason=Sign-in+was+not+completed.+Try+connecting+again.`,
+    );
   });
 
   it('callback returns success JSON when authorize supplied no return_to', async () => {

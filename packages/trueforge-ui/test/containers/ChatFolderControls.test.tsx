@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { AssistantRuntimeProvider, useExternalStoreRuntime, type ThreadMessageLike } from '@assistant-ui/react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ThreadListRowProps } from '@/atoms/ThreadListRow.js';
@@ -65,6 +66,75 @@ function DeleteChatHarness({
   );
 }
 
+/**
+ * The same delete, with the folder store also holding the chat as an unfiled copy. The
+ * copy carries its own title so a test can tell it apart from the runtime row: while the
+ * runtime row is there the copy stays hidden behind it, and it may only surface if the
+ * delete fails to drop it.
+ */
+function DeleteUnfiledChatHarness({
+  title,
+  deleteSession,
+}: {
+  title: string;
+  deleteSession: (request: { sessionId: string }) => Promise<void>;
+}) {
+  // Once the delete lands, the runtime list no longer holds the chat, as the real
+  // adapter's next page would not. What keeps the chat on screen after that is the bug.
+  const [threads, setThreads] = useState<Array<{ status: 'regular'; id: string; remoteId: string; title: string }>>([
+    { status: 'regular', id: 'thread-1', remoteId: 'session-1', title },
+  ]);
+  const runtime = useExternalStoreRuntime<ThreadMessageLike>({
+    messages: [],
+    convertMessage: message => message,
+    onNew: async () => {},
+    adapters: {
+      threadList: {
+        threadId: 'thread-1',
+        threads,
+        onDelete: async () => {
+          await deleteSession({ sessionId: 'session-1' });
+          setThreads([]);
+        },
+      },
+    },
+  });
+  const chatFolders: ChatFolderStore = {
+    load: async () => ({
+      folders: [],
+      assignments: [],
+      folderSessions: [],
+      unfiledSessions: [
+        {
+          sessionId: 'session-1',
+          title: 'Quarterly plan folder copy',
+          updatedAt: new Date('2026-11-18T00:00:00.000Z'),
+          agentName: null,
+          isMutable: true,
+        },
+      ],
+    }),
+    createFolder: async ({ name }) => ({ id: 'folder-1', name }),
+    renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+    deleteFolder: async () => {},
+    setSessionFolder: async () => {},
+  };
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <SlotsProvider overrides={{ ThreadListRow: ThreadListRowOverride }}>
+        <CompactLayoutProvider>
+          <ServerProvider server={createMockAgentUIServer({ deleteSession })}>
+            <ChatFolderProvider store={chatFolders}>
+              <ThreadListContainer />
+            </ChatFolderProvider>
+          </ServerProvider>
+        </CompactLayoutProvider>
+      </SlotsProvider>
+    </AssistantRuntimeProvider>
+  );
+}
+
 function openDeleteDialog() {
   fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
@@ -107,6 +177,26 @@ describe('ChatFolderControls delete confirmation', () => {
       expect(deleteSession).toHaveBeenCalledTimes(1);
     });
     expect(deleteSession).toHaveBeenCalledWith({ sessionId: 'session-1' });
+  });
+
+  it('keeps an unfiled chat deleted instead of bringing it back from the folder store', async () => {
+    const deleteSession = vi.fn(async (_request: { sessionId: string }) => {});
+    render(<DeleteUnfiledChatHarness title="Quarterly plan" deleteSession={deleteSession} />);
+
+    expect(await screen.findByTestId('thread-row-Quarterly plan')).toBeInTheDocument();
+    expect(screen.queryByTestId('thread-row-Quarterly plan folder copy')).not.toBeInTheDocument();
+
+    const dialog = openDeleteDialog();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(deleteSession).toHaveBeenCalledTimes(1);
+    });
+    // Give the folder copy its chance to surface, then check that it never does.
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 250));
+    });
+    expect(screen.queryByTestId('thread-row-Quarterly plan folder copy')).not.toBeInTheDocument();
   });
 });
 

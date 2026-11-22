@@ -10,6 +10,8 @@ export * from "./google/client/requests/index.js";
 export * as google from "./google/index.js";
 export * from "./mcpServers/client/requests/index.js";
 export * as mcpServers from "./mcpServers/index.js";
+export * from "./memoryItemTracking/client/requests/index.js";
+export * as memoryItemTracking from "./memoryItemTracking/index.js";
 export * from "./memoryNightly/client/requests/index.js";
 export * as memoryNightly from "./memoryNightly/index.js";
 export * from "./memoryPageSorting/client/requests/index.js";
