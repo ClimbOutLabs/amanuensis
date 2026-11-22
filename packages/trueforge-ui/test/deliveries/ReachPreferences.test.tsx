@@ -72,6 +72,49 @@ describe('Settings, Reach me mail trouble', () => {
     expect(await screen.findByText('Mira is watching the mail from the shared Email connector.')).toBeTruthy();
   });
 
+  function renderWithMail({
+    mailSource,
+    mailSenderConfirmation,
+  }: {
+    mailSource: ReachView['mailSource'];
+    mailSenderConfirmation: ReachView['mailSenderConfirmation'];
+  }) {
+    const server = fakeServer([]);
+    server.state.reach = { ...server.state.reach, mailSource, mailSenderConfirmation };
+    render(
+      <PersonalizationProvider
+        api={{ getProfile: async () => profile, updateProfile: async next => next, deleteProfile: async () => {} }}
+      >
+        <ReachPreferences reach={server.api.reach} />
+      </PersonalizationProvider>,
+    );
+  }
+
+  it('words the always-important rule from the watched mail confirming its senders', async () => {
+    renderWithMail({ mailSource: 'google', mailSenderConfirmation: true });
+    expect(await screen.findByText(/Your Google mail confirms its senders\./)).toBeTruthy();
+    expect(screen.queryByText(/needs a Google account/)).toBeNull();
+    expect(screen.queryByText(/cannot confirm senders yet/)).toBeNull();
+  });
+
+  it('words the always-important rule from the watched mail not confirming senders yet', async () => {
+    renderWithMail({ mailSource: 'email_connector', mailSenderConfirmation: false });
+    expect(
+      await screen.findByText(
+        /The mail from the shared Email connector cannot confirm senders yet, so mail from these people is treated as ordinary mail\./,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/needs a Google account/)).toBeNull();
+  });
+
+  it('states only the rule while sender confirmation is not known yet', async () => {
+    renderWithMail({ mailSource: 'email_connector', mailSenderConfirmation: null });
+    await screen.findByText('Mira is watching the mail from the shared Email connector.');
+    expect(screen.queryByText(/confirms its senders/)).toBeNull();
+    expect(screen.queryByText(/cannot confirm senders yet/)).toBeNull();
+    expect(screen.queryByText(/needs a Google account/)).toBeNull();
+  });
+
   it('says, with the assistant’s own name, since when mail was not checked and the one thing to do', async () => {
     renderWithProblem({ since: '2026-11-05T14:00:00.000Z', kind: 'other' });
     const notice = await screen.findByText(/Mira has not been able to check your mail since/);

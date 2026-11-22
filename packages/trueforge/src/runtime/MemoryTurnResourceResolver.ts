@@ -47,6 +47,8 @@ export interface MemoryTurnContext {
   turnedOffConnectorKeys?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
+  /** When false, item tracking is off for this turn: no tracked items are folded into recall. */
+  itemTrackingEnabled?: boolean | undefined;
   /** Reads the facts the person pulled out of this chat's recall, from where they are stored with the chat. Absent: nothing is excluded. */
   loadRecallExclusions?: (() => Promise<readonly string[]>) | undefined;
   /** Present when summaries are on for this turn, so a vanished earlier turn is never rebuilt as a raw exchange. */
@@ -84,6 +86,7 @@ function memoryCapabilitiesForTurn(input: {
       sessionId: memory.sessionId,
       previousTurnId: memory.previousTurnId,
       recallEnabled: memory.recallEnabled,
+      itemTrackingEnabled: memory.itemTrackingEnabled,
       keepsFullExchange: memory.summarize === undefined,
       timeZone: memory.clientTimezone,
       internalSourceState: memory.internalSourceState,

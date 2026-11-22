@@ -1,5 +1,5 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
-import { cp, mkdtemp, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ulid } from 'ulid';
@@ -124,6 +124,44 @@ describe('deleting a memory by the words a chat showed', () => {
     expect((await deleteShown('The spare key for the shed is with the neighbour now.')).status).toBe(200);
     expect((await deleteShown('The spare key for the shed is...')).status).toBe(200);
     expect((await texts()).some(text => text.includes('spare key'))).toBe(false);
+  });
+
+  const PIPPA_PAGE = [
+    '---',
+    'kind: person',
+    'title: Pippa',
+    'aliases: [Pippa]',
+    '---',
+    '# Pippa',
+    '',
+    '## Now',
+    '- Pippa moved to Leeds. <!-- fact: id=f_p1 src=you_said since=2026-11-01 -->',
+    '- Pippa likes oat bars. <!-- fact: id=f_p2 src=you_said since=2026-11-01 -->',
+    '',
+  ].join('\n');
+
+  async function pippaPage(vault = 'default'): Promise<string> {
+    return readFile(path.join(baseDir, vault, 'people', 'pippa.md'), 'utf8');
+  }
+
+  it('takes a line off its page by the words the chat showed, and leaves the other lines', async () => {
+    await mkdir(path.join(baseDir, 'default', 'people'), { recursive: true });
+    await writeFile(path.join(baseDir, 'default', 'people', 'pippa.md'), PIPPA_PAGE);
+    const response = await deleteShown('Pippa moved to Leeds.');
+    expect(response.status).toBe(200);
+    expect(DeletedSchema.parse(await response.json()).data.deleted).toBe(1);
+    const page = await pippaPage();
+    expect(page).not.toContain('Leeds');
+    expect(page).toContain('- Pippa likes oat bars.');
+  });
+
+  it('deletes nothing when the words fit both a page line and a different memory', async () => {
+    await mkdir(path.join(baseDir, 'default', 'people'), { recursive: true });
+    await writeFile(path.join(baseDir, 'default', 'people', 'pippa.md'), PIPPA_PAGE);
+    await addNote({ vault: 'default', text: 'Pippa moved to Leeds last week with her sister.' });
+    const response = await deleteShown('Pippa moved to Leeds...');
+    expect(response.status).toBe(404);
+    expect(await pippaPage()).toContain('Leeds');
   });
 
   it('leaves a memory with the same words in another instance\u2019s folder alone', async () => {

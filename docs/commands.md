@@ -45,6 +45,16 @@ aman status
 
 It shows each instance: every address it answers at, the email you sign in with, the model, running code, data and backups. It also shows how to set up a new phone or computer, with the trust page link, the fingerprint and a code to scan. It changes nothing. The end of an install or an upgrade shows only the one address to open and anything that needs you.
 
+## Answer at another address
+
+```
+aman address list
+aman address add ADDRESS
+aman address remove ADDRESS
+```
+
+Aman answers on this computer and on your home network. To open it over a VPN or through another program, add that address. An address of this computer, such as a VPN address, makes Aman listen there too. A name makes Aman answer to it. A full address such as `https://aman.example.com` lets another program pass visitors on to Aman. Public addresses are refused. Add `--instance NAME` if you have more than one instance.
+
 ## Check that everything works
 
 ```bash

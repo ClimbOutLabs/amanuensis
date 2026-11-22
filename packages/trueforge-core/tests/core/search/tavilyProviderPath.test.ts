@@ -11,7 +11,7 @@ import type { SentinelServices } from '../../../src/core/permissions/context';
 import { isSearchHoldCardText } from '../../../src/core/permissions/searchHoldText';
 import { NO_HOST_STAMP, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
 import { FetchedPageStore } from '../../../src/core/search/fetchedPages';
-import { TAVILY_SOURCE_TOOLS, TavilyClient } from '../../../src/core/search/TavilyClient';
+import { TAVILY_EXTRACT_TOOL_NAME, TAVILY_SEARCH_TOOL_NAME, TavilyClient } from '../../../src/core/search/TavilyClient';
 import { TavilySource } from '../../../src/core/search/TavilySource';
 import { GARDEN_URL, HARBOUR_URL, extractResponse, searchResponse } from './tavilyFixtures';
 
@@ -57,7 +57,12 @@ function harness(options: { searchWithoutAsking: boolean; secrets?: readonly str
     selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
     preload: false,
     sentinel: host,
-    searchProvider: { tools: [...TAVILY_SOURCE_TOOLS], plumbing_fields: [] },
+    searchProvider: {
+      tools: [TAVILY_SEARCH_TOOL_NAME],
+      page_read_tools: [TAVILY_EXTRACT_TOOL_NAME],
+      plumbing_fields: [],
+      served_in_process: true,
+    },
   });
   return { toolSet, audit, sent, host };
 }

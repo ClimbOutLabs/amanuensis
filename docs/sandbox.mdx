@@ -40,7 +40,7 @@ The image and the limits for each run come from the server settings, and change 
 
 A script Aman wrote in the chat's workspace runs with `run_code` by name (`script_path`). The run reads a copy of that one file and never changes it.
 
-A program that is a file in the workspace, such as a project's `main.py` or `server.js`, also runs from the shell: `python3 main.py` or `node server.js`. It runs in the workspace, so it can use the project's other files. It asks first, like any other command that is not on the safe list. Code that is not in a file (`python3 -c`, code piped in) is refused in the shell and goes to `run_code`.
+A program that is a file in the workspace, such as a project's `main.py` or `server.js`, also runs from the shell: `python3 main.py` or `node server.js`. It runs in the workspace, so it can use the project's other files. It asks first, like any other command that is not on the safe list. Code that is not in a file (`python3 -c`, code piped in) also runs from the shell, and it always asks first.
 
 Package installs work only on a sandbox that can reach the package mirrors (sandbox slots). They also need downloads allowed: for the repository a chat is working on, or for your chats without a project. The Docker sandbox has no network for packages, so an install there is refused before any approval card. Build, test and run commands still run there as ordinary commands.
 
@@ -70,7 +70,7 @@ The installer uses a second kind of sandbox: two hardened slot containers, inste
 
 ### What is installed
 
-- The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib, Pillow, requests, pyyaml, httpx and beautifulsoup4 (the last four are what skill scripts use most often), plus pytest, ruff and mypy for testing and checking code, and venv for making a project environment; Node.js with TypeScript, plus vitest, jest, eslint and prettier for testing and checking code; bash and coreutils; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. More packages can be downloaded only as described under Package downloads below.
+- The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib, Pillow, requests, pyyaml, httpx and beautifulsoup4 (the last four are what skill scripts use most often), plus pytest, ruff and mypy for testing and checking code, and venv for making a project environment; Node.js with TypeScript, plus vitest, jest, eslint and prettier for testing and checking code; bash and coreutils; curl and jq, which many skills use to fetch a page and read its JSON; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. More packages can be downloaded only as described under Package downloads below.
 
 ### Attachments and languages
 
@@ -227,10 +227,11 @@ through a file or a link is refused with a plain message naming it.
 
 ## Coding in the sandbox
 
-The shell tool runs repository and workspace commands. It does not run inline code
-(`python3 -c`, `node -e` and the like), a script by path, or any other Python module; those go
-through `run_code`. Building and testing a Python project is the exception: `python3 -m pytest`,
-`python3 -m pip`, `python3 -m venv` and `python3 -m unittest` run in the shell.
+The shell tool runs repository and workspace commands, whatever their form: pipes, loops, `$(...)`,
+redirects, heredocs, shell wrappers such as `bash -c`, and inline code such as `python3 -c`. A command
+Aman can't read as one plain command asks every time, shows its exact text, and offers no Always allow.
+A check that hides its result this way, such as a test run sent to a file, still runs, but it doesn't
+count as a verification, so it can't clear the way for a commit.
 
 The sandbox's own Python does not accept installs, so a Python project gets its packages in an
 environment inside the project folder:

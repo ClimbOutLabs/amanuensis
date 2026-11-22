@@ -74,7 +74,10 @@ describe('designateTavilyAtBoot', () => {
       url: 'https://mcp.tavily.com/mcp',
       description: expect.any(String),
       search_provider: true,
-      search_tools: ['tavily_search', 'tavily_extract'],
+      search_tools: ['tavily_search'],
+      page_read_tools: ['tavily_extract'],
+      search_plumbing_fields: [],
+      search_in_process: true,
       auth: { type: 'header', headers: { Authorization: `Bearer ${KEY}` } },
     });
     expect(await f.holders()).toEqual(['tavily']);

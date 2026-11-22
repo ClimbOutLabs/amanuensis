@@ -60,6 +60,8 @@ test('settings tabs highlight the section shown and stay reachable', { timeout: 
           path: await featureShotPath({
             surface: 'screen:settings-tabs',
             step: `${String(viewport.width)}px-${theme}`,
+            did: `Opened Settings on a ${String(viewport.width)} px wide screen in the ${theme} theme.`,
+            expect: 'The tab of the section on screen is highlighted, and every tab can be reached.',
           }),
         });
         await context.close();

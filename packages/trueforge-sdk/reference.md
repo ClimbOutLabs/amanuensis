@@ -1086,7 +1086,7 @@ await client.mcpServers.deleteAuthorization("name");
 <dl>
 <dd>
 
-Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.
+Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. The check changes nothing on the server. It does store, on the connector record, which of the listed tools the server itself declares as changes, because standing grants read that. A failed check is a 200 carrying the reason.
 </dd>
 </dl>
 </dd>
@@ -4152,6 +4152,79 @@ await client.sessions.update("session_id");
 <dd>
 
 **request:** `TrueForge.UpdateSessionRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">setArchive</a>(session_id, { ...params }) -> TrueForge.SetSessionArchiveResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Hides a chat from the everyday list or restores it. Its messages remain searchable.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.setArchive("session_id", {
+    archived: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.SetSessionArchiveRequest`
 
 </dd>
 </dl>
@@ -9600,7 +9673,7 @@ await client.memory.vault.list();
 <dl>
 <dd>
 
-Delete every memory that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when no memory, or more than one different memory, fits the words.
+Delete every memory and every page line that recall shows in exactly these words, in any collection. Answers 404 and deletes nothing when nothing, or more than one different text, fits the words.
 </dd>
 </dl>
 </dd>
@@ -11616,6 +11689,127 @@ await client.settings.mcpServers.delete("name");
 <dd>
 
 **requestOptions:** `McpServersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings MemoryItemTracking
+<details><summary><code>client.settings.memoryItemTracking.<a href="/src/api/resources/settings/resources/memoryItemTracking/client/Client.ts">get</a>() -> TrueForge.GetMemoryItemTrackingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The stored override for item tracking, or the default (on) when none is stored.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryItemTracking.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryItemTrackingClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryItemTracking.<a href="/src/api/resources/settings/resources/memoryItemTracking/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryItemTrackingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the item-tracking override: `true`/`false` turns tracking of open items on/off; `null` clears the override back to the default. Turning it off leaves the diary and the items already recorded untouched.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryItemTracking.createOrUpdate({
+    enabled: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryItemTrackingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryItemTrackingClient.RequestOptions`
 
 </dd>
 </dl>

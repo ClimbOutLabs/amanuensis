@@ -1,5 +1,5 @@
 import type { RemoteMcpHeaders } from '@truefoundry/trueforge-core/core';
-import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
+import { isMcpAuthRequired, resolveMcpAuth, revokeMcpTokens } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
 import { resolveConfiguredMcpRequestHeaders, resolveMcpAuthStatus, type McpAuthStatus } from '../schemas/mcpServer';
 import {
@@ -62,7 +62,7 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
     if (auth?.type === 'dcr' || auth?.type === 'oauth_client') {
       const oauthParams =
         auth.type === 'oauth_client' ? { oauthClientId: auth.client_id, oauthClientSecret: auth.client_secret } : {};
-      return async () => {
+      return async challenge => {
         const result = await resolveMcpAuth({
           tokenStore: this.#tokenStore,
           mcpServerStore: this.#store,
@@ -72,6 +72,9 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
           mcpServerName: record.name,
           clientName: this.#clientName,
           authType: auth.type,
+          forceRefresh: challenge !== undefined,
+          resourceMetadataUrl: challenge?.resourceMetadataUrl,
+          scope: auth.type === 'oauth_client' && auth.scopes?.length ? auth.scopes.join(' ') : challenge?.scope,
           ...oauthParams,
         });
         if (isMcpAuthRequired(result)) {
@@ -103,12 +106,20 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
   async resolveAuthStatuses(input: ResolveMcpAuthStatusesInput): Promise<ReadonlyMap<string, McpAuthStatus>> {
     // `oauth_client` (fork-only; see DIVERGENCE.md) is token-backed the same way `dcr` is.
     const tokenBackedIds = input.records
-      .filter(record => record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client')
+      .filter(record => record.manifest.auth?.type !== 'header')
       .map(record => record.id);
     const tokens = await this.#tokenStore.getTokens({ ids: tokenBackedIds, userRef: input.userRef });
     const out = new Map<string, McpAuthStatus>();
     for (const record of input.records) {
       const token = tokens.get(record.id);
+      if (
+        record.manifest.type === 'remote' &&
+        record.manifest.auth === undefined &&
+        (await this.#store.getClient({ id: record.id })) !== undefined
+      ) {
+        out.set(record.name, token ? { status: 'authenticated' } : { status: 'auth_required' });
+        continue;
+      }
       out.set(
         record.name,
         resolveMcpAuthStatus({
@@ -127,12 +138,18 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
     }
     const auth = record.manifest.auth;
     if (auth?.type !== 'dcr' && auth?.type !== 'oauth_client') {
-      return resolveMcpAuthStatus({ manifest: record.manifest });
+      if (
+        auth !== undefined ||
+        record.manifest.type !== 'remote' ||
+        (await this.#store.getClient({ id: record.id })) === undefined
+      ) {
+        return resolveMcpAuthStatus({ manifest: record.manifest });
+      }
     }
     // `oauth_client` (fork-only; see DIVERGENCE.md) reuses the same discovery/token flow as `dcr`
     // but never registers a client: it is built from the manifest's own client_id/client_secret.
     const oauthParams =
-      auth.type === 'oauth_client' ? { oauthClientId: auth.client_id, oauthClientSecret: auth.client_secret } : {};
+      auth?.type === 'oauth_client' ? { oauthClientId: auth.client_id, oauthClientSecret: auth.client_secret } : {};
     const result = await resolveMcpAuth({
       tokenStore: this.#tokenStore,
       mcpServerStore: this.#store,
@@ -141,7 +158,8 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
       mcpServerUrl: record.manifest.url,
       mcpServerName: record.name,
       clientName: this.#clientName,
-      authType: auth.type,
+      authType: auth?.type === 'oauth_client' ? 'oauth_client' : 'dcr',
+      scope: auth?.type === 'oauth_client' && auth.scopes?.length ? auth.scopes.join(' ') : undefined,
       ...oauthParams,
       ...(input.returnTo !== undefined ? { returnTo: input.returnTo } : {}),
     });
@@ -155,8 +173,15 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
     if (record === undefined) {
       throw new McpServerNotFoundError(input.name);
     }
-    if (record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client') {
-      await this.#tokenStore.deleteToken({ id: record.id, userRef: input.userRef });
+    const key = { id: record.id, userRef: input.userRef };
+    const token = await this.#tokenStore.getToken(key);
+    const client = token ? await this.#store.getClient({ id: record.id }) : undefined;
+    try {
+      if (client && token) {
+        await revokeMcpTokens({ client, accessToken: token.accessToken, refreshToken: token.refreshToken });
+      }
+    } finally {
+      await this.#tokenStore.deleteToken(key);
     }
   }
 }

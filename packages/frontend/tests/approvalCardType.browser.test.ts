@@ -14,6 +14,15 @@ import { privateViteCache } from './support/viteCache.ts';
 const RENDER_TIMEOUT_MS = 45_000;
 const KINDS = ['email', 'calendar', 'shell', 'space', 'connector'] as const;
 
+/** The first choice on each kind: the email card sends, so it leads with Send; the rest lead with Allow. */
+const FIRST_CHOICE: Record<(typeof KINDS)[number], string> = {
+  email: 'Send',
+  calendar: 'Allow',
+  shell: 'Allow',
+  space: 'Allow',
+  connector: 'Allow',
+};
+
 test(
   'every approval card is set in the body font, with only the question and a mail body at the chat body size',
   { timeout: 180_000 },
@@ -45,7 +54,12 @@ test(
         });
         await page.locator('[data-card="connector"] h3').waitFor({ timeout: RENDER_TIMEOUT_MS });
         await page.screenshot({
-          path: await featureShotPath({ surface: 'screen:approval-card', step: `every-kind-${theme}` }),
+          path: await featureShotPath({
+            surface: 'screen:approval-card',
+            step: `every-kind-${theme}`,
+            did: `Opened one of every kind of approval card in the ${theme} theme.`,
+            expect: 'Every card uses the body font. Only the question and an email body are as large as chat text.',
+          }),
           fullPage: true,
         });
 
@@ -102,7 +116,7 @@ test(
             };
           });
 
-          // Allow leads the row and no choice is filled or inked: every button has the same outlined look.
+          // The yes word leads the row, Send on the email card and Allow on the rest, and no choice is filled or inked: every button has the same outlined look.
           const choices = await page
             .locator(`[data-card="${kind}"] .aui-approval-card__actions button`)
             .evaluateAll(buttons =>
@@ -115,7 +129,8 @@ test(
                 };
               }),
             );
-          assert.equal(choices[0]?.label, 'Allow', `${kind} (${theme}): Allow is the first choice`);
+          const firstChoice = FIRST_CHOICE[kind];
+          assert.equal(choices[0]?.label, firstChoice, `${kind} (${theme}): ${firstChoice} is the first choice`);
           for (const choice of choices) {
             assert.equal(
               choice.background,

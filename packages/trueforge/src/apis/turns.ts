@@ -27,6 +27,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  callReadsMemoryPages,
   callResultSource,
   chatSawOutsideText,
   existingSandboxIdForProvider,
@@ -34,7 +35,6 @@ import {
   HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
-  isHostWrappedText,
   McpConnectionError,
   newEventId,
   PromiseTimeoutError,
@@ -77,10 +77,12 @@ import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
+import type { ITelegramStore } from '../db/telegramStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { gateEvalApprovals } from '../eval/approvalGate';
 import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { storeHomeAssistantDeclaredChangeTools } from '../mcp/homeAssistant';
 import { setUpConnectorNamesOf } from '../mcp/hostConnectors';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import { personalizationFactLines, type PersonalizationProfile } from '../personalization/profile';
@@ -109,6 +111,7 @@ import {
 } from '../runtime/chatTitle';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { effectiveGitCommitIdentity, readStoredGitCommitIdentity } from '../runtime/gitCommitIdentitySettings';
+import type { GoalTurnAccess, GoalTurnContext } from '../runtime/goals/goalCapability';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
 import { placeOfModelHost } from '../runtime/localModels';
@@ -128,6 +131,7 @@ import { serverMemoryConfig, withMemoryScreenOverride } from '../runtime/memory/
 import type { ProfileLineSuggestion } from '../runtime/memory/memorySummarize';
 import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
 import { createOutsideInputTracker, inputAttachesFiles } from '../runtime/memory/turnOutsideInput';
+import { resolveMemoryItemTrackingEnabled } from '../runtime/memoryItemTrackingSettings';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -175,6 +179,7 @@ import {
 import { chatSkillSwitch, type SkillTurnContext } from '../runtime/skillCapability';
 import { readSkillFilesFromGit } from '../runtime/skillWebsites';
 import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
+import { queueAppTurnForTelegram } from '../runtime/telegram/telegramMirror';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
@@ -189,6 +194,7 @@ import {
 } from '../runtime/turnStartBound';
 import type { TurnTimezone } from '../runtime/turnTimezone';
 import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
+import { extractUserMessageText } from '../runtime/userMessageText';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import { drainSkillNetworkCards, resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
@@ -313,6 +319,8 @@ export interface TurnsRouterDeps {
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** Copies messages typed in the app's Telegram chat to Telegram; absent where Telegram is not wired. */
+  telegramStore?: Pick<ITelegramStore, 'getConnection' | 'addPendingReply'> | undefined;
   repositoryStore: IRepositoryStore;
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
@@ -340,6 +348,8 @@ export interface TurnsRouterDeps {
   authorizer: Authorizer;
   /** Present only where schedules run (standalone): chat turns then get the schedule tools. */
   schedules?: ScheduleStoreAccess | undefined;
+  /** Present only where goals run (standalone with a goal store): chat turns then get the goal tools. */
+  goals?: GoalTurnAccess | undefined;
 }
 
 /** Names only, bounded: enough for the model to know the host's catalog exists without inflating the prompt. */
@@ -453,6 +463,8 @@ function createTurnResolver(deps: {
   memorySummarize: SummarizeTurnContext | undefined;
   /** The person's "use memories in replies" switch when they set it; absent, the agent's own setting applies. */
   memoryRecallEnabled: boolean | undefined;
+  /** The person's item-tracking switch for this turn: off, no tracked items are folded into recall. */
+  memoryItemTrackingEnabled: boolean;
   /** The person's past-chat search switch for this turn; off, the search tool is not offered. */
   chatSearchEnabled: boolean;
   /** Lists the person's personas, so the search keeps to the chats this persona may recall; absent, the tool is not offered. */
@@ -483,6 +495,8 @@ function createTurnResolver(deps: {
   modelUsage: TurnModelUsage;
   /** Chat turns where schedules run; absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
+  /** Chat turns where goals run; absent, no goal tools mount. */
+  goals?: GoalTurnContext | undefined;
   /** Chat turns that have a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
   /** Chat turns where this app keeps the skills itself; absent, no skill tools mount. */
@@ -521,6 +535,7 @@ function createTurnResolver(deps: {
     previousTurnId,
     memorySummarize,
     memoryRecallEnabled,
+    memoryItemTrackingEnabled,
     chatSearchEnabled,
     personaStore,
     spaceStore,
@@ -534,6 +549,7 @@ function createTurnResolver(deps: {
     chatDeletionStore,
     modelUsage,
     schedules,
+    goals,
     personas,
     skills,
   } = deps;
@@ -681,12 +697,15 @@ function createTurnResolver(deps: {
           }),
           first_party: connection.first_party,
           grant_binding: connection.grant_binding,
+          declared_change_tools: connection.declared_change_tools,
           search_provider:
             connection.search_provider === undefined
               ? undefined
-              : mcpCatalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
+              : mcpCatalog.searchProviderGrant({ manifest: connection.search_provider }),
         };
       },
+      storeDeclaredChangeTools: ({ name, url, declared_change_tools }) =>
+        storeHomeAssistantDeclaredChangeTools({ store: mcpServerStore, tenant_id, name, url, declared_change_tools }),
       setUpConnectorNames: async () =>
         setUpConnectorNamesOf(await mcpServerStore.listServers({ tenant_id, names: undefined })),
       mailAccounts: mailAccountDirectory,
@@ -1052,6 +1071,7 @@ function createTurnResolver(deps: {
       // An explicit value wins over the spec in resolveAgentDefinition: unattended runs do not recall,
       // and the person's switch applies to every agent, saved ones included.
       recallEnabled: deps.unattended ? false : memoryRecallEnabled,
+      itemTrackingEnabled: memoryItemTrackingEnabled,
       summarize: memorySummarize,
       clientTimezone,
       internalSourceState,
@@ -1080,6 +1100,7 @@ function createTurnResolver(deps: {
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
+      goals,
       personas,
       skills,
       logger,
@@ -1145,27 +1166,6 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
     return undefined;
   }
   return title;
-}
-
-/**
- * Full (uncapped) text of every user message in a create-turn input, concatenated in order and
- * joined with a blank line, or `''` when there is none. A turn's input can carry several user
- * messages (e.g. queued follow-ups sent before the previous turn finished); retention must not
- * silently drop any but the first.
- */
-export function extractUserMessageText(input: TurnInputItem[] | undefined): string {
-  const userMessages = input?.filter(isAgentInputUserMessage) ?? [];
-  return userMessages
-    .map(message =>
-      typeof message.content === 'string'
-        ? message.content
-        : message.content
-            .filter(part => !isFileContentPart(part))
-            .map(part => part.text)
-            .filter(text => !isHostWrappedText(text))
-            .join(' '),
-    )
-    .join('\n\n');
 }
 
 /**
@@ -1516,6 +1516,9 @@ async function runTurnEventDrain(params: {
   // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
   const outsideInput = createOutsideInputTracker({ attachedFiles: memory?.attachedFiles === true });
   const toolResults: TurnToolResult[] = [];
+  // What the turn read out of its own stored memory pages, kept apart from the findings: it is already
+  // memory, and the note pass is told it apart so a reply that only repeats it is not stored as new.
+  const recalledMemory: string[] = [];
   // A send is read from its call and saved as soon as its result says it went through, whichever turn ran it.
   const sentMailWrites: Promise<void>[] = [];
   let followUp: Promise<void> | undefined;
@@ -1550,15 +1553,27 @@ async function runTurnEventDrain(params: {
         }
       }
       if (readOutside && (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2)) {
-        // Kept for the note pass; a result that did not run cleanly holds no finding.
-        if (
-          (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') &&
-          toolResults.length < TURN_TOOL_RESULTS_KEPT
-        ) {
-          toolResults.push({
-            source: callResultSource(outsideInput.callOf(event)),
-            text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
-          });
+        // Kept for the note pass; a result that did not run cleanly holds no finding. A result read out
+        // of the stored memory pages is not kept as a finding: it is memory itself, not a finding of
+        // this turn, so the note pass must not store it again as one. It is kept apart instead, as what
+        // the turn recalled, so the pass can also tell a reply that only repeats it from a new
+        // statement. The turn still counts as having read outside content, exactly as the tracker
+        // above decided; only the note pass is kept from repeating what is already stored.
+        const call = outsideInput.callOf(event);
+        if (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') {
+          if (callReadsMemoryPages(call)) {
+            if (recalledMemory.length < TURN_TOOL_RESULTS_KEPT) {
+              recalledMemory.push(event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT));
+            }
+          } else if (toolResults.length < TURN_TOOL_RESULTS_KEPT) {
+            toolResults.push({
+              source: callResultSource(call),
+              text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
+              // The outcome rides on the result, so the item check can tell a receipt that
+              // proves an action from one that cannot. The older response shape has none.
+              ...(event.type === EventType.TOOL_RESPONSE_V2 ? { disposition: event.disposition } : {}),
+            });
+          }
         }
       }
       // Dual-write before any client sink so subscribers can resume after disconnect.
@@ -1577,6 +1592,7 @@ async function runTurnEventDrain(params: {
           state: event.state,
           ingestedToolOutput: outsideInput.ingested,
           toolResults,
+          recalledMemory,
           markArtifactsCaptured,
         });
       } else if (event.type === EventType.TURN_DONE && memory !== undefined) {
@@ -1627,9 +1643,10 @@ async function runTurnFollowUp(params: {
   state: Extract<TerminalTurnState, { status: 'done' }>;
   ingestedToolOutput: boolean;
   toolResults: readonly TurnToolResult[];
+  recalledMemory: readonly string[];
   markArtifactsCaptured: () => void;
 }): Promise<void> {
-  const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
+  const { input, state, ingestedToolOutput, toolResults, recalledMemory, markArtifactsCaptured } = params;
   const {
     turnEventStream,
     sessionId,
@@ -1704,6 +1721,7 @@ async function runTurnFollowUp(params: {
         chatWrotePages: memory.chatWrotePages?.() === true,
         logger,
         toolResults,
+        recalledMemory,
         summarize: memory.summarize,
         profileLearning:
           profileLearning === undefined
@@ -2023,6 +2041,11 @@ async function beginAcceptedTurnExecution(
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
       });
+      // The person's item-tracking switch, read once per turn the same way.
+      const memoryItemTrackingEnabled = await resolveMemoryItemTrackingEnabled({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+      });
       // The person's past-chat search switch, read once per turn the same way.
       const chatSearchEnabled = await readChatSearchEnabled({
         sentinelSettingsStore: deps.sentinelSettingsStore,
@@ -2091,6 +2114,7 @@ async function beginAcceptedTurnExecution(
         previousTurnId: deps.previousTurnId ?? null,
         memorySummarize,
         memoryRecallEnabled,
+        memoryItemTrackingEnabled,
         chatSearchEnabled,
         personaStore: deps.personaStore,
         clientTimezone: deps.clientTimezone,
@@ -2733,6 +2757,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             session,
             previous_turn_id: previousTurnId,
             input: submitted.input,
+            allowSkills: configuration.AMAN_EVAL_SKILLS,
           }),
         }
       : submitted;
@@ -2963,6 +2988,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
+    // The person's item-tracking switch, read once per turn the same way.
+    const memoryItemTrackingEnabled = await resolveMemoryItemTrackingEnabled({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
     // The person's past-chat search switch, read once per turn the same way.
     const chatSearchEnabled = await readChatSearchEnabled({
       sentinelSettingsStore: deps.sentinelSettingsStore,
@@ -3014,6 +3044,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previousTurnId: memoryPreviousTurnId,
       memorySummarize,
       memoryRecallEnabled,
+      memoryItemTrackingEnabled,
       chatSearchEnabled,
       personaStore: deps.personaStore,
       spaceStore: deps.spaceStore,
@@ -3049,7 +3080,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               sandboxReady: serverSandboxAvailable,
               lookup: { fetchImpl: undefined, resolveAddresses: undefined },
               readFiles: readSkillFilesFromGit,
-              turnOnForChat: chatSkillSwitch({
+              chatSkills: chatSkillSwitch({
                 sessionStore: deps.sessionStore,
                 tenant_id: requestContext.tenant_id,
                 session_id: session.session_id,
@@ -3086,6 +3117,42 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               }),
               logger: deps.logger,
               // A reminder set in this chat fires back into this chat.
+              session_id: session.session_id,
+            },
+      goals:
+        deps.goals === undefined || chatRunner === undefined
+          ? undefined
+          : {
+              store: deps.goals.goalStore,
+              agentStore,
+              skillStore,
+              spaceStore: deps.spaceStore,
+              tenant_id: requestContext.tenant_id,
+              owner: scheduleOwner,
+              persona_id: persona?.kind === 'persona' ? persona.persona.id : null,
+              // A goal made here runs as whatever runs this turn: the chat's agent or setup.
+              resolve_chat_agent_id: async () => {
+                if (chatRunner.kind === 'saved') {
+                  return chatRunner.agent.id;
+                }
+                const assistant = resolveChatAssistant({
+                  tenant_id: requestContext.tenant_id,
+                  owner: scheduleOwner,
+                  runner: chatRunner,
+                  persona: persona?.kind === 'persona' ? persona.persona : undefined,
+                  agentStore,
+                  scheduleAgentChoices: scheduleAgentChoices({
+                    tenant_id: requestContext.tenant_id,
+                    modelProviderStore,
+                    mcpServerStore,
+                    skillStore,
+                    sandboxProviderStore,
+                    searchProviderPresetNames: deps.mcpCatalog.searchProviderPresetNames(),
+                  }),
+                });
+                return (await assistant.agent()).id;
+              },
+              logger: deps.logger,
               session_id: session.session_id,
             },
     });
@@ -3361,6 +3428,17 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           409,
         );
       }
+    }
+
+    // A message typed in the app's Telegram chat is copied to Telegram with its answer.
+    if (deps.telegramStore !== undefined) {
+      await queueAppTurnForTelegram({
+        store: deps.telegramStore,
+        session: session.record,
+        subjectId: requestContext.subject.id,
+        turnId: turn.id,
+        logger: deps.logger,
+      });
     }
 
     const createdTurn = turn;

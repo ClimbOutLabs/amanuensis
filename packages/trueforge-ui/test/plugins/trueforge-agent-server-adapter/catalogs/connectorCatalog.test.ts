@@ -159,6 +159,23 @@ describe('connectorCatalog mappers', () => {
     assert.equal(connected.requiresAuth, false);
   });
 
+  it('shows discovered OAuth on a connector saved without an auth type', () => {
+    const manifest = {
+      type: 'remote' as const,
+      name: 'flights',
+      url: 'https://example.com/mcp',
+      description: 'Flights',
+    };
+    const pending = toUiConnector({ name: 'flights', manifest, authStatus: { status: 'auth_required' } });
+    assert.equal(pending.auth.type, 'dcr');
+    assert.equal(pending.authenticated, false);
+    const connected = toUiConnector({ name: 'flights', manifest, authStatus: { status: 'authenticated' } });
+    assert.equal(connected.auth.type, 'dcr');
+    assert.equal(connected.authenticated, true);
+    const publicConnector = toUiConnector({ name: 'flights', manifest, authStatus: { status: 'not_required' } });
+    assert.equal(publicConnector.auth.type, 'none');
+  });
+
   it('maps the search provider role from the manifest the SDK delivers', () => {
     const base = {
       type: 'remote' as const,

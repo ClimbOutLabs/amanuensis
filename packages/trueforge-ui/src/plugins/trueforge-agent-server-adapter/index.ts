@@ -11,6 +11,7 @@ import { createChatSearchCatalog } from './catalogs/chatSearchCatalog.js';
 import { createConnectorCatalog } from './catalogs/connectorCatalog.js';
 import { createGitCommitIdentityCatalog } from './catalogs/gitCommitIdentityCatalog.js';
 import { createMemoryNightlyCatalog, createMemoryPageSortingCatalog } from './catalogs/memoryHelpersCatalog.js';
+import { createMemoryItemTrackingCatalog } from './catalogs/memoryItemTrackingCatalog.js';
 import { createMemoryPagesCatalog } from './catalogs/memoryPagesCatalog.js';
 import { createMemoryRecallCatalog } from './catalogs/memoryRecallCatalog.js';
 import { createMemoryScreenCatalog } from './catalogs/memoryScreenCatalog.js';
@@ -139,6 +140,7 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
     gitCommitIdentity: createGitCommitIdentityCatalog(clientOptions),
     chatSearch: createChatSearchCatalog(clientOptions),
     memorySummarize: createMemorySummarizeCatalog(clientOptions),
+    memoryItemTracking: createMemoryItemTrackingCatalog(clientOptions),
     memoryPageSorting: createMemoryPageSortingCatalog(clientOptions),
     memoryNightly: createMemoryNightlyCatalog(clientOptions),
     memoryVault: createMemoryVaultCatalog(clientOptions),

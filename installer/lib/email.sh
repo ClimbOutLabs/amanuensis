@@ -18,16 +18,17 @@ EM_PASSWORD=
 EM_TARGET=
 EM_SKIP=
 
-# One preset per line: key, incoming host, port, mode, outgoing host, port, mode.
+# One preset per line: key, incoming host, port, mode, outgoing host, port, mode, and whether the provider
+# shows app passwords in groups split by spaces (strip-spaces) or not (keep-spaces).
 # A mode is ssl (encrypted from the start) or starttls (upgraded after connecting). The certificate is always checked.
-EMAIL_PRESETS='gmail imap.gmail.com 993 ssl smtp.gmail.com 465 ssl
-yahoo imap.mail.yahoo.com 993 ssl smtp.mail.yahoo.com 465 ssl
-aol imap.aol.com 993 ssl smtp.aol.com 465 ssl
-icloud imap.mail.me.com 993 ssl smtp.mail.me.com 587 starttls
-fastmail imap.fastmail.com 993 ssl smtp.fastmail.com 465 ssl
-zoho imap.zoho.com 993 ssl smtp.zoho.com 465 ssl
-gmx imap.gmx.net 993 ssl mail.gmx.net 465 ssl
-webde imap.web.de 993 ssl smtp.web.de 587 starttls'
+EMAIL_PRESETS='gmail imap.gmail.com 993 ssl smtp.gmail.com 465 ssl strip-spaces
+yahoo imap.mail.yahoo.com 993 ssl smtp.mail.yahoo.com 465 ssl strip-spaces
+aol imap.aol.com 993 ssl smtp.aol.com 465 ssl strip-spaces
+icloud imap.mail.me.com 993 ssl smtp.mail.me.com 587 starttls strip-spaces
+fastmail imap.fastmail.com 993 ssl smtp.fastmail.com 465 ssl strip-spaces
+zoho imap.zoho.com 993 ssl smtp.zoho.com 465 ssl keep-spaces
+gmx imap.gmx.net 993 ssl mail.gmx.net 465 ssl keep-spaces
+webde imap.web.de 993 ssl smtp.web.de 587 starttls keep-spaces'
 
 # The one sign-in check after saving. It runs from this computer, so the Email connector does not have to be running.
 # Its five input lines (server, port, mode, address, password) come on stdin, never on the command line.
@@ -112,13 +113,14 @@ email_port_problem() {
   echo "A port is a number from 1 to 65535, for example 993."
 }
 
-# Some providers show an app password in groups split by spaces; the spaces are not part of it. Other passwords are
-# kept as typed.
+# Some providers show an app password in groups split by spaces; the spaces are not part of it. The preset row
+# for the provider says which it is (strip-spaces or keep-spaces); a provider with no row keeps its password as typed.
 email_clean_password() { # key password
-  case "$1" in
-    gmail | icloud | yahoo | aol | fastmail) printf '%s' "${2// /}" ;;
-    *) printf '%s' "$2" ;;
-  esac
+  if email_preset "$1" && [ "$EM_APP_PASSWORD_SPACES" = "strip-spaces" ]; then
+    printf '%s' "${2// /}"
+  else
+    printf '%s' "$2"
+  fi
 }
 
 email_secret_problem() {
@@ -135,8 +137,8 @@ email_preset() {
   local row
   row=$(printf '%s\n' "$EMAIL_PRESETS" | sed -n "/^$1 /p")
   [ -n "$row" ] || return 1
-  # shellcheck disable=SC2034 # the key column is only there to find the row
-  read -r _key EM_IMAP_HOST EM_IMAP_PORT EM_IMAP_MODE EM_SMTP_HOST EM_SMTP_PORT EM_SMTP_MODE <<<"$row"
+  # shellcheck disable=SC2034 # the key and app-password columns are only there to find the row and clean the password
+  read -r _key EM_IMAP_HOST EM_IMAP_PORT EM_IMAP_MODE EM_SMTP_HOST EM_SMTP_PORT EM_SMTP_MODE EM_APP_PASSWORD_SPACES <<<"$row"
 }
 
 # The encryption of a server the person typed: port 993 and 465 are encrypted from the start, others upgrade.

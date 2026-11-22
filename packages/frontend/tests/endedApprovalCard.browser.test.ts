@@ -40,6 +40,7 @@ async function endRequest(api: ApprovalTestServer, ids: { sessionId: string; pau
       custom: null,
     },
     approval_grants: [],
+    approval_refusals: [],
     require_previous_turn_is_tip: false,
     retained_previous_thread_ids: ['main'],
     new_threads: [],
@@ -119,26 +120,46 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
       await openChat(page, origin, ids.sessionId);
       await page.waitForTimeout(5_000);
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-ended', step: '0-opened' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-ended',
+          step: '0-opened',
+          did: 'Ended an approval request on the server, then opened its chat and waited five seconds.',
+          expect: 'The chat has loaded with the card for the ended request.',
+        }),
         fullPage: true,
       });
       await page.getByText(ENDED_NOTE).waitFor({ timeout: RENDER_TIMEOUT_MS });
       assert.equal(await page.getByRole('button', { name: ALLOW }).count(), 0, 'an ended card offers no Allow');
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-ended', step: '1-before-dismiss' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-ended',
+          step: '1-before-dismiss',
+          did: 'Same chat, once the card has settled.',
+          expect: 'The card says the request has ended and offers no Allow button, only Dismiss.',
+        }),
         fullPage: true,
       });
 
       await page.getByRole('button', { name: 'Dismiss' }).click();
       await page.getByText(ENDED_NOTE).waitFor({ state: 'detached', timeout: RENDER_TIMEOUT_MS });
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-ended', step: '2-after-dismiss' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-ended',
+          step: '2-after-dismiss',
+          did: 'Pressed Dismiss on the ended card.',
+          expect: 'The card is gone and nothing ran.',
+        }),
         fullPage: true,
       });
       await assertNotWaitingAfterReload(page, 'dismiss');
       assert.equal(await page.getByText(ENDED_NOTE).count(), 0, 'the dismissed card stays cleared');
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-ended', step: '3-dismiss-reloaded' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-ended',
+          step: '3-dismiss-reloaded',
+          did: 'Reloaded the page after Dismiss.',
+          expect: 'The card stays gone and the chat is not waiting for anything.',
+        }),
         fullPage: true,
       });
       assert.equal(api.mcp.writeInvocations(), 0, 'Dismiss runs nothing');
@@ -158,14 +179,24 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
         await page.getByText(ENDED_NOTE).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       }
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-ended', step: '4-allow-refused' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-ended',
+          step: '4-allow-refused',
+          did: 'Opened a chat with a waiting card, ended the request on the server, then pressed Allow.',
+          expect: 'The card says the request has ended. The action did not run.',
+        }),
         fullPage: true,
       });
       assert.equal(api.mcp.writeInvocations(), 0, 'Allow on an ended request runs nothing');
       await assertNotWaitingAfterReload(page, 'allow');
       await page.getByText(ENDED_NOTE).waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-ended', step: '5-allow-reloaded' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-ended',
+          step: '5-allow-reloaded',
+          did: 'Reloaded the page after that refused Allow.',
+          expect: 'The card still says the request has ended, the chat is not waiting, and still nothing ran.',
+        }),
         fullPage: true,
       });
       assert.equal(api.mcp.writeInvocations(), 0, 'still nothing ran');
@@ -183,13 +214,23 @@ test('an ended approval card can be cleared but never run', { timeout: 600_000 }
       await clickUnlessEnded(page, DENY);
       await page.waitForTimeout(3_000);
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-ended', step: '6-deny-clicked' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-ended',
+          step: '6-deny-clicked',
+          did: 'Opened a chat with a waiting card, ended the request on the server, then pressed Not now.',
+          expect: 'The card does not stay waiting, and nothing ran.',
+        }),
         fullPage: true,
       });
       assert.equal(api.mcp.writeInvocations(), 0, 'Not now runs nothing');
       await assertNotWaitingAfterReload(page, 'deny');
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-ended', step: '7-deny-reloaded' }),
+        path: await featureShotPath({
+          surface: 'screen:approval-ended',
+          step: '7-deny-reloaded',
+          did: 'Reloaded the page after that Not now.',
+          expect: 'The chat is not waiting for anything, and nothing ran.',
+        }),
         fullPage: true,
       });
       assert.equal(

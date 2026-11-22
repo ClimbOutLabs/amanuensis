@@ -6,6 +6,8 @@ export interface ReachView {
     availability: TrueForge.ReachAvailability;
     calendarProblem: TrueForge.CalendarProblem | null;
     mailProblem: TrueForge.MailProblem | null;
+    /** Whether the mail source read from reports sender confirmation, as the source states about itself. Null until mail has been checked once, or when the last checks predate the fact being recorded. */
+    mailSenderConfirmation: boolean | null;
     mailSource: TrueForge.MailSourceKind | null;
     /** The highest level each kind of event can ever reach, whatever the model says. */
     maxLevels: TrueForge.ReachViewMaxLevels;

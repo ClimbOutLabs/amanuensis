@@ -182,6 +182,7 @@ const TODAY: RailToday = {
     },
   ],
   free_after: '2026-11-06T19:00:00.000Z',
+  calendar_unread: false,
   due: [
     {
       reminder_id: 'rem-1',
@@ -238,6 +239,18 @@ describe('the rail desk on Home', () => {
     expect(await screen.findByText('Nothing on the calendar.')).toBeInTheDocument();
     expect(screen.queryByText('Due')).not.toBeInTheDocument();
     expect(screen.queryByText('Needs your OK')).not.toBeInTheDocument();
+  });
+
+  it("says the calendar couldn't be read, not that the day is empty, when no account answered", async () => {
+    render(
+      <AmanRuntimeRail
+        status="ready"
+        deskApi={deskApi({ ...TODAY, calendar: [], free_after: null, calendar_unread: true })}
+      />,
+    );
+    expect(await screen.findByText(/Couldn't read your calendar just now/)).toBeInTheDocument();
+    expect(screen.queryByText('Nothing on the calendar.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Free for the rest of the day/)).not.toBeInTheDocument();
   });
 
   it("names tomorrow on tomorrow's event, so it never reads as one of today's", async () => {
@@ -320,7 +333,7 @@ describe('the rail desk in a chat', () => {
     );
   }
 
-  it('gives a line from a page no controls, and says where it is changed', async () => {
+  it('gives a line from a page the same × and Delete, and says which page Delete changes', async () => {
     const pageApi: MemoryRecallApi = {
       listMemoryTurnContext: async () => [
         turnContext(
@@ -341,9 +354,15 @@ describe('the rail desk in a chat', () => {
     );
     expect(await screen.findByText('Lives in Denver now.')).toBeInTheDocument();
     expect(screen.getByText('From memory (2)')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete this memory: Lives in Denver now.' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Take this out of this chat: Lives in Denver now.' }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete this memory: The gate code is 4417' })).toBeInTheDocument();
-    expect(screen.getByText(/A line from a page is changed on its page\./)).toBeInTheDocument();
+    expect(screen.queryByText(/changed on its page/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete this memory: Lives in Denver now.' }));
+    expect(
+      screen.getByText('Delete this line from the page for Sam Rivera? It cannot be brought back.'),
+    ).toBeInTheDocument();
   });
 
   it('keeps the memory row and says so when the last message used nothing from memory', async () => {

@@ -71,6 +71,7 @@ import { browserCapability } from './browserCapability';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
 import { connectionOfferCapability } from './connectionOfferCapability';
 import { OFFERABLE_CONNECTORS } from './connectionOfferRegistry';
+import { goalCapability, type GoalTurnContext } from './goals/goalCapability';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
@@ -1866,6 +1867,7 @@ class SpaceTool extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: LIST_SPACES_TOOL_NAME,
+      requiresNetwork: false,
       description:
         "List the user's spaces without bodies: name, link, folder (null when not in one), purpose, status, revision, and updated_at, plus the names of all folders and the aggregate_revision. A space is addressed by its exact name, and names are unique. Call before create_space to check for an existing space on the same subject.",
       schema: LIST_SPACES_INPUT_SCHEMA,
@@ -1875,6 +1877,7 @@ class SpaceTool extends LocalToolMCP {
     }),
     defineTool({
       name: GET_SPACE_TOOL_NAME,
+      requiresNetwork: false,
       description:
         "Read one space by its exact space_name. Returns metadata (including its folder), the aggregate_revision, the block outline (each block's anchor, fingerprint, and a preview of its first line), and the body unless include_body is false. Call before edit_space to get the current body, revision, and fingerprints.",
       schema: GET_SPACE_INPUT_SCHEMA,
@@ -1884,6 +1887,7 @@ class SpaceTool extends LocalToolMCP {
     }),
     defineTool({
       name: CREATE_SPACE_TOOL_NAME,
+      requiresNetwork: false,
       description:
         "Create a persistent space: a named page the host renders in the Spaces view. Write and change a space only with create_space and edit_space, never by editing files in the sandbox. The name must be one no existing space has: a taken name is refused, so change the existing space with edit_space instead. Use format 'markdown' for a list or note, and 'html' for a page meant to be looked at. An html body is one complete fragment with no <script>, external stylesheets, or external fonts (the host strips all three). Scripts never run on a space page, so use plain HTML and CSS. Pictures come from a page you opened or a search result. Pass body as one string with real line breaks, at most " +
         SPACE_WRITE_SIZE_TEXT +
@@ -1894,6 +1898,7 @@ class SpaceTool extends LocalToolMCP {
     }),
     defineTool({
       name: EDIT_SPACE_TOOL_NAME,
+      requiresNetwork: false,
       description:
         'Change part of one space by its exact space_name, without resending the body. ' +
         'Read the space first (get_space, or list_blocks for just its blocks) and send expected_revision set to the revision that read showed. ' +
@@ -1914,6 +1919,7 @@ class SpaceTool extends LocalToolMCP {
     }),
     defineTool({
       name: REVERT_SPACE_TOOL_NAME,
+      requiresNetwork: false,
       description:
         'Restore an older revision of a space as a new current revision, to undo a bad edit_space. Address the space by its exact space_name. The name, purpose, status, format, and body return to that revision; the bad content stays recoverable. expected_revision and expected_aggregate_revision are optional.',
       schema: REVERT_SPACE_INPUT_SCHEMA,
@@ -1922,6 +1928,7 @@ class SpaceTool extends LocalToolMCP {
     }),
     defineTool({
       name: MOVE_SPACE_TOOL_NAME,
+      requiresNetwork: false,
       description:
         "File a space in a folder, by its exact space_name and the folder's name. A folder with no match is made. A folder_name of null takes the space out of its folder. Moving changes neither the space nor its revision.",
       schema: MOVE_SPACE_INPUT_SCHEMA,
@@ -1930,6 +1937,7 @@ class SpaceTool extends LocalToolMCP {
     }),
     defineTool({
       name: LIST_BLOCKS_TOOL_NAME,
+      requiresNetwork: false,
       description:
         "List one space's blocks with an 80-character preview of each, without the body. Address the space by its exact space_name. Every block has an anchor edit_space can name: the name of its <!-- @block:name --> marker, or b1, b2, and so on for the blocks a body without markers is split into (its headings, paragraphs, list groups, and table row groups). Every block also carries a fingerprint: a short code hashed from its exact current content, which an edit entry names back so the host can check the block still holds what you read. The result names the revision the anchors and fingerprints belong to: send it as expected_revision when you edit. Use it after a context compaction or before edit_space. In a marked space, the text before the first marker is the preamble: reported separately, and listed as the block 'preamble' when it holds content, unless a marker has that name.",
       schema: LIST_BLOCKS_INPUT_SCHEMA,
@@ -2825,6 +2833,8 @@ export interface SpaceTurnContext {
   logger: Logger;
   /** Present only where schedules run (standalone); absent, no schedule tools mount. */
   schedules?: ScheduleTurnContext | undefined;
+  /** Present only where goals run (standalone with a goal store); absent, no goal tools mount. */
+  goals?: GoalTurnContext | undefined;
   /** Present where the chat has a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
   /** Present where this app keeps the skills itself; absent, no skill tools mount. */
@@ -2897,6 +2907,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const notesFolder = await this.#notesFolder(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
+    const goals = this.#space.goals;
     const personas = this.#space.personas;
     const skills = this.#space.skills;
     const keepsNothing = this.keepsNothing;
@@ -2960,6 +2971,15 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
                 timeZone: this.clientTimezone,
                 sentinel,
                 now: () => new Date(),
+                keepsNothing,
+              }),
+            ]),
+        ...(goals === undefined
+          ? []
+          : [
+              goalCapability({
+                ...goals,
+                tracing: input.tracing,
                 keepsNothing,
               }),
             ]),

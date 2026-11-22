@@ -605,6 +605,17 @@
             },
             "default": "./dist/cjs/api/resources/settings/resources/mcpServers/exports.js"
         },
+        "./settings/memoryItemTracking": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/memoryItemTracking/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/memoryItemTracking/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/memoryItemTracking/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/memoryItemTracking/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/memoryItemTracking/exports.js"
+        },
         "./settings/memoryNightly": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/resources/memoryNightly/exports.d.mts",

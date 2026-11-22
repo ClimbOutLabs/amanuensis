@@ -46,6 +46,9 @@ Some cards offer a lasting answer, so you don't have to click **Allow** every ti
 **Always allow in this chat**
 : Aman stops asking about this kind of action, to this same person or place, for the rest of this chat. In any other chat it asks again. Only a card that names who or where the action goes shows this button.
 
+**Always allow this site**
+: Aman stops asking about opening pages on this one site for the rest of this chat. Only some cards that open a page show this button. See [Cards that open a page](#cards-that-open-a-page).
+
 **Always allow everywhere**
 : Aman runs this one tool of a connector without asking, in every chat. A connector is an app or service you linked to Aman. On a chat card, this button is inside **Details**. Aman asks you to **Confirm** first.
 
@@ -86,6 +89,18 @@ If the draft goes to an address that isn't on your Email list, the buttons chang
 If your list changed after you approved the draft, the send card says so too. Its buttons read **Add and send** and **Don't send**.
 
 Saving a draft and sending both always ask. No button on a mail card lets you skip that question next time. [Email](email.md) has the details.
+
+## Cards that open a page
+
+A card that opens a page names the site in its first line. The card also shows the full address.
+
+If a page Aman read named the address, the card says so. When Aman knows the site of that page, the card names it too. That card has no **Always allow this site**. An address that came from something Aman read always asks, even on a site you allowed.
+
+If you didn't give the address, the card can offer **Always allow this site**. That covers every page on that site for the rest of this chat. A site means the exact name in the address. A page on a longer name, such as shop.example.com when you allowed example.com, asks again. A new chat asks again too.
+
+Each page on an allowed site is still checked on its own. A later page asks if it would carry one of your private details. It also asks if its link adds details to a site only Aman brought up in a reply, or if a page Aman read named its address. Those cards have no **Always allow this site**.
+
+If you click **Not now** on one of these cards, that no lasts for the rest of the chat. Aman doesn't ask again about the same kind of open on that site. It refuses the open instead. A no on a card for a click on a page lasts the same way. A new chat asks again.
 
 ## Cards from a scheduled run
 

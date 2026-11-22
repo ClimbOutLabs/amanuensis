@@ -21,7 +21,7 @@ const CARDS = ['search', 'calendar', 'email', 'email-new-recipient', 'command', 
  * but the ones it shows always keep this order, so each choice sits in the same place on every card.
  */
 const SLOTS: readonly (readonly string[])[] = [
-  ['Allow', 'Add and send', 'Add and save draft'],
+  ['Allow', 'Send', 'Add and send', 'Add and save draft'],
   ['Always allow in this chat'],
   ['Always allow everywhere', 'Always allow for this skill'],
   ['Allow all', 'Allow all (3)'],
@@ -122,7 +122,12 @@ test('every approval card kind puts each choice in the same place', { timeout: 1
         .waitFor({ timeout: RENDER_TIMEOUT_MS });
       await checkRows(page, where);
       await page.screenshot({
-        path: await featureShotPath({ surface: 'screen:approval-card', step: `choice-row-${where}` }),
+        path: await featureShotPath({
+          surface: 'screen:approval-card',
+          step: `choice-row-${where}`,
+          did: `Opened one of every kind of approval card side by side on a ${where} screen.`,
+          expect: 'Every card puts each choice in the same place in its row of buttons.',
+        }),
         fullPage: true,
       });
       await page.close();

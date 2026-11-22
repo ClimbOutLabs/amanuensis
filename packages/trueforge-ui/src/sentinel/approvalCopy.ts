@@ -1,5 +1,6 @@
 import type { ApprovalFact } from './ApprovalCardParts.js';
 import {
+  APPROVAL_CHOICES,
   isNewRecipientCard,
   isNewRecipientDraftCard,
   NEW_RECIPIENT_CHOICES,
@@ -82,12 +83,26 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
   return GENERIC_CARD_HEADLINE;
 }
 
-/** The verb on the first button: Allow for every card, except a new-recipient card, which says it adds its addresses. */
+/**
+ * The verb on the first button: Send on a card that sends an email, Allow for every other card,
+ * except a new-recipient card, which says it adds its addresses.
+ */
 export function approveVerb(card: SentinelApprovalCard): string {
   // Approving a new-recipient card adds its addresses to the send list, so it says so, in send or draft words.
   if (isNewRecipientDraftCard(card)) return NEW_RECIPIENT_DRAFT_CHOICES.approve.label;
   if (isNewRecipientCard(card)) return NEW_RECIPIENT_CHOICES.approve.label;
+  // The button on a send card sends the email, so it says Send, not a general Allow.
+  if (card.email?.action === 'send') return 'Send';
   return 'Allow';
+}
+
+/**
+ * The words on the standing-grant button. The server marks a card whose chat grant covers the whole
+ * site, and only that card names the site, so the words always match what the grant really covers.
+ * Every other card keeps the shared words.
+ */
+export function chatGrantLabel(grantScope: 'site' | undefined): string {
+  return grantScope === 'site' ? 'Always allow this site' : APPROVAL_CHOICES.approveForChat.label;
 }
 
 /** The verb on the quiet button that says no: Not now, except a new-recipient card, which says what will not happen. */

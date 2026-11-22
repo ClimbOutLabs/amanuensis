@@ -1,15 +1,11 @@
+import { extractWWWAuthenticateParams } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 // SSE remains required during the Streamable HTTP migration (some servers still speak SSE only).
 
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
-import {
-  ErrorCode,
-  McpError,
-  type CallToolRequest,
-  type CallToolResult,
-} from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, McpError, type CallToolRequest, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
 import { McpConnectionError, McpRedirectRefusedError } from '../errors';
 import { currentMcpOutboundFetchOptions, mcpOutboundBaseFetch, withOutboundHttpRetries } from '../util/outboundFetch';
@@ -20,6 +16,21 @@ import type { ToolSchema } from './IMCPServer';
 /** Networking for remote (url-based) MCP servers, kept separate so it can be mocked in tests. */
 
 export type RemoteMcpTransportType = 'streamable-http' | 'sse';
+
+export interface McpAuthChallenge {
+  resourceMetadataUrl: string | undefined;
+  scope: string | undefined;
+}
+
+export class McpAuthChallengeError extends McpConnectionError {
+  constructor(
+    readonly challenge: McpAuthChallenge,
+    options?: ErrorOptions,
+  ) {
+    super('The connector requires sign-in.', 401, options);
+    this.name = 'McpAuthChallengeError';
+  }
+}
 
 export interface RemoteMcpConnection {
   readonly transportType: RemoteMcpTransportType;
@@ -146,6 +157,19 @@ function createRedirectGuardFetch({ sameOriginOnly }: { sameOriginOnly: boolean 
       for (let hop = 0; ; hop += 1) {
         const response = await mcpOutboundBaseFetch(currentUrl, { ...currentInit, redirect: 'manual' });
         if (!isRedirectStatus(response.status)) {
+          const header = response.headers.get('www-authenticate');
+          if (response.status === 401 && header !== null && /^Bearer(?:\s|$)/i.test(header)) {
+            const parsed = extractWWWAuthenticateParams(response);
+            if (!/\bresource_metadata\s*=/i.test(header) || parsed.resourceMetadataUrl !== undefined) {
+              await response.body?.cancel().catch(() => {
+                /* no-op */
+              });
+              throw new McpAuthChallengeError({
+                resourceMetadataUrl: parsed.resourceMetadataUrl?.href,
+                scope: parsed.scope,
+              });
+            }
+          }
           return response;
         }
         const target = redirectTargetOrigin({ response, requestUrl: currentUrl });
@@ -444,6 +468,9 @@ export async function connectRemoteMcp(params: {
       const refused = redirectRefusal.refusal();
       if (refused !== undefined) {
         throw new McpRedirectRefusedError(redirectRefusedMessage(refused), { cause: error });
+      }
+      if (error instanceof McpAuthChallengeError) {
+        throw error;
       }
       if (isAuthError(error)) {
         throw toConnectError(error);

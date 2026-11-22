@@ -248,7 +248,7 @@ describe('progressRefundFor', () => {
   });
 
   it('refunds nothing for a sandbox command the host refused or could not run', () => {
-    // The interpreter guard and the other refusals answer as an error result.
+    // A host refusal (such as a missing purpose) answers as an error result.
     const refused = {
       ...landed,
       toolName: 'exec',

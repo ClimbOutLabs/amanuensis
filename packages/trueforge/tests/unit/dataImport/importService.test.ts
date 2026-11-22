@@ -612,6 +612,37 @@ describe('runDataImport', () => {
     }
   });
 
+  it('imports a chat from an export made before chat refusals were kept', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-older-refusals');
+    try {
+      // Today's export carries the field, so taking it out really is the older format.
+      const exported = legacySessionsOf(readZipEntries(archive));
+      const exportedMain = exported
+        .map(entry => recordAt(entry, 'chat'))
+        .find(entry => recordAt(entry['session'], 'session')['session_id'] === SEED_IDS.sessionMain);
+      expect(recordAt(recordAt(exportedMain, 'main chat')['session'], 'session')).toHaveProperty('approval_refusals');
+      // The older export's session records have no approval_refusals field at all.
+      const older = await repack(archive, entries => {
+        const sessions = legacySessionsOf(entries);
+        for (const entry of sessions) {
+          delete recordAt(recordAt(entry, 'chat')['session'], 'session')['approval_refusals'];
+        }
+        setLegacySessions(entries, sessions);
+      });
+      await runDataImport(importDeps(target), importRequest(older));
+
+      const restored = await target.stores.sessionStore.getSession({
+        tenant_id: TENANT,
+        session_id: SEED_IDS.sessionMain,
+      });
+      expect(restored?.approval_refusals).toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
   it('refuses an archive over the byte cap', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-cap');
@@ -3175,11 +3206,15 @@ describe('runDataImport keeps the default web search connector a new instance is
         id: seeded.id,
         record: {
           server: {
+            issuer: null,
+            issuerResponseRequired: false,
+            resource: null,
+            revocation: null,
             authorizationEndpoint: 'https://auth.example.com/authorize',
             tokenEndpoint: 'https://auth.example.com/token',
             codeChallengeMethodsSupported: ['S256'],
           },
-          client: { clientId: 'owner-client', clientSecret: 'owner-secret' },
+          client: { clientId: 'owner-client', clientSecret: 'owner-secret', tokenAuthMethod: 'client_secret_post' },
         },
       });
       expect(await importError(withClient, archive)).toMatchObject({ status: 409 });

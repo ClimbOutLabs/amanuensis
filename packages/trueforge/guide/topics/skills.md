@@ -37,7 +37,7 @@ When a skill is on for a chat, Aman reads its instructions when the job comes up
 
 Some skills come with their own scripts. Aman runs them in the sandbox, from the skill's folder. A skill's own script runs without asking, because you installed the skill. It asks first when the sandbox can reach the internet, or when Aman edited one of the skill's files in that chat.
 
-Some skills show their steps as shell commands that loop over results. Aman doesn't run loops like that directly, because the approval card couldn't show what they would run. It writes the same steps into a short script and runs that instead, and it still asks you first.
+Some skills show their steps as shell commands that loop over results. Aman runs those steps as the skill writes them. The card shows you the exact command first, and each run asks.
 
 A skill script that needs a website or an extra package can't get it on its own. Aman skips a skill's own install steps and uses the packages the sandbox already has. When a package is missing, Aman tells you which one instead of trying workarounds. On an installed Aman, you can add a Python package with `aman doctor sandbox --add-python` and the package's name.
 
@@ -69,7 +69,18 @@ After you allow it, the skill is on for that chat from your next message, in the
 
     A skill is instructions written by someone else. Add one only if you trust where it comes from.
 
-From a chat, Aman can only add a skill. It can't change or remove one, and a skill that wants to reach sites still needs your OK before it reaches any of them. Only skills in a public GitHub repository can be added from a chat. An incognito chat can't add a skill, and neither can a scheduled run.
+A skill that wants to reach sites still needs your OK before it reaches any of them. Only skills in a public GitHub repository can be added from a chat. An incognito chat can't add a skill, and neither can a scheduled run.
+
+## Remove a skill from a chat
+
+You can also ask Aman in a chat to remove a skill, such as "remove the release-notes skill".
+
+1. A card names the skill and the websites it will no longer reach.
+2. Click **Allow** to remove it, or **Not now** to keep it. This card asks every time.
+
+Removing it takes the skill out of every chat, the same as **Remove** in Settings. Its websites go with it. To use it again, add it again and approve its websites again.
+
+From a chat, Aman can add or remove a skill, but it can't change one. An incognito chat can't remove a skill, and neither can a scheduled run.
 
 ## Turn a skill off
 

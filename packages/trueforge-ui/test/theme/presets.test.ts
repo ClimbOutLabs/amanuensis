@@ -55,6 +55,7 @@ const REQUIRED_TOKEN_KEYS: (keyof SemanticTokens)[] = [
   'successText',
   'failureBg',
   'failureText',
+  'failureInk',
   'warningBg',
   'warningText',
   'success',

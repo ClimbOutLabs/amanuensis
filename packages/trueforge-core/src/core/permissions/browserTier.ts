@@ -27,11 +27,11 @@ import {
   isBrowserToolName,
 } from './browserToolNames';
 import { browserCardCopy } from './cardCopy';
-import type { SentinelAction } from './classifier';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments } from './extractorRegistry';
 import { withHoldSay } from './searchHoldText';
 import { autoDenyDecision, tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
+import type { SentinelAction } from './tierTypes';
 
 /**
  * The card for an open that asks: the exact address, which is everything the open sends, and the site

@@ -171,6 +171,7 @@ async function restoreTurn(
     },
     sandbox_info: null,
     approval_grants: [],
+    approval_refusals: [],
     require_previous_turn_is_tip: false,
     retained_previous_thread_ids: retainedThreadIds,
     new_threads: newThreads.map(thread => ({

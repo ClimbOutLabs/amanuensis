@@ -76,7 +76,12 @@ test('at phone widths nothing on the main screens runs off the side', { timeout:
       const page = await context.newPage();
       const check = async (screen: string): Promise<void> => {
         await page.screenshot({
-          path: await featureShotPath({ surface: SURFACE, step: `${String(width)}-${screen}` }),
+          path: await featureShotPath({
+            surface: SURFACE,
+            step: `${String(width)}-${screen}`,
+            did: `Opened the "${screen}" screen on a ${String(width)} px wide phone.`,
+            expect: 'Nothing on the screen runs off the side or is cut off.',
+          }),
         });
         for (const problem of await cutOff(page)) problems.push(`${String(width)}px ${screen}: ${problem}`);
       };

@@ -65,6 +65,7 @@ export class NotesFolderToolSet extends LocalToolMCP {
     this.#tools = [
       defineTool({
         name: SEARCH_NOTES_TOOL_NAME,
+        requiresNetwork: false,
         description:
           "Search the person's notes folder by meaning and by words. Each hit names its note's path and the heading it sits under. Use read_note with a hit's path to see the whole note.",
         schema: SearchNotesSchema,
@@ -73,6 +74,7 @@ export class NotesFolderToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: READ_NOTE_TOOL_NAME,
+        requiresNetwork: false,
         description:
           "Read one note in full from the person's notes folder. The path is the folder-relative path search results use, like Projects/Ideas.md.",
         schema: ReadNoteSchema,
@@ -81,6 +83,7 @@ export class NotesFolderToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: APPEND_TO_INBOX_TOOL_NAME,
+        requiresNetwork: false,
         description:
           "Add an entry to the person's notes inbox, the one file they named in Settings. The entry lands under a heading with the date and time. This only ever adds: nothing already written is changed or removed.",
         schema: AppendToInboxSchema,
@@ -89,6 +92,7 @@ export class NotesFolderToolSet extends LocalToolMCP {
       }),
       defineTool({
         name: CREATE_NOTE_TOOL_NAME,
+        requiresNetwork: false,
         description:
           "Make a new note in the person's notes folder. The path is folder-relative and ends in .md, like Projects/Ideas.md. A note that is already there is never overwritten; when the name is taken, the call says so.",
         schema: CreateNoteSchema,

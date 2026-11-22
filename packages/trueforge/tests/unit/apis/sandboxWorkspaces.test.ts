@@ -1,3 +1,4 @@
+/** The nightly coverage surface this file answers for: route:sandboxWorkspace. */
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ISessionStore, SessionRecord, TurnRecord } from '@truefoundry/trueforge-core/agent-session';
 import { SandboxWorkspaceListingSchema } from '@truefoundry/trueforge-core/core';
@@ -41,6 +42,7 @@ function chatRecord(
     updated_at: new Date('2026-10-01T00:00:00.000Z'),
     last_activity_timestamp_ms: 0,
     approval_grants: [],
+    approval_refusals: [],
     task_checklist: { revision: 0, items: [] },
     metrics: { total_duration_ms: 0, total_turns: 0 },
     metadata: {},

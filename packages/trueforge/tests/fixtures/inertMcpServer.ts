@@ -54,6 +54,14 @@ export const INERT_SEARCH_MESSAGES_TOOL = 'search_messages';
 export const INERT_SEARCH_NOTES_TOOL = 'search_notes';
 export const INERT_WRITE_TOOL = 'inert_write';
 export const INERT_UNANNOTATED_TOOL = 'inert_unannotated';
+/**
+ * The folder in the connector's own store that the write and unannotated tools act on. A call
+ * that carries words, names no place and is not declared read-only is refused as a send the card
+ * cannot show; naming this folder keeps the call inside the connector, so it still asks.
+ */
+export const INERT_MAILBOX = 'inert';
+/** The tools whose scripted calls name `INERT_MAILBOX`. The echo tool is declared read-only, so it needs none. */
+export const INERT_MAILBOX_TOOLS = [INERT_WRITE_TOOL, INERT_UNANNOTATED_TOOL] as const;
 export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
 export const INERT_SEARCH_MEMORY_TOOL = 'search_memory';
 /** Opt-in (`startInertMcpServer({ webSearch: true })`), so the default tool list stays unchanged. */
@@ -220,6 +228,8 @@ export interface InertMcpServer {
   setCalendarEvents: (events: readonly InertCalendarEvent[] | undefined) => void;
   /** The arguments of every calendar `list_events` call so far, in the order they arrived. */
   calendarListCalls: () => readonly Record<string, unknown>[];
+  /** While set, `list_events` refuses with these words, as the connector does when it cannot read. */
+  setCalendarRefusal: (text: string | undefined) => void;
   /** Sets the result shape the next (and every subsequent) `search_memory` call answers with. */
   setSearchMemoryMode: (mode: MemoryToolMode) => void;
   /**
@@ -264,6 +274,8 @@ interface CalendarEvents {
   byAccount: Readonly<Record<string, readonly InertCalendarEvent[]>> | undefined;
   /** The arguments of every `list_events` call, in the order they arrived. */
   listCalls: Record<string, unknown>[];
+  /** The words every `list_events` call is refused with while set. */
+  refusal: string | undefined;
 }
 
 interface MemoryModes {
@@ -434,7 +446,7 @@ function buildMcpServer({
     INERT_WRITE_TOOL,
     {
       description: 'Records a value. Annotated as a write so the approval gate covers it.',
-      inputSchema: { text: z.string() },
+      inputSchema: { text: z.string(), mailbox: z.string().optional() },
       annotations: { readOnlyHint: false },
     },
     async ({ text }) => {
@@ -454,7 +466,7 @@ function buildMcpServer({
     INERT_UNANNOTATED_TOOL,
     {
       description: 'Carries no annotations, so it matches `@unclassified` and is gated by default.',
-      inputSchema: { text: z.string() },
+      inputSchema: { text: z.string(), mailbox: z.string().optional() },
     },
     ({ text }) => {
       counters.unannotated += 1;
@@ -604,6 +616,25 @@ function buildMcpServer({
             return textResult('[]');
           }
           calendarEvents.listCalls.push({ ...args });
+          // The real connector refuses a window bound that carries its own offset when a zone is
+          // given too, so the fake refuses it the same way, in the same words.
+          const offsetBound = (['from', 'to'] as const).find(
+            key => typeof args[key] === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(args[key]),
+          );
+          if (calendarEvents.refusal !== undefined) {
+            return { content: [{ type: 'text' as const, text: calendarEvents.refusal }], isError: true };
+          }
+          if (offsetBound !== undefined && typeof args['timezone'] === 'string') {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `caldav-mcp: ${offsetBound} carries its own offset and a timezone (${args['timezone']}) was given as well. Pass one or the other, so there is no question which one was meant.`,
+                },
+              ],
+              isError: true,
+            };
+          }
           const account = typeof args['account'] === 'string' ? args['account'] : undefined;
           const events =
             account !== undefined && calendarEvents.byAccount !== undefined
@@ -709,6 +740,7 @@ export async function startInertMcpServer(options?: {
     current: options?.calendarEvents,
     byAccount: options?.calendarEventsByAccount,
     listCalls: [],
+    refusal: undefined,
   };
   const gates: WriteGate[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
@@ -907,6 +939,9 @@ export async function startInertMcpServer(options?: {
       calendarEvents.current = events;
     },
     calendarListCalls: () => calendarEvents.listCalls,
+    setCalendarRefusal: text => {
+      calendarEvents.refusal = text;
+    },
     setSearchMemoryMode: mode => {
       memoryModes.search = mode;
     },

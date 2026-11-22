@@ -199,6 +199,7 @@ export class InMemoryTelegramStore implements ITelegramStore {
         chat_id: input.chat_id,
         session_id: input.session_id,
         turn_id: input.turn_id,
+        origin: input.origin,
         created_at: '2026-11-06T00:00:00.000Z',
       });
     }
