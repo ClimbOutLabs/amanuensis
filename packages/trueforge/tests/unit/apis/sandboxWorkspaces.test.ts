@@ -42,6 +42,7 @@ function chatRecord(
     updated_at: new Date('2026-10-01T00:00:00.000Z'),
     last_activity_timestamp_ms: 0,
     approval_grants: [],
+    approval_refusals: [],
     task_checklist: { revision: 0, items: [] },
     metrics: { total_duration_ms: 0, total_turns: 0 },
     metadata: {},
