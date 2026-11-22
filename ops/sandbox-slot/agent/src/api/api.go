@@ -93,6 +93,10 @@ type Server struct {
 	VolumeDir string
 	// MinFreeBytes is the free space the volume needs for a call to start; zero means 1 GiB.
 	MinFreeBytes int64
+	// VolumeBytes is the workspace volume's total size, against which the quotas promised to the
+	// trees on it are counted before a new tree is made; zero means the size is read from the
+	// filesystem.
+	VolumeBytes int64
 	// TreeDir holds one workspace tree per session, on the slot volume.
 	TreeDir string
 	// SessionsMaxAge bounds how old the sessions listing may be before the trees are walked again;
@@ -111,6 +115,9 @@ type Server struct {
 	sem      chan struct{}
 	sessions sessionLocks
 	stats    sessionsCache
+	// createMu serializes making a new tree, so two chats cannot both pass the room check against
+	// the promises counted before either tree existed.
+	createMu sync.Mutex
 	once     sync.Once
 	mu       sync.Mutex
 	last     attest.Report
@@ -134,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/exec", s.exec)
 	mux.HandleFunc("POST /v1/fs_read", s.fsRead)
 	mux.HandleFunc("POST /v1/fs_write", s.fsWrite)
+	mux.HandleFunc("POST /v1/create_session", s.createSession)
 	mux.HandleFunc("POST /v1/destroy_session", s.destroySession)
 	return mux
 }

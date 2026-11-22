@@ -114,11 +114,13 @@ export class SlotClient {
     });
   }
 
+  /** Writes one file; when the write makes the session's tree, the agent first checks room for `diskMb`. */
   async fsWrite(input: {
     sessionId: string;
     path: string;
     content: Buffer;
     mode: number;
+    diskMb: number;
     signal: AbortSignal | undefined;
   }): Promise<SlotCallResult<undefined>> {
     return this.call({
@@ -129,7 +131,24 @@ export class SlotClient {
         path: input.path,
         content_base64: input.content.toString('base64'),
         mode: input.mode,
+        disk_mb: input.diskMb,
       },
+      schema: z.undefined(),
+      signal: input.signal,
+      timeoutMs: 60_000,
+    });
+  }
+
+  /** Asks the agent to make the session's empty tree; it refuses with storage_full when its volume has no room. */
+  async createSession(input: {
+    sessionId: string;
+    diskMb: number;
+    signal: AbortSignal | undefined;
+  }): Promise<SlotCallResult<undefined>> {
+    return this.call({
+      method: 'POST',
+      path: '/v1/create_session',
+      body: { session_id: input.sessionId, disk_mb: input.diskMb },
       schema: z.undefined(),
       signal: input.signal,
       timeoutMs: 60_000,

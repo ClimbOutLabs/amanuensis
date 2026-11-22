@@ -72,7 +72,7 @@ To check every step yourself, turn the **Sandbox** switch off.
 
 ## When the sandbox is full
 
-Each sandbox space holds as many chats as its disk fits. When they are all full, the sandbox is off and Aman says so. Delete old chats you no longer need, then try again.
+A new chat gets a workspace only when a sandbox space has room for it. When no space has room, the new chat cannot start and the message says the sandbox storage is almost full. Delete old chats you no longer need, then try again. If the message also says to free disk space, removing large files from this computer helps too. Chats that already have a workspace keep working.
 
 ## See the chat workspaces
 
