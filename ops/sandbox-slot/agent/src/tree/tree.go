@@ -121,13 +121,27 @@ func RecordedQuota(parent, sessionID string) (int64, bool) {
 func PromisedBytes(parent string) int64 {
 	var total int64
 	for _, session := range Sessions(parent) {
-		promised := session.Bytes
-		if quota, ok := RecordedQuota(parent, session.ID); ok && quota > promised {
-			promised = quota
-		}
-		total += promised
+		total += promisedBytes(parent, session.ID, session.Bytes)
 	}
 	return total
+}
+
+// PromisedBytesFor returns how much of the volume one tree has been promised: the larger of the
+// quota recorded for it and the space it already takes. A tree with no recorded quota counts the
+// space it takes now, since its promise is unknown.
+func PromisedBytesFor(parent, sessionID string) int64 {
+	bytes, _ := lease.Usage(Root(parent, sessionID))
+	return promisedBytes(parent, sessionID, bytes)
+}
+
+// promisedBytes is one tree's promise from its measured size: the larger of that size and the
+// quota recorded for the tree.
+func promisedBytes(parent, sessionID string, bytes int64) int64 {
+	promised := bytes
+	if quota, ok := RecordedQuota(parent, sessionID); ok && quota > promised {
+		promised = quota
+	}
+	return promised
 }
 
 // Relative converts a guest path into components below the tree root, or an error when the path is not

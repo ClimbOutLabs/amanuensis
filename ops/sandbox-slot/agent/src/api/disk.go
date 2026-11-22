@@ -75,6 +75,44 @@ func (s *Server) checkCreateRoom(quotaBytes int64) error {
 	return nil
 }
 
+// checkRaiseRoom answers whether an existing tree's promise may be recorded at quotaBytes. A
+// recording at or below what the volume already counts for the tree, its recorded quota or the
+// space it already takes, needs no room: that space is already spoken for. A rise is new
+// promise, so it takes the creation accounting with the rise in place of a whole quota: what is
+// free now must fit the rise plus the reserve, and the promises counted after the rise, plus
+// the reserve, must fit in the volume itself. Without this check, raising the configured quota
+// would rewrite every tree's record upward unchecked, and the reserve the creation check
+// protected would be promised away one call at a time.
+func (s *Server) checkRaiseRoom(sessionID string, quotaBytes int64) error {
+	counted := tree.PromisedBytesFor(s.TreeDir, sessionID)
+	rise := quotaBytes - counted
+	if rise <= 0 {
+		return nil
+	}
+	minFree := s.MinFreeBytes
+	if minFree == 0 {
+		minFree = defaultMinFreeBytes
+	}
+	_, free, err := lease.FilesystemUsedBytes(s.VolumeDir)
+	if err != nil {
+		return err
+	}
+	if free < rise+minFree {
+		return errStorageFull
+	}
+	total := s.VolumeBytes
+	if total == 0 {
+		total, err = lease.FilesystemTotalBytes(s.VolumeDir)
+		if err != nil {
+			return err
+		}
+	}
+	if tree.PromisedBytes(s.TreeDir)-counted+quotaBytes+minFree > total {
+		return errStorageFull
+	}
+	return nil
+}
+
 // guard returns the termination cause when the guest is over its limit, or an empty string.
 func (d *diskWatch) guard() string {
 	bytes, entries := lease.Usage(d.dirs...)

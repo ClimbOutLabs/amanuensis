@@ -46,7 +46,11 @@ The work lands in stages, each its own pull request against this spec:
    size limits already promised to the slot's workspaces count in full
    against its storage alongside the new one, so the reserve survives
    every workspace growing to its limit and a chat that holds a
-   workspace can always start. The
+   workspace can always start. A recorded limit that grows is checked
+   the same way before it is recorded: the increase must fit beside the
+   promises already counted and the reserve, and a raise that does not
+   fit is refused with the old limit standing, so raising the limit
+   later cannot promise away the reserve creation protected. The
    same check runs whenever any call first makes a tree (a command or a
    file write into a chat whose tree the idle sweep removed), so no path
    makes a tree without it, and making an empty tree never waits for
@@ -120,7 +124,10 @@ by agent tests: a tree is created, creation is refused with no tree left
 behind when the storage cannot fit the quota plus the reserve, creation
 is refused when the quotas already promised plus the new quota and the
 reserve pass the volume's size, a second chat still starts after the
-first writes within its quota, an
+first writes within its quota, a recorded limit raised for one chat
+still leaves the other chat able to start, a raise past what the volume
+can promise is refused with the old record standing, a tree made before
+limits were recorded is checked when its limit is first recorded, an
 existing tree needs no new room, bad requests are refused, a command or
 file write that makes a tree is refused the same way, and a new chat's
 tree is made while another chat's call runs. A live

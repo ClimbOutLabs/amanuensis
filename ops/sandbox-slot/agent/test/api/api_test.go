@@ -20,6 +20,7 @@ import (
 	"aman/slotagent/src/api"
 	"aman/slotagent/src/attest"
 	"aman/slotagent/src/guest"
+	"aman/slotagent/src/tree"
 )
 
 const (
@@ -610,6 +611,111 @@ func TestASecondChatCanStillStartAfterTheFirstWritesWithinItsQuota(t *testing.T)
 	third := strings.Repeat("c", 32)
 	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": third, "disk_mb": 256}); rec.Code != 507 || errCode(t, rec) != "storage_full" {
 		t.Fatalf("a third quota must not fit: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestARaisedQuotaStillLeavesTheOtherChatAbleToStart(t *testing.T) {
+	e := newEnv(t, true)
+	// The volume fits one chat's quota raised to 4 GiB beside the other chat's 2 GiB, plus the
+	// default 1 GiB reserve: 4096 + 2048 + 1024. It could not promise both raises.
+	e.srv.VolumeBytes = 7168 << 20
+	second := strings.Repeat("b", 32)
+	for _, id := range []string{sessionID, second} {
+		if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": id, "disk_mb": 2048}); rec.Code != 204 {
+			t.Fatalf("%s: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	// The configured quota rises, and the first chat's next call records the larger promise.
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 4096}); rec.Code != 204 {
+		t.Fatalf("the first raise must be honored: %d %s", rec.Code, rec.Body.String())
+	}
+	if recorded, ok := tree.RecordedQuota(e.srv.TreeDir, sessionID); !ok || recorded != 4096<<20 {
+		t.Fatalf("the raised quota must stand recorded: %d, %v", recorded, ok)
+	}
+	// The second chat starts its call at the promise it already holds. The reserve its start
+	// check needs is intact, because the raise was counted before it was recorded.
+	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+		m["session_id"] = second
+		m["disk_mb"] = 2048
+	}))
+	if rec.Code != 200 {
+		t.Fatalf("the second chat must be able to start: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAQuotaRaiseTheVolumeCannotPromiseIsRefused(t *testing.T) {
+	e := newEnv(t, true)
+	// The same volume as above: one raise to 4 GiB fits, the second does not.
+	e.srv.VolumeBytes = 7168 << 20
+	second := strings.Repeat("b", 32)
+	for _, id := range []string{sessionID, second} {
+		if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": id, "disk_mb": 2048}); rec.Code != 204 {
+			t.Fatalf("%s: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 4096}); rec.Code != 204 {
+		t.Fatalf("the first raise must be honored: %d %s", rec.Code, rec.Body.String())
+	}
+	// Raising the second chat too would promise 4096 + 4096 plus the reserve, more than the
+	// volume holds, so the raise is refused and the old record stands.
+	rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": second, "disk_mb": 4096})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("a raise past what the volume can promise must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if recorded, ok := tree.RecordedQuota(e.srv.TreeDir, second); !ok || recorded != 2048<<20 {
+		t.Fatalf("the refused raise must leave the old record standing: %d, %v", recorded, ok)
+	}
+	// The tree is not wedged: a call at the recorded quota still succeeds.
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": second, "disk_mb": 2048}); rec.Code != 204 {
+		t.Fatalf("the second chat must keep working at its recorded quota: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// The same refusal comes from free space: when the reserve alone passes what is free, a
+	// raise is refused even though the volume's total could promise it.
+	fresh := newEnv(t, true)
+	if rec := fresh.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 2048}); rec.Code != 204 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	fresh.srv.MinFreeBytes = 1 << 60
+	rec = fresh.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 4096})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("a raise the free space cannot fit must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if recorded, ok := tree.RecordedQuota(fresh.srv.TreeDir, sessionID); !ok || recorded != 2048<<20 {
+		t.Fatalf("the refused raise must leave the old record standing: %d, %v", recorded, ok)
+	}
+}
+
+func TestATreeWithoutAQuotaRecordIsCheckedWhenItsQuotaIsFirstRecorded(t *testing.T) {
+	e := newEnv(t, true)
+	// A tree made before quotas were recorded stands on the volume with no record, so it
+	// counts only at the space it takes, which is almost nothing.
+	legacy := strings.Repeat("d", 32)
+	if _, err := tree.Ensure(e.srv.TreeDir, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tree.RecordedQuota(e.srv.TreeDir, legacy); ok {
+		t.Fatal("the legacy tree must start with no quota record")
+	}
+	// The volume fits the other chat's 2 GiB promise, a 2 GiB promise for the legacy tree and
+	// the reserve, but not a 4 GiB one: 2048 + 2048 + 1024.
+	e.srv.VolumeBytes = 5120 << 20
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 2048}); rec.Code != 204 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": legacy, "disk_mb": 4096})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("the first record must be checked like a creation: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, ok := tree.RecordedQuota(e.srv.TreeDir, legacy); ok {
+		t.Fatal("a refused first record must leave the tree unrecorded")
+	}
+	// A first record that fits is taken.
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": legacy, "disk_mb": 2048}); rec.Code != 204 {
+		t.Fatalf("a first record that fits must be taken: %d %s", rec.Code, rec.Body.String())
+	}
+	if recorded, ok := tree.RecordedQuota(e.srv.TreeDir, legacy); !ok || recorded != 2048<<20 {
+		t.Fatalf("the first record must stand: %d, %v", recorded, ok)
 	}
 }
 
