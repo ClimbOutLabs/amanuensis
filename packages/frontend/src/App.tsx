@@ -13,6 +13,7 @@ import {
   LocalAccountProvider,
   MemoryRecallProvider,
   ModelUsageProvider,
+  PairTerminalPage,
   PersonalizationProvider,
   PersonaProvider,
   ReminderListProvider,
@@ -21,6 +22,7 @@ import {
   SentinelApiProvider,
   SentinelAuditFeed,
   SpokenReplyProvider,
+  TerminalPairingProvider,
   ThemeProvider,
   TrueForgeUI,
   useIsPrivateChat,
@@ -65,6 +67,7 @@ import { createLocalAccountApi } from './localAccountApi';
 import { LogoutButton, SignOutConfirmProvider } from './LogoutButton';
 import { createMemoryRecallApi } from './memoryRecallApi';
 import { createModelUsageApi } from './modelUsageApi';
+import { isPairTerminalPath, stripPairingCodeSearch } from './pairTerminalPath';
 import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
@@ -75,6 +78,7 @@ import { createRunCodeStatusApi } from './runCodeStatusApi';
 import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
+import { createTerminalPairingApi } from './terminalPairingApi';
 import { useLiveBrowserHref } from './useLiveBrowserHref';
 import { createServerVoiceApi, createVoiceInputApi } from './voiceInputApi';
 
@@ -301,6 +305,12 @@ function AmanShell({
 
 export function App() {
   const authError = parseAuthErrorReason(window.location.search);
+  // The pairing code arrives in the address of the pair-a-terminal page. Read it once,
+  // here: the effect below takes it out of the address once the page is shown, so the
+  // code does not sit in the address bar or the browser history for the page's life.
+  const [pairingCode] = useState(() =>
+    isPairTerminalPath(window.location.pathname) ? new URLSearchParams(window.location.search).get('code') : null,
+  );
   const [session, setSession] = useState<SessionState | { status: 'checking' }>({ status: 'checking' });
   // Drafts in session storage are keyed by this, so a later sign-in in the same tab never sees them.
   const [draftScope, setDraftScope] = useState('');
@@ -334,6 +344,27 @@ export function App() {
       window.history.state,
       '',
       stripAuthErrorSearch({
+        pathname: window.location.pathname,
+        search: window.location.search,
+        hash: window.location.hash,
+      }),
+    );
+  }, [session]);
+
+  useEffect(() => {
+    if (session.status !== 'authenticated') {
+      return;
+    }
+    if (!isPairTerminalPath(window.location.pathname)) {
+      return;
+    }
+    if (new URLSearchParams(window.location.search).get('code') == null) {
+      return;
+    }
+    window.history.replaceState(
+      window.history.state,
+      '',
+      stripPairingCodeSearch({
         pathname: window.location.pathname,
         search: window.location.search,
         hash: window.location.hash,
@@ -487,6 +518,7 @@ export function App() {
   );
   const personalizationApi = useMemo(() => createPersonalizationApi(authAwareFetch), []);
   const localAccountApi = useMemo(() => createLocalAccountApi(authAwareFetch), []);
+  const terminalPairingApi = useMemo(() => createTerminalPairingApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const deliveriesApi = useMemo(() => createDeliveriesApi(authAwareFetch), []);
   const chatAnswerMarksApi = useMemo(() => createChatAnswerMarksApi(authAwareFetch), []);
@@ -555,6 +587,20 @@ export function App() {
     );
   }
 
+  // The pair-a-terminal page is a bare page of its own, answered the same way. Sign-in
+  // comes first: an unauthenticated visit never reaches this branch, because the welcome
+  // screen above shows instead, and its sign-in comes back to the address the person
+  // opened, this one included.
+  if (isPairTerminalPath(window.location.pathname)) {
+    return (
+      <ThemeProvider>
+        <TerminalPairingProvider api={terminalPairingApi}>
+          <PairTerminalPage code={pairingCode} />
+        </TerminalPairingProvider>
+      </ThemeProvider>
+    );
+  }
+
   if (boot.status === 'error') {
     return (
       <ThemeProvider>
@@ -602,19 +648,21 @@ export function App() {
                                         >
                                           <ComposerDraftScopeProvider scope={draftScope}>
                                             <SignOutConfirmProvider>
-                                              <AmanShell
-                                                defaultAgentSpec={boot.defaultAgentSpec}
-                                                openSettings={boot.openSettings}
-                                                displayName={session.displayName}
-                                                overrides={overrides}
-                                                railDeskApi={railDeskApi}
-                                                modelName={
-                                                  setup?.modelName ??
-                                                  (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                                }
-                                                version={boot.build?.version}
-                                                buildRef={boot.build?.ref}
-                                              />
+                                              <TerminalPairingProvider api={terminalPairingApi}>
+                                                <AmanShell
+                                                  defaultAgentSpec={boot.defaultAgentSpec}
+                                                  openSettings={boot.openSettings}
+                                                  displayName={session.displayName}
+                                                  overrides={overrides}
+                                                  railDeskApi={railDeskApi}
+                                                  modelName={
+                                                    setup?.modelName ??
+                                                    (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                                  }
+                                                  version={boot.build?.version}
+                                                  buildRef={boot.build?.ref}
+                                                />
+                                              </TerminalPairingProvider>
                                             </SignOutConfirmProvider>
                                           </ComposerDraftScopeProvider>
                                         </AmanSetupProvider>

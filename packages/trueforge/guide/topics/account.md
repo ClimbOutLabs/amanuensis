@@ -56,6 +56,26 @@ Aman can't email you a reset link, because it has no mail account of its own. Se
 
     The command won't run while Aman is running. It tells you to stop Aman first, so the change can't clash with it.
 
+## Paired terminals
+
+A terminal app can pair with Aman instead of signing in. Pairing starts on the terminal, never here. The terminal shows a short code and a link, and the link opens a page in this web app.
+
+To confirm a pairing:
+
+1. Open the link the terminal shows. If you are not signed in, sign in first, and Aman brings you back to the page.
+2. Check that the code on the page matches the code on your terminal. The page names the terminal that is waiting when it can, so check that name too.
+3. Click **Confirm pairing**.
+
+The page then names the terminal that paired, and you can close the page. A paired terminal can reach your chats and answer approval cards in them, and nothing else. It cannot open Settings or change any setting. In the terminal app, approval cards appear in the chat and you can answer them there, so anything a card guards still waits for your answer before it happens.
+
+To stop a terminal:
+
+1. Click **More** in the left bar, click **Settings**, then click **Account**.
+2. Under **Paired terminals**, find the terminal and click **Revoke**.
+3. Click **Revoke** once more to confirm.
+
+The terminal stops working the next time it asks Aman for anything, and you can pair it again afterwards. Changing your password also stops every paired terminal, when Aman keeps the password itself. When you sign in through the sign-in service, the password changes there and Aman does not hear about it, so revoke each terminal here instead.
+
 ## Good to know
 
 - Nobody else can be added to your sign-in. Each person who uses Aman gets their own copy, called an instance, with its own sign-in. On Mac and Linux, Docker lists each instance's parts under its name, such as `aman-alex-app` for an instance called alex or aman-alex.

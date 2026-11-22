@@ -20,6 +20,7 @@ import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { useOptionalLocalAccount } from '@/components/LocalAccountContext.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { useOptionalRunCodeStatus } from '@/components/RunCodeStatusContext.js';
+import { useOptionalTerminalPairing } from '@/components/TerminalPairingContext.js';
 import { useOptionalDeliveries } from '@/deliveries/DeliveriesContext.js';
 import { Icon } from '@/icons/Icon.js';
 import { readSignInMode } from '@/plugins/trueforge-agent-server-adapter/lists.js';
@@ -103,10 +104,14 @@ const TruefoundrySettingsBuilder = () => {
   const hasPersonalization = useOptionalPersonalization() != null;
   const hasSentinel = useOptionalSentinelApiState() != null;
   const hasDeliveries = useOptionalDeliveries() != null;
-  // Account exists only for local sign-in: the host provides the surface and the server says so.
+  // The password card exists only for local sign-in: the host provides the surface and the server says so.
   const localAccount = useOptionalLocalAccount();
   const serverCapabilities = useServerCapabilities();
   const hasAccount = localAccount != null && readSignInMode(serverCapabilities) === 'local';
+  // The section also carries the paired terminals list, and the host offers the pairing
+  // surface in both sign-in modes, so the section shows whenever either surface is present.
+  const pairing = useOptionalTerminalPairing();
+  const hasAccountSection = hasAccount || pairing != null;
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -137,7 +142,7 @@ const TruefoundrySettingsBuilder = () => {
     if (!hasDeliveries && section === 'reach-me') {
       setSettingsOpen(settingsOpen, 'models');
     }
-    if (!hasAccount && section === 'account') {
+    if (!hasAccountSection && section === 'account') {
       setSettingsOpen(settingsOpen, 'models');
     }
   }, [
@@ -146,7 +151,7 @@ const TruefoundrySettingsBuilder = () => {
     hasPersonalization,
     hasSentinel,
     hasDeliveries,
-    hasAccount,
+    hasAccountSection,
     section,
     settingsOpen,
     setSettingsOpen,
@@ -192,12 +197,12 @@ const TruefoundrySettingsBuilder = () => {
     if (hasDeliveries) {
       baseSections.push({ id: 'reach-me', label: 'Reach me', icon: 'bell' });
     }
-    if (hasAccount) {
+    if (hasAccountSection) {
       baseSections.push({ id: 'account', label: 'Account', icon: 'lock' });
     }
     baseSections.push({ id: 'about', label: 'About', icon: 'info' });
     return baseSections;
-  }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, hasDeliveries, hasAccount]);
+  }, [hasSkills, hasSandbox, hasPersonalization, hasSentinel, hasDeliveries, hasAccountSection]);
 
   // The one section both the tab strip and the body show. A stored section the host no longer
   // offers falls back to Models here, so the highlighted tab and the content cannot disagree.
