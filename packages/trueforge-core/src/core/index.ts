@@ -430,13 +430,27 @@ export {
 export { SANDBOX_IMAGE_URI } from './sandbox/sandboxImage';
 export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandboxId } from './sandbox/sandboxRef';
 export type { SandboxRefParts } from './sandbox/sandboxRef';
+export {
+  SandboxWorkspaceHolderSchema,
+  SandboxWorkspaceListingSchema,
+  SandboxWorkspaceSchema,
+  SandboxWorkspaceSlotSchema,
+} from './sandbox/sandboxWorkspaceSchemas';
+export type {
+  SandboxWorkspace,
+  SandboxWorkspaceHolder,
+  SandboxWorkspaceListing,
+  SandboxWorkspaceSlot,
+} from './sandbox/sandboxWorkspaceSchemas';
 export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
 export type { HostCommandRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
+export { SlotClient } from './sandbox/slots/SlotClient';
 export {
   DEFAULT_SESSION_DISK_MB,
+  SLOT_HEALTH_TIMEOUT_MS,
   SLOT_MIRROR_GUEST_PORT,
   SLOT_MIRROR_SOCKET_NAME,
   SLOT_SKILL_NETWORK_GUEST_PORT,
@@ -446,7 +460,12 @@ export {
   slotSocketPathsIn,
 } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
-export { SlotFullStateLog, SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
+export {
+  SlotFullStateLog,
+  SlotSandboxProvider,
+  retiredSlotSourceIndex,
+  retiredSlotTargetIndex,
+} from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 

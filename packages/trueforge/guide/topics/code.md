@@ -1,7 +1,7 @@
 ---
 id: code
 title: Run code
-covers: settings:sandbox, route:runCode, route:sandboxProvider, route:gitCommitIdentity
+covers: settings:sandbox, route:runCode, route:sandboxProvider, route:gitCommitIdentity, route:sandboxWorkspace
 ---
 
 Aman can write and run small programs for you, to work out numbers, sort data or draw a chart. For example, ask it to add up your expenses by category and draw a chart. The code runs in the sandbox: a walled-off space on your computer with no internet access, where nothing it does can reach your own files or accounts.
@@ -73,6 +73,10 @@ To check every step yourself, turn the **Sandbox** switch off.
 ## When the sandbox is full
 
 Each sandbox space holds as many chats as its disk fits. When they are all full, the sandbox is off and Aman says so. Delete old chats you no longer need, then try again.
+
+## See the chat workspaces
+
+Each chat that runs code gets its own workspace in the sandbox. To see them, open Settings, then Sandbox, and look at the "Chat workspaces" card. It lists each workspace with how much space it takes and when it was last used, and how much room is left. Your own chats show by title, and your incognito chats show as "Incognito chat", without their title. Another person's chat shows as "Another person's chat". "A workspace with no chat" usually means its chat was deleted but the workspace stayed behind. The card only shows. Nothing there deletes a workspace.
 
 ## Good to know
 

@@ -193,6 +193,27 @@ export function formatMegabytes(mb: number): string {
   return mb >= 1024 && mb % 1024 === 0 ? `${String(mb / 1024)} GB` : `${String(mb)} MB`;
 }
 
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+
+/** Bytes in the largest unit that keeps the number readable, one decimal unless it is whole. */
+export function formatBytes(bytes: number): string {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const text = Number.isInteger(value) ? String(value) : value.toFixed(1);
+  return `${text} ${BYTE_UNITS[unit] ?? 'B'}`;
+}
+
+/** A slot-reported instant in the reader's own locale, or the text as reported when it does not parse. */
+export function formatLastUsed(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
 /** Whole minutes when the value divides evenly, seconds otherwise. */
 export function formatSeconds(seconds: number): string {
   return seconds >= 60 && seconds % 60 === 0 ? `${String(seconds / 60)} min` : `${String(seconds)} s`;
