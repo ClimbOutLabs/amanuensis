@@ -1,3 +1,4 @@
+/** The nightly coverage surface this file answers for: route:sandboxWorkspace. */
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ISessionStore, SessionRecord, TurnRecord } from '@truefoundry/trueforge-core/agent-session';
 import { SandboxWorkspaceListingSchema } from '@truefoundry/trueforge-core/core';
