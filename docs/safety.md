@@ -52,7 +52,7 @@ Aman sorts every action into one of three groups before it runs.
 
     Nothing runs for these:
 
-    - A send whose destination can't be checked.
+    - A send whose destination can't be checked. Aman decides a connector call is a send from what it carries, such as a recipient, an amount or message text, not from the tool's name. A call that carries words or an id but shows no place the card can check is refused, unless the tool says it only reads information. Then Aman asks you, as before.
     - A send whose card would hide a recipient or cut off its content.
     - Anything that needs the internet while offline mode is on.
 
@@ -96,9 +96,9 @@ Aman always shows a card first. Aman itself reads the skill on GitHub, so the na
 
 What you approve is what is added. The skill is saved at the exact version on the card, so a later change to the repository isn't picked up. If the repository changes between the card and your answer, nothing is added and Aman asks again.
 
-Skills from a marketplace don't say which websites they use, so Aman reads all of the skill's files first and lists the websites it found on the card. If the skill makes up web addresses while it runs, the card says so, and those websites stay blocked until you allow each one. Approving is all or nothing: **Allow** adds the skill and lets it reach exactly the websites on the card, and nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. From a chat, Aman can only add a skill. It can't change or remove one.
+Skills from a marketplace don't say which websites they use, so Aman reads all of the skill's files first and lists the websites it found on the card. If the skill makes up web addresses while it runs, the card says so, and those websites stay blocked until you allow each one. Approving is all or nothing: **Allow** adds the skill and lets it reach exactly the websites on the card, and nothing else. Its scripts run only in the sandbox. **Commands in the sandbox** below says when they ask first. From a chat, Aman can also remove a skill, and that card asks every time too. It can't change one.
 
-An incognito chat can't add a skill. A scheduled run can't add one either, because the tool isn't there.
+An incognito chat can't add or remove a skill. A scheduled run can't either, because the tools aren't there.
 
 ### Commands in the sandbox
 
@@ -107,6 +107,8 @@ The sandbox is the sealed-off space on your computer where Aman runs code.
 In the sandbox, a command that only reads inside the workspace runs without asking. That's still true when several reads are joined, as in `cd repo && git status`. That's also true when one read feeds the next, as in a search whose results are cut to the first 60 lines. Reads are listing files, reading a file or part of one, searching files, counting or sorting lines, and looking at git history. Writing the results to a file still asks. A file named by its full path counts the same as one named from the workspace, so Aman reading an installed skill's instructions doesn't ask. A full path outside the workspace still asks.
 
 Every other command asks first, unless the **Sandbox** switch covers it. Answering **Always allow in this chat** on a command covers running that same command again in this chat, and nothing else.
+
+Aman doesn't refuse a command because of how it's written. A loop, `$(...)`, a redirect, a heredoc or inline code such as `python3 -c` all run once you approve them. When Aman can't read a command as one plain command, the card shows its exact text, and it offers no **Always allow**, so each run asks. The sandbox walls keep such a command contained, not the way it's written: it can reach only the websites you approved and the package sites you allowed, and nothing outside the workspace.
 
 Installing a package asks first on every sandbox. The **Sandbox** switch never covers it.
 
@@ -143,15 +145,19 @@ Pages, emails from other people, files and tool results are things Aman reads. T
 
     The card says who it goes to and where Aman read that address, for example "This goes to Dana Wolfe (dana@example.org), who sent the email Aman just read."
 
+    When the held action opens a page, the card names the site it opens. It also names the site of the page the link was read on, when Aman knows it. That card has no standing choice: an address only something Aman read named always asks.
+
+    An open can also ask when Aman has read other people's content in the chat and you never gave the address. That card offers **Always allow this site**, which covers every page on that site for the rest of this chat. Refusing on that card refuses later opens of the same kind on that site for the rest of this chat, without another card. A new chat asks again.
+
 ??? note "It carries a secret"
 
     A search, page or map that would send a password, an API key, a private key or a payment card number is held, whatever its source.
 
-    So is a read through a connector, even one you set to **Always allow everywhere**, because what the read asks for goes to that connector's service. A connector read that would send one of this computer's own keys doesn't run at all.
+    So is anything that would run through a connector without asking, because what it sends goes to that connector's service. That covers reading your Gmail, Google Calendar and Google Drive, the Email and Calendar connectors, Home Assistant, and any connector tool you set to **Always allow everywhere**. A connector call that would send one of this computer's own keys doesn't run at all. What each of these sends is kept for the rest of the chat, so a secret split across two calls is still caught.
 
 ??? note "It's very long"
 
-    A search, or a read through a connector, asks first when one part is over 200 characters, or all of it is over 1,000.
+    A search, or anything that would run through a connector without asking, asks first when one part is over 200 characters, or all of it is over 1,000.
 
 ??? note "A link adds details to a site only Aman brought up"
 

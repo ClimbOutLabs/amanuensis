@@ -45,6 +45,17 @@ import type { SkillManifest } from '../../schemas/skill';
 import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
 import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
+import type {
+  GoalActionTable,
+  GoalClaimTable,
+  GoalCycleTable,
+  GoalEventTable,
+  GoalEvidenceTable,
+  GoalFencingCounterTable,
+  GoalStepTable,
+  GoalTable,
+  GoalWakeupTable,
+} from '../goalStore';
 import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
@@ -113,6 +124,7 @@ export interface SessionTable {
   folder_id: string | null;
   last_turn_id: string | null;
   approval_grants: JsonbColumn<string[]>;
+  approval_refusals: JsonbColumn<string[]>;
   /** Host-owned durable ordered task state. Null only for rows created before T3. */
   task_checklist: JsonbColumn<TaskChecklist> | null;
   /** Optional unique key within `tenant_id` when set. */
@@ -848,6 +860,15 @@ export interface Database {
   recall_exclusion: RecallExclusionTable;
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
+  goal: GoalTable;
+  goal_step: GoalStepTable;
+  goal_evidence: GoalEvidenceTable;
+  goal_event: GoalEventTable;
+  goal_cycle: GoalCycleTable;
+  goal_action: GoalActionTable;
+  goal_claim: GoalClaimTable;
+  goal_fencing_counter: GoalFencingCounterTable;
+  goal_wakeup: GoalWakeupTable;
   reach_settings: ReachSettingsTable;
   person_timezone: PersonTimezoneTable;
   text_contact: TextContactTable;

@@ -1,5 +1,6 @@
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(): ClassifyContext {
@@ -80,8 +81,35 @@ describe('Skill tool classification', () => {
     expect(decision.card ?? null).toBeNull();
   });
 
-  it('fails closed on a skill tool it does not know', async () => {
+  it('always asks before removing a skill, naming the websites it loses', async () => {
+    const decision = await classifyTier(
+      skillAction('remove_skill', { skill_remove: { name: 'release-notes', websites: ['api.release-feed.info'] } }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'skill_remove', auto_deny: null });
+    expect(decision.card?.plain_what).toBe(
+      'Remove the skill "release-notes"? It is taken out of every chat. It will no longer reach api.release-feed.info.',
+    );
+    expect(decision.card?.cannot_be_undone).toContain('add it again');
+    expect(decision.standing_grant_barred).toBe(true);
+  });
+
+  it('leaves websites out of the remove card when the skill reaches none', async () => {
+    const decision = await classifyTier(
+      skillAction('remove_skill', { skill_remove: { name: 'release-notes', websites: [] } }),
+      makeCtx(),
+    );
+    expect(decision.card?.plain_what).toBe('Remove the skill "release-notes"? It is taken out of every chat.');
+  });
+
+  it('refuses a removal whose skill the host did not find', async () => {
     const decision = await classifyTier(skillAction('remove_skill'), makeCtx());
+    expect(decision.auto_deny).not.toBeNull();
+    expect(decision.card ?? null).toBeNull();
+  });
+
+  it('fails closed on a skill tool it does not know', async () => {
+    const decision = await classifyTier(skillAction('rename_skill'), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'unclassified' });
   });
 });

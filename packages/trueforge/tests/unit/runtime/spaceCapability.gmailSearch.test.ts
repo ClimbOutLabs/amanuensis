@@ -147,7 +147,11 @@ describe('a web search after the chat read mail', () => {
             modelSupportsVision: false,
           }),
         mcp: () =>
-          Promise.resolve({ url: inert.url, headers: {}, search_provider: { tools: [], plumbing_fields: [] } }),
+          Promise.resolve({
+            url: inert.url,
+            headers: {},
+            search_provider: { tools: [], page_read_tools: [], plumbing_fields: [], served_in_process: false },
+          }),
         mcpRequestTimeoutMs: 10_000,
         mcpConnectTimeoutMs: 10_000,
         logger: createLogger({ silent: true }),

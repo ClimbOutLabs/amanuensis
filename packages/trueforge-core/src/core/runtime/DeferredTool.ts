@@ -4,6 +4,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 import { type ConnectorAvailability, connectorUnavailableLine } from '../connectors/connectorAvailability';
 import { isMailConnectorGuess, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
+import { McpConnectionError } from '../errors';
 import type { RegisteredPassthroughEvent } from '../events/PassthroughEvents';
 import type { ApprovalDecision } from '../events/schema';
 import { InstructionBuilder } from '../InstructionBuilder';
@@ -360,6 +361,14 @@ export class DeferredTool extends LocalToolMCP {
 
   /** A connector this chat has that did not answer when its tools were listed. The detail is for the model only. */
   private notAnsweringResponse(mcpServer: string, error: unknown): CallToolResponse {
+    if (error instanceof McpConnectionError && error.statusCode === 401) {
+      return toolResultResponse({
+        text: JSON.stringify({
+          error: `The ${mcpServer} connector requires sign-in. Check its sign-in settings and try again.`,
+        }),
+        isError: true,
+      });
+    }
     return toolResultResponse({
       text: JSON.stringify({
         error: `The ${mcpServer} connector is set up but is not answering yet. Try again in a minute. Do not try other names; tell the person this if it keeps failing.`,
@@ -407,7 +416,7 @@ export class DeferredTool extends LocalToolMCP {
       });
     } catch (error) {
       this.logger.error('list_tools failed', {
-        ...extractErrorLogFields(error),
+        ...(error instanceof McpConnectionError && error.statusCode === 401 ? {} : extractErrorLogFields(error)),
         mcpServer: input.mcp_server,
       });
       return this.notAnsweringResponse(input.mcp_server, error);
@@ -417,6 +426,7 @@ export class DeferredTool extends LocalToolMCP {
   private buildListTools(): ToolDefinition {
     return defineTool({
       name: LIST_TOOLS_NAME,
+      requiresNetwork: false,
       description: dedent`
         List tool names available on an MCP server.
         Returns tool names only — use ${GET_TOOL_INFO_NAME} to get full details before calling a tool.`,
@@ -460,7 +470,7 @@ export class DeferredTool extends LocalToolMCP {
       });
     } catch (error) {
       this.logger.error('get_tool_info failed', {
-        ...extractErrorLogFields(error),
+        ...(error instanceof McpConnectionError && error.statusCode === 401 ? {} : extractErrorLogFields(error)),
         mcpServer: input.mcp_server,
         toolName: input.tool_name,
       });
@@ -471,6 +481,7 @@ export class DeferredTool extends LocalToolMCP {
   private buildGetToolInfo(): ToolDefinition {
     return defineTool({
       name: GET_TOOL_INFO_NAME,
+      requiresNetwork: false,
       description: dedent`
         Get description, inputSchema and outputSchema for a tool, by its server and name.
         If outputSchema is null, it will NOT be present in ${GET_TOOL_OUTPUT_SCHEMA_NAME} as well.
@@ -513,7 +524,7 @@ export class DeferredTool extends LocalToolMCP {
       });
     } catch (error) {
       this.logger.error('get_tool_output_schema failed', {
-        ...extractErrorLogFields(error),
+        ...(error instanceof McpConnectionError && error.statusCode === 401 ? {} : extractErrorLogFields(error)),
         mcpServer: input.mcp_server,
         toolName: input.tool_name,
       });
@@ -524,6 +535,7 @@ export class DeferredTool extends LocalToolMCP {
   private buildGetToolOutputSchema(): ToolDefinition {
     return defineTool({
       name: GET_TOOL_OUTPUT_SCHEMA_NAME,
+      requiresNetwork: false,
       description: dedent`
         Get the outputSchema for a specific tool on an MCP server.
         The Agent MUST not call ${GET_TOOL_OUTPUT_SCHEMA_NAME} and ${GET_TOOL_INFO_NAME} for the same tool.
@@ -579,6 +591,7 @@ export class DeferredTool extends LocalToolMCP {
   private buildCallTool(): ToolDefinition {
     return defineTool({
       name: CALL_TOOL_NAME,
+      requiresNetwork: true,
       description: dedent`
         Call a tool by its server and name.
         The Agent MUST call ${GET_TOOL_INFO_NAME} before calling a tool. Built-in tools are called directly by name, never through ${CALL_TOOL_NAME}.
@@ -620,7 +633,7 @@ export class DeferredTool extends LocalToolMCP {
           resolved = await this.resolveServerTools({ mcpServer: input.mcp_server });
         } catch (error) {
           this.logger.error('call_tool could not list tools', {
-            ...extractErrorLogFields(error),
+            ...(error instanceof McpConnectionError && error.statusCode === 401 ? {} : extractErrorLogFields(error)),
             mcpServer: input.mcp_server,
             toolName: input.tool_name,
           });
@@ -666,7 +679,7 @@ export class DeferredTool extends LocalToolMCP {
           return response;
         } catch (error) {
           this.logger.error('call_tool failed', {
-            ...extractErrorLogFields(error),
+            ...(error instanceof McpConnectionError && error.statusCode === 401 ? {} : extractErrorLogFields(error)),
             mcpServer: input.mcp_server,
             toolName: input.tool_name,
           });

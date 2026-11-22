@@ -89,19 +89,19 @@ describe('what the mail is sent as', () => {
 });
 
 describe('EmailApprovalCard title and verb', () => {
-  it('asks "Send this reply to grace@example.com?" with Allow on the button for a reply', () => {
+  it('asks "Send this reply to grace@example.com?" with Send on the button for a reply', () => {
     renderEmail({
       reply_in_thread: { subject: 'Lease', from: 'Grace' },
       subject: 'Re: Lease',
     });
     expect(screen.getByRole('heading', { name: 'Send this reply to grace@example.com?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
   });
 
-  it('asks "Send this email to grace@example.com?" with Allow on the button for a new message', () => {
+  it('asks "Send this email to grace@example.com?" with Send on the button for a new message', () => {
     renderEmail();
     expect(screen.getByRole('heading', { name: 'Send this email to grace@example.com?' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
   });
 
   it('asks "Save this draft?" with Allow on the button when the action is a draft', () => {
@@ -232,9 +232,9 @@ describe('EmailApprovalCard body', () => {
 
   it('keeps the action bar visible under a 3000-word body', () => {
     renderEmail({ body: longBody(300, 10) });
-    const send = screen.getByRole('button', { name: 'Allow' });
+    const send = screen.getByRole('button', { name: 'Send' });
     const bar = send.parentElement?.parentElement ?? null;
-    if (bar === null) throw new Error('the allow button has no action bar');
+    if (bar === null) throw new Error('the send button has no action bar');
     expect(bar).toHaveClass('sticky', 'bottom-0');
     expect(within(bar).getByRole('button', { name: 'Not now' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Show full message · 3000 words/ })).toBeInTheDocument();
@@ -249,14 +249,14 @@ describe('EmailApprovalCard body', () => {
 describe('EmailApprovalCard actions', () => {
   it('sends once, then says Sending with no buttons, and never claims Sent before the server does', () => {
     const { onApprove } = renderEmail();
-    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('status')).toHaveTextContent('Sending…');
     expect(screen.queryByText(/^Sent/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
   });
 
-  it("puts Allow first and Don't send last on a safe-first send, all alike, and each sends its own answer", () => {
+  it("puts Send first and Don't send last on a safe-first send, all alike, and each sends its own answer", () => {
     const onApprove = vi.fn();
     const onDeny = vi.fn();
     render(
@@ -269,7 +269,7 @@ describe('EmailApprovalCard actions', () => {
       />,
     );
     const buttons = screen.getAllByRole('button').filter(button => button.closest('section') === null);
-    expect(buttons.map(button => button.textContent)).toEqual(['Allow', 'Change it', "Don't send"]);
+    expect(buttons.map(button => button.textContent)).toEqual(['Send', 'Change it', "Don't send"]);
     for (const button of buttons) {
       expect(button.className).toMatch(/bg-secondary-button-bg/);
       expect(button.className).not.toMatch(/bg-primary-button-bg|text-failure-bg/);
@@ -421,7 +421,7 @@ describe('EmailApprovalCard account picker', () => {
     if (!(picker instanceof HTMLSelectElement)) throw new Error('From picker is not a select');
     expect(picker.value).toBe('home@example.com');
     fireEvent.change(picker, { target: { value: 'work@example.com' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(onApprove).toHaveBeenCalledWith('work@example.com');
   });
 

@@ -493,11 +493,11 @@ case "$cmd" in
         exit 0
         ;;
       *"aman import-data --check-ready"*)
-        # Downloading for the first STUB_MODEL_DOWNLOADING looks, then ready; STUB_MODEL_BROKEN answers nothing.
+        # Missing with STUB_MODEL_MISSING, otherwise ready; STUB_MODEL_BROKEN answers nothing.
         [ -n "${STUB_MODEL_BROKEN:-}" ] && exit 1
         echo x >>"$S/model_checks"
-        if [ "$(wc -l <"$S/model_checks")" -le "${STUB_MODEL_DOWNLOADING:-0}" ]; then
-          echo '{"search_model":"downloading"}'
+        if [ -n "${STUB_MODEL_MISSING:-}" ]; then
+          echo '{"search_model":"missing"}'
         else
           echo '{"search_model":"ready"}'
         fi

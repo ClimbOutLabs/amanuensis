@@ -792,6 +792,23 @@ test(
 );
 
 test(
+  'a page the person closed in the browser is told as closed, and opening it again works',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar }) => {
+      await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
+      const profile = await sidecar.profileFor('owner-1');
+      const [page] = profile.context.pages().filter(candidate => candidate.url().startsWith('http://site-a.test/'));
+      await page.close();
+      assert.deepEqual(await sidecar.read({ owner: 'owner-1', tab: 'chat-1' }), { status: 'closed' });
+      const again = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/' });
+      assert.equal(again.status, 'ok');
+      assert.match(again.text, /Streaming Account/);
+    });
+  },
+);
+
+test(
   'only opening a page makes a tab, so a chat with none never closes another',
   { skip: !browsersAvailable },
   async () => {
@@ -1683,7 +1700,8 @@ test('a ref resolves back to the DOM path it was given to, and an unknown ref re
 /**
  * A sidecar on a fake page and a fake gateway check, with no Chromium: the one page has a single
  * field, given ref e1 by the opening read. `state.elementGone` makes that field vanish from the page,
- * and `state.actions` counts every read or action that reached the page.
+ * `state.actError` makes an action's own call fail with that error, as it does on a dead session, and
+ * `state.actions` counts every read or action that reached the page.
  */
 async function withFakeSidecar(run) {
   if (BrowserSidecar === undefined) {
@@ -1695,11 +1713,12 @@ async function withFakeSidecar(run) {
       .end(JSON.stringify({ ok: true, url: 'http://site-a.test/' }));
   });
   await new Promise(resolve => gateway.listen(0, '127.0.0.1', resolve));
-  const state = { elementGone: false, actions: 0 };
+  const state = { elementGone: false, actions: 0, actError: undefined };
   const page = {
     url: () => 'http://site-a.test/',
     title: async () => 'Fake page',
     on: () => undefined,
+    isClosed: () => false,
     goto: async () => undefined,
     mainFrame: () => undefined,
     exposeBinding: async () => undefined,
@@ -1720,6 +1739,10 @@ async function withFakeSidecar(run) {
     }
     if (expression.includes('return actOnElement(')) {
       state.actions += 1;
+      // The page or its session dies mid-act: the act's own call fails, as it does on a dead session.
+      if (state.actError !== undefined) {
+        throw state.actError;
+      }
       return state.elementGone ? { status: 'refused', reason: 'stale_ref' } : { status: 'done' };
     }
     throw new Error(`the fake page has no script for ${expression.slice(0, 40)}`);
@@ -1727,6 +1750,7 @@ async function withFakeSidecar(run) {
   const context = {
     on: () => undefined,
     route: async () => undefined,
+    newPage: async () => page,
     newCDPSession: async () => ({
       on: () => undefined,
       send: async (method, params) => {
@@ -1796,6 +1820,44 @@ test('an action whose element is gone from the page is refused as a stale ref, w
   });
 });
 
+test('an act whose page or session dies mid-act answers closed over HTTP, not a failure', async () => {
+  await withFakeSidecar(async ({ sidecar, state }) => {
+    const server = createHttpServer({ sidecar, allowedPeers: async () => ['127.0.0.1'] });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const ask = async (route, body) => {
+        const response = await fetch(`http://127.0.0.1:${String(server.address().port)}${route}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ owner: 'owner-1', tab: 'chat-1', ...body }),
+        });
+        return { status: response.status, json: await response.json() };
+      };
+      // The shapes a dead session actually produces: its session is gone, or its target is.
+      const sessionClosed = new Error('Session closed. Most likely the page has been closed.');
+      const targetClosed = new Error('Target closed');
+      state.actError = sessionClosed;
+      assert.deepEqual(await ask('/click', { ref: 'e1', expect: FAKE_FIELD }), {
+        status: 200,
+        json: { status: 'closed' },
+      });
+      state.actError = targetClosed;
+      assert.deepEqual(await ask('/type', { ref: 'e1', expect: FAKE_FIELD, text: 'hello' }), {
+        status: 200,
+        json: { status: 'closed' },
+      });
+      state.actError = sessionClosed;
+      assert.deepEqual(await ask('/select', { ref: 'e1', expect: FAKE_FIELD, option: 'x' }), {
+        status: 200,
+        json: { status: 'closed' },
+      });
+      assert.equal(state.actions, 3);
+    } finally {
+      server.close();
+    }
+  });
+});
+
 test('an action with no checked read never reaches the page, with no browser', async () => {
   await withFakeSidecar(async ({ sidecar, state }) => {
     const { role, ...withoutRole } = FAKE_FIELD;
@@ -1814,12 +1876,17 @@ test('an action with no checked read never reaches the page, with no browser', a
 async function fakeSidecar() {
   const acts = [];
   const handlers = {};
+  const contextHandlers = {};
   let fileFields = 0;
   let launches = 0;
   let shotsToFail = 0;
   let pageTitle = 'Account';
   let frameUrls = ['https://site-a.test/account'];
   let framesHang = false;
+  let pageClosed = false;
+  let contextClosed = false;
+  let routeGate;
+  let gotoError;
   const mainFrame = { name: 'main' };
   const page = {
     mainFrame: () => mainFrame,
@@ -1831,7 +1898,11 @@ async function fakeSidecar() {
         url: () => url,
         evaluate: () => (framesHang ? new Promise(() => undefined) : Promise.resolve(undefined)),
       })),
-    goto: async () => undefined,
+    goto: async () => {
+      if (gotoError !== undefined) {
+        throw gotoError;
+      }
+    },
     exposeBinding: async () => undefined,
     addInitScript: async () => undefined,
     context: () => context,
@@ -1879,7 +1950,7 @@ async function fakeSidecar() {
     on: (event, handler) => {
       handlers[event] = handler;
     },
-    isClosed: () => false,
+    isClosed: () => pageClosed,
     // The page's file fields: none until a test gives it one.
     locator: selector => {
       assert.equal(selector, 'input[type="file"]');
@@ -1913,9 +1984,25 @@ async function fakeSidecar() {
     on: () => undefined,
   };
   const context = {
-    on: () => undefined,
-    route: async () => undefined,
-    newPage: async () => page,
+    on: (event, handler) => {
+      contextHandlers[event] = handler;
+    },
+    // A held start waits here, at the routing step of its launch, until the test lets it finish.
+    route: async () => {
+      if (routeGate !== undefined) {
+        const gate = routeGate;
+        gate.reached();
+        await gate.promise;
+      }
+    },
+    // The stand-in has one page; a new page is that page open again. A closed browser opens none.
+    newPage: async () => {
+      if (contextClosed) {
+        throw new Error('browserContext.newPage: Target closed');
+      }
+      pageClosed = false;
+      return page;
+    },
     // The page has no frames from another site, so only the page itself gets a session.
     newCDPSession: async target => {
       if (target !== page) {
@@ -1938,6 +2025,7 @@ async function fakeSidecar() {
     proxyServer: `http://127.0.0.1:${gateway.address().port}`,
     launch: async () => {
       launches += 1;
+      contextClosed = false;
       return { context, page };
     },
   });
@@ -1957,6 +2045,43 @@ async function fakeSidecar() {
           acts.push({ chooser: file });
         },
       });
+    },
+    /** The page closes without the sidecar closing it, as when the person or the page closes it; `quietly` skips the close event. */
+    closePage: ({ quietly = false } = {}) => {
+      pageClosed = true;
+      if (!quietly) {
+        handlers.close?.();
+      }
+    },
+    /**
+     * Holds a browser start at its routing step, so a test can close the browser mid-start. The
+     * returned promise resolves once a start reaches that step.
+     */
+    holdRoute: () => {
+      let release = () => undefined;
+      let reached = () => undefined;
+      const promise = new Promise(resolve => {
+        release = resolve;
+      });
+      const reachedPromise = new Promise(resolve => {
+        reached = resolve;
+      });
+      routeGate = { promise, release, reached };
+      return reachedPromise;
+    },
+    /** Lets a held start finish. */
+    releaseRoute: () => {
+      routeGate?.release();
+      routeGate = undefined;
+    },
+    /** The browser itself closes without the sidecar closing it, as when it crashes or is quit. */
+    closeContext: () => {
+      contextClosed = true;
+      contextHandlers.close?.();
+    },
+    /** The next loads fail with `error`, as a load into a page that closed under it does; undefined stops that. */
+    failLoads: error => {
+      gotoError = error;
     },
     /** The tab's page moves to another address on its site. */
     navigate: () => {
@@ -2264,6 +2389,82 @@ test('the live view puts a file into the picker the page opened, else its file f
   }
 });
 
+test('a page closed outside the sidecar answers closed, and opening it again makes a fresh tab', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, gateway, closePage, launches } = await fakeSidecar();
+  const where = { owner: 'owner-1', tab: 'chat-1' };
+  try {
+    for (const quietly of [false, true]) {
+      assert.equal((await sidecar.open({ ...where, url: 'https://site-a.test/account' })).status, 'ok');
+      // With or without its close event seen yet, the closed page is never used again.
+      closePage({ quietly });
+      for (const call of ['read', 'scroll', 'back', 'screenshot', 'liveFrame', 'liveCopy']) {
+        assert.deepEqual(await sidecar[call]({ ...where, direction: 'down' }), { status: 'closed' }, call);
+      }
+      assert.deepEqual((await sidecar.liveTabs({ owner: 'owner-1' })).tabs, []);
+      const again = await sidecar.open({ ...where, url: 'https://site-a.test/account' });
+      assert.equal(again.status, 'ok');
+      assert.equal((await sidecar.liveTabs({ owner: 'owner-1' })).tabs.length, 1);
+    }
+    assert.equal(launches(), 1);
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('a browser that closes while it is still starting does not wedge its profile', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, gateway, launches, holdRoute, releaseRoute, closeContext } = await fakeSidecar();
+  const where = { owner: 'owner-1', tab: 'chat-1' };
+  try {
+    const routeReached = holdRoute();
+    const first = sidecar.open({ ...where, url: 'https://site-a.test/account' });
+    await routeReached;
+    // The browser closes while its start is still being set up, before the start has finished.
+    closeContext();
+    releaseRoute();
+    // That open cannot work: its browser is gone. What matters is what the next one does.
+    await assert.rejects(first, /Target closed/);
+    // The profile was dropped with the browser, so the next open starts a fresh one instead of
+    // running on the dead browser forever.
+    const second = await sidecar.open({ ...where, url: 'https://site-a.test/account' });
+    assert.equal(second.status, 'ok');
+    assert.equal(launches(), 2);
+    assert.equal((await sidecar.liveTabs({ owner: 'owner-1' })).tabs.length, 1);
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('a page that closes during a step is answered as closed over HTTP, not as a page that changed', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, gateway, failLoads } = await fakeSidecar();
+  const server = createHttpServer({ sidecar, allowedPeers: async () => ['127.0.0.1'] });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    failLoads(new Error('page.goto: Target page, context or browser has been closed'));
+    const response = await fetch(`http://127.0.0.1:${String(server.address().port)}/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: 'closed' });
+  } finally {
+    server.close();
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
 test("the person ends the session from the live view, which closes the chat's tab", async () => {
   if (BrowserSidecar === undefined) {
     return;
@@ -2350,6 +2551,8 @@ test('failure reasons come from the kind of error', () => {
     'navigation_failed',
   );
   assert.equal(failureReason(new Error('locator.fill: Element is not attached to the DOM')), 'page_changed');
+  assert.equal(failureReason(new Error('page.goto: Target page, context or browser has been closed')), 'page_closed');
+  assert.equal(failureReason(new Error('page.title: Target closed')), 'page_closed');
   assert.equal(failureReason(new Error('page.evaluate: Error: anything')), 'page_script_error');
   assert.equal(failureReason(new Error('something else')), 'unknown');
   assert.equal(failureReason('not an error'), 'unknown');

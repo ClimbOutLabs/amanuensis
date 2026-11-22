@@ -22,7 +22,7 @@ describe('a page read counts its pictures as seen', () => {
     recordToolResultProvenance({
       state,
       tool_name: 'web_fetch',
-      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true, page_read_call: true }),
       argument_values: [FILE_PAGE],
       texts: [`# File:Red Fox.jpg\n<img src="${FOX}" alt="Red fox">`],
     });

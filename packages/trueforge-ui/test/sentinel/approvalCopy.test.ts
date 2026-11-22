@@ -8,6 +8,7 @@ import {
   cardConsequence,
   cardHeadline,
   cardReason,
+  chatGrantLabel,
   declineVerb,
   GENERIC_CARD_HEADLINE,
   outboundRepeatsFacts,
@@ -54,11 +55,19 @@ const reply: SentinelApprovalCard['email'] = {
 };
 
 describe('approval copy', () => {
-  it('asks "Send this reply to Rui?" for a reply, with Allow and Not now', () => {
+  it('asks "Send this reply to Rui?" for a reply, with Send and Not now', () => {
     const card = cardWith({ email: reply });
     expect(approvalQuestion(card)).toBe('Send this reply to Rui?');
-    expect(approveVerb(card)).toBe('Allow');
+    expect(approveVerb(card)).toBe('Send');
     expect(declineVerb(card)).toBe('Not now');
+  });
+
+  it('names the site on the standing grant when the server marked the grant as covering it', () => {
+    expect(chatGrantLabel('site')).toBe('Always allow this site');
+  });
+
+  it('keeps the shared grant words when the server set no wider scope', () => {
+    expect(chatGrantLabel(undefined)).toBe('Always allow in this chat');
   });
 
   it('names a held search by its provider, never by a connector id', () => {
@@ -109,7 +118,7 @@ describe('approval copy', () => {
   it('asks "Send this email to a@x.com and 1 more?" for a new message, whatever the number of recipients', () => {
     const card = cardWith({ email: { ...reply, reply_in_thread: null, to: [bare('a@x.com'), bare('b@x.com')] } });
     expect(approvalQuestion(card)).toBe('Send this email to a@x.com and 1 more?');
-    expect(approveVerb(card)).toBe('Allow');
+    expect(approveVerb(card)).toBe('Send');
   });
 
   it('says "Add and send" for a send to a new address, since approving adds it', () => {
@@ -144,7 +153,7 @@ describe('approval copy', () => {
         location: '',
         description: '',
         attendees: [],
-        guests_emailed: false,
+        guests_line: '',
         one_of_repeating: false,
         before: null,
       },

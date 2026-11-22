@@ -7,8 +7,9 @@
  * fork's own check lives here instead.
  *
  * The launch carries no sign-in configuration at all: the npx install defaults to local
- * sign-in, so the check drives the whole first-run story over HTTP: the create form,
- * creating the one sign-in, signing out, a wrong password, and signing back in.
+ * sign-in, so the check drives the whole first-run story: the sign-in typed at the first-start
+ * prompt, a page that offers no way to create one, signing in, signing out, a wrong password,
+ * and signing back in.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
@@ -29,16 +30,24 @@ const WRONG_CREDENTIALS_LINE = 'That email or password is not right';
 async function checkLocalSignIn(origin) {
   const loginPage = await globalThis.fetch(`${origin}/api/v1/auth/login`);
   const loginHtml = await loginPage.text();
-  check(loginPage.status === 200, `first login page answered ${String(loginPage.status)}`);
-  check(loginHtml.includes('Create your sign-in'), 'first login page did not offer to create the sign-in');
+  check(loginPage.status === 200, `login page answered ${String(loginPage.status)}`);
+  check(!loginHtml.includes('npx amanuensis --create-account'), 'the sign-in typed at the prompt was not made');
+
+  const posted = await formPost({
+    origin,
+    pathname: '/api/v1/auth/create-account',
+    fields: { email: 'someone@example.com', password: PASSWORD, password_confirm: PASSWORD },
+  });
+  await posted.text();
+  check(posted.status >= 400, `a browser create answered ${String(posted.status)}`);
 
   const created = await formPost({
     origin,
-    pathname: '/api/v1/auth/create-account',
-    fields: { email: EMAIL, password: PASSWORD, password_confirm: PASSWORD },
+    pathname: '/api/v1/auth/login',
+    fields: { email: EMAIL, password: PASSWORD },
   });
   await created.text();
-  check(created.status === 302, `creating the sign-in answered ${String(created.status)}`);
+  check(created.status === 302, `signing in with the prompt's sign-in answered ${String(created.status)}`);
   let cookie = sessionCookie(created);
 
   const me = await globalThis.fetch(`${origin}/api/v1/auth/me`, { headers: { Cookie: cookie } });
@@ -55,9 +64,8 @@ async function checkLocalSignIn(origin) {
   check(logout.status === 204, `logout answered ${String(logout.status)}`);
 
   const signInPage = await globalThis.fetch(`${origin}/api/v1/auth/login`);
-  const signInHtml = await signInPage.text();
+  await signInPage.text();
   check(signInPage.status === 200, `login page after create answered ${String(signInPage.status)}`);
-  check(!signInHtml.includes('Create your sign-in'), 'login page still offered to create the sign-in');
 
   const wrong = await formPost({
     origin,
@@ -79,7 +87,7 @@ async function checkLocalSignIn(origin) {
   const meAgain = await globalThis.fetch(`${origin}/api/v1/auth/me`, { headers: { Cookie: cookie } });
   await meAgain.json();
   check(meAgain.status === 200, `me after sign-in answered ${String(meAgain.status)}`);
-  console.log('packed amanuensis CLI local sign-in OK: create, sign out, wrong password, sign in');
+  console.log('packed amanuensis CLI local sign-in OK: prompt, no browser create, sign out, wrong password, sign in');
 }
 
 let app;
@@ -94,7 +102,12 @@ try {
   if (tarballName === undefined) {
     throw new Error(`pnpm pack produced no tarball in ${packDir}`);
   }
-  app = await startPackedApp({ tarballPath: path.join(packDir, tarballName), dataDir, port });
+  app = await startPackedApp({
+    tarballPath: path.join(packDir, tarballName),
+    dataDir,
+    port,
+    account: { email: EMAIL, password: PASSWORD },
+  });
   console.log('packed amanuensis CLI healthz and UI OK');
   await checkLocalSignIn(app.origin);
 } finally {

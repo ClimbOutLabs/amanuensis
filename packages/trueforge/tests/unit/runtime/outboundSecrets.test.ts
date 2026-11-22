@@ -98,8 +98,20 @@ function sources(overrides: Partial<OutboundSecretSources> = {}): OutboundSecret
         Promise.resolve(
           id === 'srv-dcr'
             ? {
-                server: { authorizationEndpoint: 'a', tokenEndpoint: 't', codeChallengeMethodsSupported: null },
-                client: { clientId: 'dcr-client', clientSecret: 'synthetic-dcr-secret-0005' },
+                server: {
+                  issuer: null,
+                  issuerResponseRequired: false,
+                  resource: null,
+                  revocation: null,
+                  authorizationEndpoint: 'a',
+                  tokenEndpoint: 't',
+                  codeChallengeMethodsSupported: null,
+                },
+                client: {
+                  clientId: 'dcr-client',
+                  clientSecret: 'synthetic-dcr-secret-0005',
+                  tokenAuthMethod: 'client_secret_post',
+                },
               }
             : undefined,
         ),

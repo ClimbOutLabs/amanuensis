@@ -5,7 +5,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
 ESC=$'\033'
-ALL_COMMANDS="status upgrade backup restore password doctor import migrate local-model"
+ALL_COMMANDS="status upgrade backup restore password doctor import migrate local-model address"
 
 # The real aman command with the given arguments, as a person would run it; OUT is its standard output, ERR its error
 # output and RC its exit code.

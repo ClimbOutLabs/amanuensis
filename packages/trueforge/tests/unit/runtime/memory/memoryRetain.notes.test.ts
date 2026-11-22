@@ -394,4 +394,73 @@ describe('turn memory with findings and reply notes', () => {
     expect(entryMetadata(entry)).toMatchObject({ note_source: 'email', note_date: '2026-10-29' });
     expect(withoutHiddenMarkers(entry)).not.toContain('note:');
   });
+
+  it('stores one headed list from a reply as one memory holding every point', async () => {
+    scripted.notes = JSON.stringify({ findings: [], responses: [1, 2, 3] });
+    await submit({
+      id: 't9',
+      userText: 'What is the allotment routine?',
+      assistantText:
+        'For the allotment day, the routine runs the same way each time:\n' +
+        '- Check the shed lock before you start.\n' +
+        '- Water the beds at the far end first.\n' +
+        '- Leave the gate latched when you go.',
+    });
+    const file = await dayFile();
+    expect(file.match(/<!-- note: assistant_response/g)).toHaveLength(1);
+    expect(file).toContain('Check the shed lock before you start.');
+    expect(file).toContain('Water the beds at the far end first.');
+    expect(file).toContain('Leave the gate latched when you go.');
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+    if (!listed.ok) {
+      throw new Error('expected a listing');
+    }
+    expect(listed.entries).toHaveLength(1);
+  });
+
+  it('stores two findings from one result as one memory with a line for each', async () => {
+    scripted.notes = JSON.stringify({
+      findings: [
+        { result: 1, text: 'Priya asked for the signed form by 2026-11-03.' },
+        { result: 1, text: 'Priya needs the signed form sent by 3 November.' },
+      ],
+      responses: [],
+    });
+    await submit({
+      id: 't10',
+      userText: 'Check my email.',
+      assistantText: SHORT_REPLY,
+      toolResults: [EMAIL_RESULT],
+    });
+    const file = await dayFile();
+    expect(file.match(/<!-- note: email/g)).toHaveLength(1);
+    expect(file).toContain('Priya asked for the signed form by 2026-11-03.');
+    expect(file).toContain('Priya needs the signed form sent by 3 November.');
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+    if (!listed.ok) {
+      throw new Error('expected a listing');
+    }
+    expect(listed.entries).toHaveLength(1);
+  });
+
+  it('keeps notes from different sources in different memories, each under its own label', async () => {
+    scripted.notes = JSON.stringify({
+      findings: [{ result: 1, text: 'Priya asked for the signed form by 2026-11-03.' }],
+      responses: [3],
+    });
+    await submit({
+      id: 't11',
+      userText: 'Check my email and tell me when to go.',
+      assistantText: LONG_REPLY,
+      toolResults: [EMAIL_RESULT],
+    });
+    const file = await dayFile();
+    expect(file.match(/<!-- note: email/g)).toHaveLength(1);
+    expect(file.match(/<!-- note: assistant_response/g)).toHaveLength(1);
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 5000 });
+    if (!listed.ok) {
+      throw new Error('expected a listing');
+    }
+    expect(listed.entries).toHaveLength(2);
+  });
 });

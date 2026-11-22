@@ -1,4 +1,5 @@
 import {
+  callReadsMemoryPages,
   callReturnsOutsideContent,
   chatProvenanceCapability,
   contextHasOutsideToolResult,
@@ -27,14 +28,16 @@ const SEARCH_RESULT = JSON.stringify({
 });
 const PAGE_TEXT = `# Oslo\n<img src="${PAGE_PICTURE}" alt="Map of Oslo">`;
 
-type Stamp = Pick<InternalToolCallInfo, 'type' | 'search_provider_call'>;
+type Stamp = Pick<InternalToolCallInfo, 'type' | 'search_provider_call' | 'search_result_call' | 'page_read_call'>;
 
 /** The assistant's own built-in tool, as the host stamps it. */
 const OWN_TOOL: Stamp = { type: 'truefoundry-system' };
 /** A tool of a connector the person added. */
 const CONNECTOR_TOOL: Stamp = { type: 'mcp' };
-/** A tool of the connector the person chose as the search provider. */
-const SEARCH_PROVIDER_TOOL: Stamp = { type: 'mcp', search_provider_call: true };
+/** A search tool of the connector the person chose as the search provider, as the host stamps it from the record's declaration. */
+const SEARCH_PROVIDER_TOOL: Stamp = { type: 'mcp', search_provider_call: true, search_result_call: true };
+/** A page-read tool of that same connector, stamped from the page-read half of the declaration. */
+const PAGE_READ_TOOL: Stamp = { type: 'mcp', search_provider_call: true, page_read_call: true };
 
 function storedCall(input: { name: string; args?: Record<string, unknown>; stamp: Stamp }) {
   return {
@@ -97,7 +100,7 @@ describe('only the chosen search provider returns links that are the person to o
 
   it('counts the pictures of a page the search provider read as seen', async () => {
     const provenance = await provenanceOf(
-      chatWithResult({ name: 'web_fetch', args: { url: PAGE }, stamp: SEARCH_PROVIDER_TOOL, result: PAGE_TEXT }),
+      chatWithResult({ name: 'web_fetch', args: { url: PAGE }, stamp: PAGE_READ_TOOL, result: PAGE_TEXT }),
     );
     expect(isTrustedPicture({ provenance, url: PAGE_PICTURE })).toBe(true);
   });
@@ -209,5 +212,56 @@ describe('an address in an earlier reply of the assistant', () => {
       { role: 'user', content: 'thanks' },
     ]);
     expect(hasReadContent(provenance)).toBe(false);
+  });
+});
+
+describe('a call that read the stored memory pages', () => {
+  it.each(['read_page', 'list_pages'])('counts a direct %s call', name => {
+    expect(callReadsMemoryPages(storedCall({ name, stamp: OWN_TOOL }))).toBe(true);
+  });
+
+  it.each(['read_page', 'list_pages'])('counts a %s call reached through the call_tool wrapper', tool_name => {
+    const call = storedCall({
+      name: 'call_tool',
+      args: { mcp_server: 'memory_pages', tool_name, input: {} },
+      stamp: OWN_TOOL,
+    });
+    expect(callReadsMemoryPages(call)).toBe(true);
+  });
+
+  it.each(['read_page', 'list_pages'])(
+    'does not count a %s call wrapped for a server that is not the memory pages',
+    tool_name => {
+      const call = storedCall({
+        name: 'call_tool',
+        args: { mcp_server: 'fieldnotes', tool_name, input: {} },
+        stamp: CONNECTOR_TOOL,
+      });
+      expect(callReadsMemoryPages(call)).toBe(false);
+    },
+  );
+
+  it('does not count a call that wrote to the pages', () => {
+    expect(callReadsMemoryPages(storedCall({ name: 'remember_fact', stamp: OWN_TOOL }))).toBe(false);
+    const wrapped = storedCall({
+      name: 'call_tool',
+      args: { mcp_server: 'memory_pages', tool_name: 'remember_fact', input: {} },
+      stamp: OWN_TOOL,
+    });
+    expect(callReadsMemoryPages(wrapped)).toBe(false);
+  });
+
+  it('does not count a call to any other tool, direct or wrapped', () => {
+    expect(callReadsMemoryPages(storedCall({ name: 'gmail__read_email', stamp: CONNECTOR_TOOL }))).toBe(false);
+    const wrapped = storedCall({
+      name: 'call_tool',
+      args: { mcp_server: 'notes', tool_name: 'search_pages', input: {} },
+      stamp: CONNECTOR_TOOL,
+    });
+    expect(callReadsMemoryPages(wrapped)).toBe(false);
+  });
+
+  it('does not count a call that is not known', () => {
+    expect(callReadsMemoryPages(undefined)).toBe(false);
   });
 });

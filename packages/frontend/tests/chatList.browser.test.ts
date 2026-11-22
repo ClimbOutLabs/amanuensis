@@ -175,7 +175,15 @@ test('the chat list sets each group of chats in under its heading', { timeout: 6
       if ((await earlier.getAttribute('aria-expanded')) === 'false') await earlier.click();
       await page.waitForTimeout(400);
       const step = `${view.label}-${view.theme}`;
-      await page.screenshot({ path: await featureShotPath({ surface: 'screen:chat-list', step }) });
+      await page.screenshot({
+        path: await featureShotPath({
+          surface: 'screen:chat-list',
+          step,
+          did: `Opened Aman with seven invented chats, three of them in folders, on a ${view.label} screen in the ${view.theme} theme.`,
+          expect:
+            'The list shows every folder, then Today and Earlier. Chats sit indented under their heading, folder names are as large as chat titles, and the list does not scroll sideways.',
+        }),
+      });
       const { sections, sideways } = await measure(page);
       assert.equal(sideways, 0, `${step}: the list does not scroll sideways`);
       assert.deepEqual(
@@ -217,7 +225,12 @@ test('the chat list sets each group of chats in under its heading', { timeout: 6
         assert.equal(await manage.evaluate(el => getComputedStyle(el).opacity), '1', `${step}: Tab reaches it`);
         await page.waitForTimeout(250);
         await page.screenshot({
-          path: await featureShotPath({ surface: 'screen:chat-list', step: `${step}-keyboard` }),
+          path: await featureShotPath({
+            surface: 'screen:chat-list',
+            step: `${step}-keyboard`,
+            did: `On the ${view.label} screen in the ${view.theme} theme, moved to the Travel folder with the keyboard and pressed Tab.`,
+            expect: "The folder's settings button, hidden at rest, shows once the keyboard reaches it.",
+          }),
         });
       }
       await context.close();

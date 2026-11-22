@@ -8,6 +8,7 @@ import { FirstRunGuideClient } from "../resources/firstRunGuide/client/Client.js
 import { GitCommitIdentityClient } from "../resources/gitCommitIdentity/client/Client.js";
 import { GoogleClient } from "../resources/google/client/Client.js";
 import { McpServersClient } from "../resources/mcpServers/client/Client.js";
+import { MemoryItemTrackingClient } from "../resources/memoryItemTracking/client/Client.js";
 import { MemoryNightlyClient } from "../resources/memoryNightly/client/Client.js";
 import { MemoryPageSortingClient } from "../resources/memoryPageSorting/client/Client.js";
 import { MemoryRecallsClient } from "../resources/memoryRecalls/client/Client.js";
@@ -32,6 +33,7 @@ export class SettingsClient {
     protected _firstRunGuide: FirstRunGuideClient | undefined;
     protected _gitCommitIdentity: GitCommitIdentityClient | undefined;
     protected _mcpServers: McpServersClient | undefined;
+    protected _memoryItemTracking: MemoryItemTrackingClient | undefined;
     protected _memoryNightly: MemoryNightlyClient | undefined;
     protected _memoryPageSorting: MemoryPageSortingClient | undefined;
     protected _memoryRecalls: MemoryRecallsClient | undefined;
@@ -64,6 +66,10 @@ export class SettingsClient {
 
     public get mcpServers(): McpServersClient {
         return (this._mcpServers ??= new McpServersClient(this._options));
+    }
+
+    public get memoryItemTracking(): MemoryItemTrackingClient {
+        return (this._memoryItemTracking ??= new MemoryItemTrackingClient(this._options));
     }
 
     public get memoryNightly(): MemoryNightlyClient {

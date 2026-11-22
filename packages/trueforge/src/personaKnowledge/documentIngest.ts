@@ -130,7 +130,8 @@ async function extractPdfText(bytes: Uint8Array): Promise<{ text: string; note?:
         : {}),
     };
   } finally {
-    await doc.destroy();
+    // Destroying the loading task also releases the document and its worker.
+    await loadingTask.destroy();
   }
 }
 

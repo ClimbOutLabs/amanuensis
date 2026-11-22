@@ -11,6 +11,7 @@
     "connectors": "Connectors",
     "data": "Export and import",
     "email": "Email",
+    "goals": "Goals",
     "help": "Help",
     "home": "Home",
     "install": "Install and upgrade",
@@ -93,6 +94,10 @@
     "calendar-preset:yahoo": {
       "set": "calendar",
       "tests": []
+    },
+    "command:address": {
+      "set": "install",
+      "tests": ["installer/tests/lib/address.test.sh"]
     },
     "command:adopt": {
       "set": "install",
@@ -298,6 +303,10 @@
       "set": "code",
       "tests": []
     },
+    "route:goal": {
+      "set": "goals",
+      "tests": []
+    },
     "route:google": {
       "set": "connectors",
       "tests": []
@@ -312,6 +321,10 @@
     },
     "route:mcpServer": {
       "set": "connectors",
+      "tests": []
+    },
+    "route:memoryItemTracking": {
+      "set": "memory",
       "tests": []
     },
     "route:memoryNightly": {
@@ -340,7 +353,7 @@
     },
     "route:memoryVault": {
       "set": "memory",
-      "tests": []
+      "tests": ["packages/frontend/tests/memoryPanelPageLines.browser.test.ts"]
     },
     "route:model": {
       "set": "models",
@@ -380,7 +393,7 @@
     },
     "route:recallExclusion": {
       "set": "memory",
-      "tests": []
+      "tests": ["packages/frontend/tests/memoryPanelPageLines.browser.test.ts"]
     },
     "route:reminder": {
       "set": "reminders",
@@ -829,17 +842,18 @@
     "route:emailAccount",
     "route:firstRunGuide",
     "route:gitCommitIdentity",
+    "route:goal",
     "route:google",
     "route:help",
     "route:mcpOAuth",
     "route:mcpServer",
+    "route:memoryItemTracking",
     "route:memoryNightly",
     "route:memoryPageSorting",
     "route:memoryPages",
     "route:memoryRecall",
     "route:memoryScreen",
     "route:memorySummarize",
-    "route:memoryVault",
     "route:model",
     "route:notesFolder",
     "route:permission",
@@ -848,7 +862,6 @@
     "route:personalization",
     "route:privateChat",
     "route:reach",
-    "route:recallExclusion",
     "route:reminder",
     "route:repository",
     "route:runCode",

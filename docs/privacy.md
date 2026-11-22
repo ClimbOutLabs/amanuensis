@@ -89,6 +89,7 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
     These all pass through Telegram's servers:
 
     - The messages you send the bot, and Aman's replies.
+    - What you type in a Telegram chat in Aman, and Aman's replies there. Files you add there stay in Aman. Other chats are never sent.
     - Reminder text.
     - The details of anything that needs your ok.
     - Any photos or files you send the bot.
@@ -105,9 +106,9 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
 
     The names and versions of those packages go to the package sources: npm, PyPI, Go and Rust.
 
-??? note "To Hugging Face, once"
+??? note "Models come in the image"
 
-    The first time Aman starts, it asks Hugging Face for the files of the memory search model. Nothing about you is in that request. Aman checks each file against a fixed fingerprint before it uses it.
+    The speech and memory search models are built into the Aman images. Starting Aman never asks a model host for files.
 
 The browser loads nothing from other companies. Fonts and icons come bundled with Aman.
 

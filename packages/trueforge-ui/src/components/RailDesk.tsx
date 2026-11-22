@@ -42,6 +42,8 @@ export type RailTodayNeedsOkItem = {
 export type RailToday = {
   calendar: RailTodayEvent[] | null;
   free_after: string | null;
+  /** True when a calendar is connected but none of it could be read just now. */
+  calendar_unread: boolean;
   due: RailTodayDueReminder[];
   needs_ok: RailTodayNeedsOkItem[];
   /** True when more actions are waiting than the Needs your OK list shows. */
@@ -93,7 +95,7 @@ export type RailRecallFact = {
   source: RailRecallFactSource;
   /** Where the fact came from and how long ago, in plain words, for the row's second line. */
   origin: string;
-  /** The page the line sits on. A page line is changed on its page, so its row has no controls. */
+  /** The page the line sits on; Delete takes the line off that page. */
   page?: string;
 };
 
@@ -342,7 +344,11 @@ export const RailHomeDesk: FC<{
     <>
       {today.calendar !== null && (
         <DeskSection title="Today">
-          {today.calendar.length === 0 ? (
+          {today.calendar_unread ? (
+            <p className="aman-runtime-rail__desk-note">
+              Couldn't read your calendar just now. If this stays, open Settings, then Connectors, and check Calendar.
+            </p>
+          ) : today.calendar.length === 0 ? (
             <p className="aman-runtime-rail__desk-note">Nothing on the calendar.</p>
           ) : (
             <ul className="aman-runtime-rail__desk-list">
@@ -595,23 +601,21 @@ export const RailChatDesk: FC<{
               <li key={fact.text} className="aman-runtime-rail__desk-fact">
                 <div className="aman-runtime-rail__desk-fact-head">
                   <span className="aman-runtime-rail__desk-fact-text">{fact.shown}</span>
-                  {fact.page === undefined && (
-                    <button
-                      type="button"
-                      className="aman-runtime-rail__desk-pull"
-                      aria-label={`Take this out of this chat: ${fact.shown}`}
-                      title="Not in this chat"
-                      onClick={() => {
-                        pullOut(fact);
-                      }}
-                    >
-                      ×
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="aman-runtime-rail__desk-pull"
+                    aria-label={`Take this out of this chat: ${fact.shown}`}
+                    title="Not in this chat"
+                    onClick={() => {
+                      pullOut(fact);
+                    }}
+                  >
+                    ×
+                  </button>
                 </div>
                 <span className="aman-runtime-rail__desk-fact-origin">
                   {fact.origin}
-                  {deskApi !== undefined && fact.page === undefined && confirming !== fact.text && (
+                  {deskApi !== undefined && confirming !== fact.text && (
                     <button
                       type="button"
                       className="aman-runtime-rail__desk-forget aman-runtime-rail__desk-delete"
@@ -627,7 +631,11 @@ export const RailChatDesk: FC<{
                 </span>
                 {confirming === fact.text && (
                   <div className="aman-runtime-rail__desk-confirm" role="group" aria-label="Delete this memory?">
-                    <span>Delete this memory everywhere? It cannot be brought back.</span>
+                    <span>
+                      {fact.page === undefined
+                        ? 'Delete this memory everywhere? It cannot be brought back.'
+                        : `Delete this line from the page for ${fact.page}? It cannot be brought back.`}
+                    </span>
                     <span className="aman-runtime-rail__desk-confirm-actions">
                       <button
                         type="button"
@@ -665,7 +673,6 @@ export const RailChatDesk: FC<{
             {facts.length === 0
               ? 'Nothing from memory was used for your last message.'
               : 'Used for your last message. The × leaves a memory out of this chat only. Delete removes it everywhere.'}
-            {facts.some(fact => fact.page !== undefined) && ' A line from a page is changed on its page.'}
             {onOpenMemorySettings !== undefined && (
               <>
                 {' '}

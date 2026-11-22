@@ -457,7 +457,7 @@ function tapContextCompactionStreamEvent(sessionId: string, data: TrueForgeApi.T
 
 /**
  * Every `document.ingestion` event this session has recorded, folded to one entry per file per
- * turn (the later of a file's `started`/`finished`/`failed`/`cancelled` events wins) — so a status
+ * turn (the latest of a file's `started`/`finished`/`failed`/`cancelled` events wins) — so a status
  * line can show which files are still being read ('started' with no later event) without the
  * caller re-deriving that from a raw event list. Mirrors `listMemoryTurnContext` above: a direct
  * `client.sessions.listEvents` read, filtered server-side to this one type, not the vendor chat
@@ -473,11 +473,16 @@ export async function listDocumentIngestionTurnContext(
     { limit: 100 },
     { queryParams: { types: ['document.ingestion'] } },
   );
+  // The server lists newest first; fold oldest first so a file's latest phase wins and turns come back in order.
+  const events: { turnId: string; fileName: string; phase: TrueForgeApi.DocumentIngestionEventPhase }[] = [];
   for await (const item of page) {
     if (item.event.type !== 'document.ingestion') continue;
-    const byFile = byTurn.get(item.turnId) ?? new Map<string, DocumentIngestionFileStatus>();
-    byFile.set(item.event.fileName, { fileName: item.event.fileName, phase: item.event.phase });
-    byTurn.set(item.turnId, byFile);
+    events.push({ turnId: item.turnId, fileName: item.event.fileName, phase: item.event.phase });
+  }
+  for (const event of events.reverse()) {
+    const byFile = byTurn.get(event.turnId) ?? new Map<string, DocumentIngestionFileStatus>();
+    byFile.set(event.fileName, { fileName: event.fileName, phase: event.phase });
+    byTurn.set(event.turnId, byFile);
   }
   return [...byTurn.entries()].map(([turnId, byFile]) => ({ turnId, files: [...byFile.values()] }));
 }

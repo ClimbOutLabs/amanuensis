@@ -40,7 +40,7 @@ Sending an email takes two steps, and you approve each one. Aman can't send anyt
    - **Not now** stops it. Nothing is saved.
 4. Tell Aman to send it, such as "Send it". A second card asks "Send this email?" It shows the same email again.
 5. Choose a button on the send card.
-   - **Allow** sends it.
+   - **Send** sends it.
    - **Change it** goes back to the draft step. Aman shows you a new draft, and sends only after you approve that one.
    - **Don't send** stops it. Nothing is sent, and the draft stays in your Drafts folder.
 

@@ -2,15 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { actionIdFor, normalizeCwd } from '../../../src/core/permissions/approvalTokens';
-import {
-  canonicalShellForm,
-  classifyTier,
-  type ClassifyContext,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { canonicalShellForm, classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { type ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import {
   canonicalFileIdentity,
   canonicalWriteTarget,

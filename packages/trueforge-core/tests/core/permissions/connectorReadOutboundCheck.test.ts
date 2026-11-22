@@ -1,9 +1,10 @@
 import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/approvalGrant';
 import { stampSentinelDecision } from '../../../src/core/mcp/ToolSet';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { FIRST_PARTY_TOOL_REASON } from '../../../src/core/permissions/connectorTrust';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { CONNECTOR_READ_GUARD_REASON } from '../../../src/core/permissions/tier';
+import type { ClassifyContext, SentinelAction } from '../../../src/core/permissions/tierTypes';
 import { TOOL_GRANT_REASON } from '../../../src/core/permissions/toolGrants';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 

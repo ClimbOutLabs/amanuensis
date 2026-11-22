@@ -52,7 +52,7 @@ const calendarCard: SentinelApprovalCard = {
     location: 'North pier',
     description: 'Bring the blue blanket.',
     attendees: ['robin@example.test'],
-    guests_emailed: true,
+    guests_line: 'Google will email every guest about this.',
     one_of_repeating: false,
     before: null,
   },

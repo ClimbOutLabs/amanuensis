@@ -32,6 +32,7 @@ import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
 import { createDeliveriesRouter, createPushRouter } from './apis/deliveries';
 import { createEmailAccountRouter, EMAIL_SETTINGS_BASE_PATH } from './apis/emailAccount';
+import { createGoalsRouter } from './apis/goals';
 import { createGoogleRouter } from './apis/google';
 import { createHelpRouter } from './apis/help';
 import { createMapsRouter } from './apis/maps';
@@ -75,6 +76,7 @@ import { createTextNumberRouter } from './apis/textNumber';
 import { createTodayRouter } from './apis/today';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
+import { createRefusedAddressLog } from './auth/addressNotListedPage';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT } from './auth/identity';
@@ -151,6 +153,7 @@ import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
+import type { IGoalStore } from './runtime/goals/goalStorePort';
 import { createMemoryClient } from './runtime/memory/createMemoryClient';
 import type { NightlyMemoryJob } from './runtime/memory/nightlyService';
 import { createVaultClient } from './runtime/memory/vaultClient';
@@ -339,6 +342,8 @@ export interface ServerDeps<TTransaction> {
   spaceStore: ISpaceStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
+  /** The goal store; absent, the Goals API and the goal tools stay off. Supplied by the goal store layer. */
+  goalStore?: IGoalStore<TTransaction> | undefined;
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
@@ -647,6 +652,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         ...(configuration.OIDC !== undefined && getAllowedOrigins().length > 0
           ? { loginPath: new URL(configuration.OIDC.OIDC_ISSUER_URL).pathname.replace(/\/$/, '') }
           : {}),
+        onAddressRefused: createRefusedAddressLog(configuration.REFUSED_ADDRESSES_PATH),
       }),
     );
   }
@@ -870,6 +876,22 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       authMiddleware,
     ),
   );
+  if (deps.goalStore !== undefined) {
+    const goalStore = deps.goalStore;
+    app.route(
+      '/api/v1/goals',
+      withAuth(
+        createGoalsRouter({
+          resolveGoalStore: () => goalStore,
+          resolveAgentStore: deps.resolveAgentStore,
+          resolveSkillStore: deps.resolveSkillStore,
+          resolveSpaceStore: () => deps.spaceStore,
+          resolveRequestContext,
+        }),
+        authMiddleware,
+      ),
+    );
+  }
   app.route(
     '/api/v1/memory/vault',
     withAuth(
@@ -1553,6 +1575,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/sessions',
     withAuth(
       createTurnsRouter({
+        telegramStore: deps.telegramStore,
         turnTimezone: deps.turnTimezone,
         mcpCatalog: deps.mcpCatalog,
         skillCatalog: deps.skillCatalog,
@@ -1586,6 +1609,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         schedules: configuration.STANDALONE
           ? { store: deps.scheduleStore, withTransaction: deps.withTransaction }
           : undefined,
+        goals: configuration.STANDALONE && deps.goalStore !== undefined ? { goalStore: deps.goalStore } : undefined,
       }),
       authMiddleware,
     ),

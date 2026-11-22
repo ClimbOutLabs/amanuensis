@@ -3866,7 +3866,7 @@ describe('Sandbox provider-owned paths', () => {
     expect(exec.mock.calls.filter(call => call[0].command === command)).toHaveLength(1);
   });
 
-  it('rejects evaluator wrappers before approval but permits quoted pipe data', async () => {
+  it('refuses a commit-purpose call that is not a plain git commit, and asks for any wrapped command', async () => {
     const exec = jest.fn(() => readyExec());
     const sandbox = makeSandbox(makeProvider({ exec }));
     const wrapped = {
@@ -3883,8 +3883,15 @@ describe('Sandbox provider-owned paths', () => {
       expect.objectContaining({ is_approval_required: false }),
     );
     const response = await sandbox.callTool(wrapped);
-    expect(JSON.stringify(response)).toContain('command-evaluator wrappers');
+    expect(JSON.stringify(response)).toContain('The commit purpose requires a Git commit command.');
     expect(exec).not.toHaveBeenCalled();
+
+    const listed = await sandbox.toolCallInfo({
+      name: SANDBOX_EXEC_TOOL_NAME,
+      arguments: { intent: 'List files', purpose: 'inspect', command: "bash -c 'ls'", cwd: '/repo' },
+    });
+    expect(listed.pre_dispatch_failure).toBeUndefined();
+    expect(listed).toEqual(expect.objectContaining({ is_approval_required: true, effect: 'execute' }));
 
     await expect(
       sandbox.toolCallInfo({
@@ -3896,7 +3903,7 @@ describe('Sandbox provider-owned paths', () => {
           cwd: '/repo',
         },
       }),
-    ).resolves.toEqual(expect.objectContaining({ is_approval_required: true }));
+    ).resolves.toEqual(expect.objectContaining({ is_approval_required: true, effect: 'verify' }));
   });
 
   it('does not execute a denied command or expose its output', async () => {
@@ -3938,38 +3945,23 @@ describe('Sandbox provider-owned paths', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it('rejects verify-purpose commands with unsafe shell syntax before approval', async () => {
+  it('asks before a verify command whose result it cannot read, and runs it as ordinary execution', async () => {
     const exec = jest.fn(() => readyExec());
     const sandbox = makeSandbox(makeProvider({ exec }));
-    for (const command of ['pnpm test > /tmp/test.log', 'echo $(pnpm test)', 'pnpm test &']) {
-      const wrapped = {
+    for (const command of [
+      'pnpm test > /tmp/test.log',
+      'echo $(pnpm test)',
+      'pnpm test &',
+      "python -c 'import sys; sys.exit(0)'",
+      "node -e 'process.exit(0)'",
+    ]) {
+      const info = await sandbox.toolCallInfo({
         name: SANDBOX_EXEC_TOOL_NAME,
         arguments: { intent: 'Run tests', purpose: 'verify', command, cwd: '/repo' },
-      };
-      await expect(sandbox.toolCallInfo(wrapped)).resolves.toEqual(
-        expect.objectContaining({ is_approval_required: false }),
-      );
-      const response = await sandbox.callTool(wrapped);
-      expect(JSON.stringify(response)).toContain('Verification commands must not use shell redirection');
-    }
-    expect(exec).not.toHaveBeenCalled();
-  });
-
-  it('rejects verify-purpose inline evaluation before approval', async () => {
-    const exec = jest.fn(() => readyExec());
-    const sandbox = makeSandbox(makeProvider({ exec }));
-    for (const command of ["python -c 'import sys; sys.exit(0)'", "node -e 'process.exit(0)'"]) {
-      const wrapped = {
-        name: SANDBOX_EXEC_TOOL_NAME,
-        arguments: { intent: 'Run tests', purpose: 'verify', command, cwd: '/repo' },
-      };
-      await expect(sandbox.toolCallInfo(wrapped)).resolves.toEqual(
-        expect.objectContaining({ is_approval_required: false }),
-      );
-      const response = await sandbox.callTool(wrapped);
-      // The interpreter guard fires before the old verify-purpose screening and
-      // redirects to run_code — still rejected before approval and dispatch.
-      expect(JSON.stringify(response)).toContain('use the run_code tool instead');
+      });
+      expect(info.pre_dispatch_failure).toBeUndefined();
+      // Never counted as a verification, so it cannot authorize a later commit.
+      expect(info).toEqual(expect.objectContaining({ is_approval_required: true, effect: 'execute' }));
     }
     expect(exec).not.toHaveBeenCalled();
   });

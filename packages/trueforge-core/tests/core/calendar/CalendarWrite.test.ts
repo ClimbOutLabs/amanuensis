@@ -143,7 +143,7 @@ describe('the approval card', () => {
       location: '12 Main St',
       description: '',
       attendees: ['lin@example.com', 'sam@example.com'],
-      guests_emailed: true,
+      guests_line: 'Google will email every guest about this.',
       one_of_repeating: false,
       already_created: false,
       span_days: 1,
@@ -168,7 +168,7 @@ describe('the approval card', () => {
       name: 'create_event',
       arguments: { ...DENTIST, attendees: ['lin@example.com'], send_updates: 'none' },
     });
-    expect(info.tier3_card?.calendar_event?.guests_emailed).toBe(false);
+    expect(info.tier3_card?.calendar_event?.guests_line).toBe('Google will not email the guests about this.');
     expect(info.tier3_card?.plain_what).toContain('Guests: lin@example.com. Google does not email them.');
     expect(info.tier3_card?.cannot_be_undone).toBeNull();
   });
@@ -189,7 +189,7 @@ describe('the approval card', () => {
       when: 'Tue Oct 20, 2:00 to 2:30 pm',
       duration: '30 minutes',
       attendees: ['lin@example.com'],
-      guests_emailed: true,
+      guests_line: 'Google will email every guest about this.',
       before: { title: 'Team sync', when: 'Mon Oct 19, 8:00 to 8:30 am', duration: '30 minutes' },
     });
   });

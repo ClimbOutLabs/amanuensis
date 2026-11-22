@@ -6,6 +6,7 @@
 import { createLogger } from 'winston';
 import { z } from 'zod';
 import { RemoteMCP, ToolSet } from '../../../src/core';
+import { McpConnectionError } from '../../../src/core/errors';
 import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { isCallToolResponseResult, toolResultResponse } from '../../../src/core/mcp/IMCPServer';
@@ -61,6 +62,7 @@ class MapLikeTools extends LocalToolMCP {
   private readonly tools: ToolDefinition[] = [
     defineTool({
       name: 'render_map',
+      requiresNetwork: false,
       description: 'Renders a map for a place.',
       schema: z.object({ place_name: z.string() }).strict(),
       handler: (input: { place_name: string }) => {
@@ -70,6 +72,7 @@ class MapLikeTools extends LocalToolMCP {
     }),
     defineTool({
       name: 'render_route',
+      requiresNetwork: false,
       description: 'Renders a route between two places.',
       schema: z.object({ from_place: z.string(), to_place: z.string() }).strict(),
       handler: (input: { from_place: string; to_place: string }) => {
@@ -150,6 +153,18 @@ async function stamp(input: {
     connector: input.connector,
   });
 }
+
+describe('connector sign-in failures', () => {
+  it('reports an authorization refusal as sign-in required', async () => {
+    const server = makeMockIMCPServer({ name: 'notes', preload: false });
+    jest.spyOn(server, 'listTools').mockRejectedValue(new McpConnectionError('upstream returned 401', 401));
+    const deferred = new DeferredTool([server], { tracing: NOOP_AGENT_TRACING, logger: silentLogger });
+    const result = await callToolText(deferred, { mcp_server: 'notes', tool_name: 'search', input: {} });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain('requires sign-in');
+    expect(result.text).not.toContain('not answering');
+  });
+});
 
 describe('call_tool naming a built-in tool', () => {
   const inner = { from_place: 'Chiado, Lisboa', to_place: 'Alfama, Lisboa' };

@@ -7,6 +7,7 @@ export const AuthLoginQuerySchema = z.object({
 
 export const OAuthCallbackQuerySchema = z.object({
   code: z.string().min(1).optional().describe('Authorization code, present when the user granted consent.'),
+  iss: z.string().optional().describe('Issuer of the authorization response, when supplied.'),
   state: z
     .string()
     .min(1)

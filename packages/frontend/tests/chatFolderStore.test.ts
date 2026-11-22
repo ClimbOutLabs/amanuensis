@@ -341,3 +341,37 @@ test('chat folder store stops paging when the server repeats a page token', asyn
   await assert.rejects(store.load(), /invalid session page/);
   assert.equal(sessionRequests, 2);
 });
+
+test('archived chats remain in the full snapshot and can be restored', async () => {
+  let archived = true;
+  const store = createChatFolderStore(async (input, init) => {
+    const url = new URL(String(input), 'http://localhost');
+    if (url.pathname === '/api/v1/session-folders') return Response.json({ data: [] });
+    if (url.pathname === '/api/v1/sessions/chat-1/archive') {
+      assert.equal(init?.method, 'PUT');
+      const body = JSON.parse(String(init?.body));
+      archived = body.archived;
+      return Response.json({});
+    }
+    return Response.json({
+      data: [
+        {
+          ...sessionWire({
+            id: 'chat-1',
+            folderId: null,
+            title: 'Travel plan',
+            updatedAt: '2026-11-17T12:00:00Z',
+            agent: { type: 'inline', spec: { model: { name: 'local' } } },
+          }),
+          metadata: { archived: String(archived) },
+        },
+      ],
+    });
+  });
+  const before = await store.load();
+  assert.deepEqual(before.archivedSessionIds, ['chat-1']);
+  assert.equal(before.unfiledSessions[0]?.sessionId, 'chat-1');
+  assert.ok(store.setSessionArchived);
+  await store.setSessionArchived({ sessionId: 'chat-1', archived: false });
+  assert.deepEqual((await store.load()).archivedSessionIds, []);
+});

@@ -56,16 +56,18 @@ test('the virtual adapters are skipped even when their addresses are private', (
   assert.deepEqual(list.ipv4, ['192.168.1.20']);
 });
 
-test('Tailscale is kept, and its range counts as private only on the Tailscale adapter', () => {
+test('VPN adapters, Tailscale among them, and the 100.64.0.0/10 range are left out on any adapter', () => {
   const list = networkAddressList({
     interfaces: {
       Tailscale: [v4('100.101.102.103'), v6('fd7a:115c:a1e0::abcd')],
+      'ZeroTier One [8056c2e21c000001]': [v4('10.147.17.5')],
+      WireGuard: [v4('10.7.0.2')],
       Ethernet: [v4('100.64.10.5'), v4('192.168.1.20')],
     },
     hostName: 'desktop-abc',
   });
-  assert.deepEqual(list.ipv4, ['100.101.102.103', '192.168.1.20']);
-  assert.deepEqual(list.ipv6, ['fd7a:115c:a1e0::abcd']);
+  assert.deepEqual(list.ipv4, ['192.168.1.20']);
+  assert.deepEqual(list.ipv6, []);
 });
 
 test('public, link-local and loopback addresses are never in the list', () => {
@@ -118,25 +120,13 @@ test('the installer is handed the IPv4 addresses and the name, never the IPv6 ad
   assert.deepEqual(networkInstallAddresses({ ipv4: [], ipv6: [], hostName: null }), []);
 });
 
-test('the Tailscale-range addresses stay in the list but are not handed to the installer', () => {
-  const list = networkAddressList({
-    interfaces: {
-      Tailscale: [v4('100.101.102.103')],
-      Ethernet: [v4('192.168.1.20')],
-    },
-    hostName: 'DESKTOP-ABC',
-  });
-  assert.deepEqual(list.ipv4, ['100.101.102.103', '192.168.1.20']);
-  assert.deepEqual(networkInstallAddresses(list), ['192.168.1.20', 'desktop-abc']);
-});
-
-test('a Tailscale-only computer hands the installer its name and no Tailscale-range address', () => {
+test('a computer with only a VPN address hands the installer its name alone', () => {
   const list = networkAddressList({
     interfaces: {
       Tailscale: [v4('100.101.102.103')],
     },
     hostName: 'DESKTOP-ABC',
   });
-  assert.deepEqual(list.ipv4, ['100.101.102.103']);
+  assert.deepEqual(list.ipv4, []);
   assert.deepEqual(networkInstallAddresses(list), ['desktop-abc']);
 });

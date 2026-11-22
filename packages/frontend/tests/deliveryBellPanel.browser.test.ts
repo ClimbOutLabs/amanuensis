@@ -79,7 +79,14 @@ test(
         await bell.waitFor({ state: 'visible', timeout: FIRST_LOAD_TIMEOUT_MS });
         await bell.click();
         for (const problem of await panelOffScreen(page)) problems.push(`${String(viewport.width)}px: ${problem}`);
-        await page.screenshot({ path: await featureShotPath({ surface: SURFACE, step: String(viewport.width) }) });
+        await page.screenshot({
+          path: await featureShotPath({
+            surface: SURFACE,
+            step: String(viewport.width),
+            did: `Opened Aman on a ${String(viewport.width)} px wide ${viewport.phone ? 'phone' : 'laptop'} and pressed the notifications bell.`,
+            expect: 'The notifications panel is open and all of it is on the screen.',
+          }),
+        });
         await context.close();
       }
       assert.deepEqual(problems, [], 'the open notifications panel stays inside the window');

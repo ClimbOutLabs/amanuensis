@@ -48,7 +48,6 @@ export {
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './classifier';
-export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
@@ -71,8 +70,7 @@ export {
   RENDER_ROUTE_TOOL_NAME,
   isMapsToolName,
 } from './mapsToolNames';
-export { provenanceForToolType, requiresNetwork } from './networkRequirements';
-export type { ToolProvenance } from './networkRequirements';
+export { requiresNetwork } from './networkRequirements';
 export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';
 export type { RunnerWorkflow } from './runner';
 export { DEMO_CONNECTOR_REFUSAL, DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
@@ -102,6 +100,7 @@ export type {
   TierDecision,
   TrackedExecutionBinding,
 } from './tier';
+export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './tierTypes';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './toolGrants';
 export {
   InMemoryTrackedExecutableStore,

@@ -8,6 +8,7 @@ export const TOOL_BUNDLE_NAMES = [
   'spaces',
   'documents',
   'schedules',
+  'goals',
   'sub_agents',
   'extras',
 ] as const;
@@ -53,6 +54,10 @@ const TOOL_BUNDLES: Record<ToolBundleName, ToolBundleSpec> = {
   schedules: {
     summary: 'what schedules can and cannot do',
     aliases: ['schedule', 'recurring', 'automations'],
+  },
+  goals: {
+    summary: 'goals the person asked Aman to keep track of: drafts, checks, evidence, and what is next',
+    aliases: ['goal', 'objectives', 'tracking'],
   },
   sub_agents: {
     summary: 'when and how to hand work to a helper',

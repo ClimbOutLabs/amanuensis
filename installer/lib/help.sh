@@ -2,7 +2,7 @@
 # The words behind `aman help`: a short overview that groups the commands, and a page for each command with its
 # options. Needs ui.sh. Bash 3.2 compatible. Every command the aman shim dispatches has a page here.
 
-HELP_COMMANDS="status upgrade backup restore password doctor import migrate local-model"
+HELP_COMMANDS="status upgrade backup restore password doctor import migrate local-model address"
 
 _help_row() { # name text: a command and what it does, on one line
   _ui_block "  $(_ui_s 1 "$(printf '%-14s' "$1")")" 16 "$2"
@@ -33,6 +33,7 @@ help_overview() {
   _help_row migrate "Move over an Aman installed the older way"
   ui_heading "Advanced"
   _help_row local-model "Let Aman use a model running on this computer"
+  _help_row address "Let Aman answer at another address, such as a VPN"
   ui_gap
   ui_line "To see every option of a command, add its name:"
   ui_command "aman help doctor"
@@ -110,6 +111,18 @@ help_command() {
         "aman local-model PORT [--instance NAME] [--remove]"
       _help_option "--remove" "Take the port away"
       _help_option "--instance NAME" "Which instance, if you have more than one"
+      ;;
+    address)
+      _help_page address "Shows, adds or removes the addresses Aman answers at, besides this computer and your home network." \
+        "aman address list [--instance NAME]" \
+        "aman address add ADDRESS [--instance NAME]" \
+        "aman address remove ADDRESS [--instance NAME]"
+      _help_option "--instance NAME" "Which instance, if you have more than one"
+      ui_heading "Addresses"
+      ui_line "An address of this computer, such as a VPN address: Aman listens there too."
+      ui_line "A name: Aman answers to it."
+      ui_line "A full address such as https://aman.example.com: another program passes visitors on to Aman."
+      ui_hint "Public addresses are refused."
       ;;
     *) return 1 ;;
   esac

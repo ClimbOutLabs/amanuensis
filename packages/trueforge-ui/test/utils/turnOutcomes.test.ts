@@ -159,6 +159,52 @@ describe('turnOutcomeLines', () => {
     expect(turnOutcomeLines([five])).toEqual(['Email sent to a@example.com, b@example.com, c@example.com and 2 more']);
   });
 
+  it('names everyone a send reached, the copied and the hidden copied alike', () => {
+    const part = toolPart({
+      toolName: 'send_email',
+      args: {
+        recipients: ['dana@example.com'],
+        cc: ['sam@example.com'],
+        bcc: ['lee@example.com'],
+        subject: 'Friday',
+        body: 'See you then.',
+      },
+      result: envelope(mcpText({ message_id: 'msg-1' })),
+    });
+    expect(turnOutcomeLines([part])).toEqual(['Email sent to dana@example.com, sam@example.com and lee@example.com']);
+  });
+
+  it('counts everyone a send reached when there are more than three, copies included', () => {
+    const part = toolPart({
+      toolName: 'send_email',
+      args: {
+        recipients: ['a@example.com', 'b@example.com'],
+        cc: ['c@example.com'],
+        bcc: ['d@example.com', 'e@example.com'],
+      },
+      result: envelope(mcpText({})),
+    });
+    expect(turnOutcomeLines([part])).toEqual(['Email sent to a@example.com, b@example.com, c@example.com and 2 more']);
+  });
+
+  it('names a copied recipient when a send names nobody in its To list', () => {
+    const part = toolPart({
+      toolName: 'send_email',
+      args: { cc: ['sam@example.com'] },
+      result: envelope(mcpText({})),
+    });
+    expect(turnOutcomeLines([part])).toEqual(['Email sent to sam@example.com']);
+  });
+
+  it('names a saved draft by its To list alone, copies left for the send line', () => {
+    const part = toolPart({
+      toolName: 'save_draft',
+      args: { recipients: ['dana@example.com'], cc: ['sam@example.com'], subject: 'Lease', body: 'See the lease.' },
+      result: envelope(mcpText({ draft_id: 'd-1' })),
+    });
+    expect(turnOutcomeLines([part])).toEqual(['Draft saved for dana@example.com']);
+  });
+
   it('names a saved draft by who it is for, on both mail tools', () => {
     const connector = toolPart({
       toolName: 'save_draft',

@@ -1,12 +1,12 @@
-import {
-  classifyTier,
-  type ClassifyContext,
-  type ReminderLine,
-  type ScheduleStatusReview,
-  type SentinelAction,
-} from '../../../src/core/permissions/classifier';
+import { classifyTier } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, forUnattendedRun } from '../../../src/core/permissions/context';
 import type { Tier3Schedule } from '../../../src/core/permissions/tier';
+import type {
+  ClassifyContext,
+  ReminderLine,
+  ScheduleStatusReview,
+  SentinelAction,
+} from '../../../src/core/permissions/tierTypes';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(): ClassifyContext {

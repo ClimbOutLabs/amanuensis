@@ -1,6 +1,6 @@
 /**
- * The local sign-in pages Aman serves itself: the first-run create form and the
- * sign-in form. Plain pages with no script, in the shape of the sign-in form the
+ * The local sign-in pages Aman serves itself: the first-run page that says where the sign-in
+ * is made, and the sign-in form. Plain pages with no script, in the shape of the sign-in form the
  * installed path shows, so the two ways in feel the same.
  */
 
@@ -27,7 +27,7 @@ const PAGE_STYLE = `
   button { width: 100%; margin-top: 1.25rem; font-size: 1rem; padding: 0.625rem; border: 0; border-radius: 0.375rem; background: #1c1a17; color: #ffffff; cursor: pointer; }
 `;
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -64,21 +64,16 @@ function returnToField(returnTo: string): string {
   return returnTo === '' ? '' : `<input type="hidden" name="return_to" value="${escapeHtml(returnTo)}">\n`;
 }
 
-/** First run, while no local user exists: email and a password typed twice. The form posts to the create path. */
-export function localCreateAccountPage(params: { returnTo: string; email?: string; error?: string }): string {
-  const body = `<h1>Create your sign-in</h1>
-<p>This sign-in belongs to this Aman on this computer. There is only one, and it can change every setting.</p>
-${errorLine(params.error)}<form method="post" action="create-account">
-${returnToField(params.returnTo)}<label for="email">Email</label>
-<input id="email" name="email" type="email" autocomplete="username" required value="${escapeHtml(params.email ?? '')}">
-<label for="password">Password</label>
-<input id="password" name="password" type="password" autocomplete="new-password" required>
-<p class="hint">At least 8 characters.</p>
-<label for="password_confirm">Type the password again</label>
-<input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required>
-<button type="submit">Create sign-in</button>
-</form>`;
-  return page({ title: 'Create your sign-in', body });
+/**
+ * First run, while no local user exists. There is no form: the sign-in is made only in a
+ * terminal on the computer that runs Aman, so nobody who merely reaches this page can claim it.
+ */
+export function localNoAccountPage(): string {
+  const body = `<h1>Set up your sign-in</h1>
+<p>This Aman has no sign-in yet. You make it on the computer that runs Aman, not in the browser.</p>
+<p>Open a terminal on that computer and run <code>npx amanuensis --create-account</code>. Then reload this page.</p>
+<p class="hint">Starting Aman with <code>npx amanuensis</code> asks for it the first time. From a copy of the code, run <code>pnpm create-account</code>.</p>`;
+  return page({ title: 'Set up your sign-in', body });
 }
 
 /** The everyday form, with the one line that says how a forgotten password is reset. */

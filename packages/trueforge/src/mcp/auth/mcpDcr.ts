@@ -1,12 +1,13 @@
 import {
-  discoverOAuthServerInfo,
+  discoverAuthorizationServerMetadata,
+  discoverOAuthProtectedResourceMetadata,
   exchangeAuthorization,
   refreshAuthorization,
   registerClient,
   startAuthorization,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import { InvalidClientError, InvalidClientMetadataError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
-import { resourceUrlFromServerUrl } from '@modelcontextprotocol/sdk/shared/auth-utils.js';
+import { checkResourceAllowed, resourceUrlFromServerUrl } from '@modelcontextprotocol/sdk/shared/auth-utils.js';
 import type {
   AuthorizationServerMetadata,
   OAuthClientMetadata,
@@ -49,7 +50,7 @@ export const MCP_OAUTH_HTTP_TIMEOUT_MS = 15_000;
  * flows' error wrapping leaves its message, which already says what happened, as the answer.
  */
 export class McpOAuthAddressRefusedError extends McpConnectionError {
-  constructor(problem: RemoteUrlProblem | 'redirect' | 'bad-redirect') {
+  constructor(problem: RemoteUrlProblem | 'redirect' | 'bad-redirect' | 'post-redirect') {
     super(
       problem === 'blocked'
         ? "Sign-in stopped. The address this connector's server named for sign-in is one the server may not connect to. Use a connector whose sign-in address is on the internet or your home network."
@@ -57,9 +58,11 @@ export class McpOAuthAddressRefusedError extends McpConnectionError {
           ? "Sign-in stopped. The address this connector's server named for sign-in did not resolve, so the server cannot check it. Try again, or check the connector's address in Settings."
           : problem === 'invalid'
             ? "Sign-in stopped. The address this connector's server named for sign-in is not a full http or https address."
-            : problem === 'bad-redirect'
-              ? 'Sign-in stopped. The sign-in address answered with a redirect that does not name an http or https address.'
-              : 'Sign-in stopped. The sign-in address kept redirecting.',
+            : problem === 'post-redirect'
+              ? 'Sign-in stopped because the sign-in server redirected a request containing credentials. Check the connector settings.'
+              : problem === 'bad-redirect'
+                ? 'Sign-in stopped. The sign-in address answered with a redirect that does not name an http or https address.'
+                : 'Sign-in stopped. The sign-in address kept redirecting.',
       422,
     );
     this.name = 'McpOAuthAddressRefusedError';
@@ -79,13 +82,31 @@ export class McpOAuthAddressRefusedError extends McpConnectionError {
  */
 export async function dialMcpOAuthUrl(url: string | URL, init: RequestInit): Promise<Response> {
   const start = new URL(url);
+  if (start.protocol !== 'https:') {
+    throw new McpConnectionError('Sign-in requires a secure service address. Check the connector settings.', 422);
+  }
   const startProblem = await remoteUrlProblem({ url: start.href });
   if (startProblem !== null) {
     throw new McpOAuthAddressRefusedError(startProblem);
   }
   const checkedFetch = withCheckedRedirects(
-    (input, hopInit) => fetch(input, hopInit),
+    async (input, hopInit) => {
+      const response = await fetch(input, hopInit);
+      if (
+        hopInit?.method !== undefined &&
+        hopInit.method.toUpperCase() !== 'GET' &&
+        response.status >= 300 &&
+        response.status < 400
+      ) {
+        await response.body?.cancel();
+        throw new McpOAuthAddressRefusedError('post-redirect');
+      }
+      return response;
+    },
     async target => {
+      if (new URL(target).protocol !== 'https:') {
+        throw new McpConnectionError('Sign-in requires a secure service address. Check the connector settings.', 422);
+      }
       const problem = await remoteUrlProblem({ url: target });
       if (problem !== null) {
         throw new McpOAuthAddressRefusedError(problem);
@@ -127,12 +148,76 @@ function mcpOAuthConnectionError(message: string, error: unknown, statusCode: nu
   return new McpConnectionError(body, statusCode, { cause: error });
 }
 
+async function discoverMcpServerInfo(params: { mcpServerUrl: string; resourceMetadataUrl?: string | undefined }) {
+  const { mcpServerUrl, resourceMetadataUrl } = params;
+  // Do not treat malformed or unreachable metadata as an invitation to trust another issuer.
+  let resourceMetadata;
+  try {
+    resourceMetadata = await discoverOAuthProtectedResourceMetadata(
+      mcpServerUrl,
+      { ...(resourceMetadataUrl !== undefined ? { resourceMetadataUrl } : {}) },
+      mcpOAuthFetch,
+    );
+  } catch (error) {
+    if (
+      resourceMetadataUrl !== undefined ||
+      !(error instanceof Error) ||
+      error.message !== 'Resource server does not implement OAuth 2.0 Protected Resource Metadata.'
+    ) {
+      throw error;
+    }
+  }
+  if (resourceMetadata) {
+    if (
+      !checkResourceAllowed({
+        requestedResource: resourceUrlFromServerUrl(mcpServerUrl),
+        configuredResource: resourceMetadata.resource,
+      })
+    ) {
+      throw new Error('Protected resource does not match the connector address');
+    }
+  }
+  const authorizationServerUrl = resourceMetadata?.authorization_servers?.[0] ?? String(new URL('/', mcpServerUrl));
+  const authorizationServerMetadata = await discoverAuthorizationServerMetadata(authorizationServerUrl, {
+    fetchFn: mcpOAuthFetch,
+  });
+  if (
+    authorizationServerMetadata &&
+    new URL(authorizationServerMetadata.authorization_endpoint).protocol !== 'https:'
+  ) {
+    throw new Error('Authorization endpoint must use HTTPS');
+  }
+  if (authorizationServerMetadata) {
+    const problem = await remoteUrlProblem({ url: authorizationServerMetadata.authorization_endpoint });
+    if (problem !== null) {
+      throw new McpOAuthAddressRefusedError(problem);
+    }
+  }
+  if (authorizationServerMetadata && authorizationServerMetadata.issuer !== authorizationServerUrl) {
+    throw new Error('Authorization server issuer does not match its discovery address');
+  }
+  return { authorizationServerUrl, authorizationServerMetadata, resourceMetadata };
+}
+
 export function isMcpAuthRequired(result: ResolveMcpAuthResult): result is McpAuthRequiredResult {
   return 'authUrl' in result;
 }
 
+function revocationMetadata(metadata: AuthorizationServerMetadata): OAuthClientRecord['server']['revocation'] {
+  const endpoint: unknown = Reflect.get(metadata, 'revocation_endpoint');
+  if (typeof endpoint !== 'string') {
+    return null;
+  }
+  const methods: unknown = Reflect.get(metadata, 'revocation_endpoint_auth_methods_supported');
+  return {
+    endpoint,
+    authMethods: Array.isArray(methods) && methods.every(method => typeof method === 'string') ? methods : null,
+  };
+}
+
 async function registerMcpClientWithAuthMethodFallback(params: {
   authorizationServerUrl: string;
+  resource: string | null;
   metadata: AuthorizationServerMetadata;
   clientMetadata: OAuthClientMetadata;
   mcpServerName: string;
@@ -141,11 +226,21 @@ async function registerMcpClientWithAuthMethodFallback(params: {
 }): Promise<OAuthClientRecord> {
   const { authorizationServerUrl, metadata, clientMetadata, mcpServerName, authorizationEndpoint, tokenEndpoint } =
     params;
+  const methods = metadata.token_endpoint_auth_methods_supported;
+  const requestedMethod = methods?.includes('client_secret_post')
+    ? 'client_secret_post'
+    : methods?.includes('none')
+      ? 'none'
+      : 'client_secret_basic';
   let fullInfo;
+  let fallback = false;
   try {
     fullInfo = await registerClient(authorizationServerUrl, {
       metadata,
-      clientMetadata: { ...clientMetadata, token_endpoint_auth_method: 'client_secret_post' },
+      clientMetadata: {
+        ...clientMetadata,
+        token_endpoint_auth_method: requestedMethod,
+      },
       fetchFn: mcpOAuthFetch,
     });
   } catch (firstError: unknown) {
@@ -160,6 +255,7 @@ async function registerMcpClientWithAuthMethodFallback(params: {
       );
     }
     try {
+      fallback = true;
       fullInfo = await registerClient(authorizationServerUrl, {
         metadata,
         clientMetadata,
@@ -182,8 +278,21 @@ async function registerMcpClientWithAuthMethodFallback(params: {
       424,
     );
   }
+  const method =
+    fullInfo.token_endpoint_auth_method ??
+    (fullInfo.client_secret ? (fallback ? 'client_secret_basic' : requestedMethod) : 'none');
+  if (method !== 'none' && method !== 'client_secret_basic' && method !== 'client_secret_post') {
+    throw new McpDcrConfigurationError('The service requires a sign-in method Aman does not support.');
+  }
+  if (method !== 'none' && !fullInfo.client_secret) {
+    throw new McpDcrConfigurationError('The service did not provide its sign-in secret. Try connecting again.');
+  }
   return {
     server: {
+      issuer: metadata.issuer,
+      issuerResponseRequired: Reflect.get(metadata, 'authorization_response_iss_parameter_supported') === true,
+      resource: params.resource,
+      revocation: revocationMetadata(metadata),
       authorizationEndpoint,
       tokenEndpoint,
       codeChallengeMethodsSupported: metadata.code_challenge_methods_supported ?? null,
@@ -191,6 +300,7 @@ async function registerMcpClientWithAuthMethodFallback(params: {
     client: {
       clientId: fullInfo.client_id,
       clientSecret: fullInfo.client_secret ?? null,
+      tokenAuthMethod: method,
     },
   };
 }
@@ -202,15 +312,21 @@ async function registerMcpClientWithAuthMethodFallback(params: {
 async function discoverMcpAuthorizationServerMetadata(params: {
   mcpServerUrl: string;
   mcpServerName: string;
+  resourceMetadataUrl?: string | undefined;
 }): Promise<{
+  issuer: string | null;
+  issuerResponseRequired: boolean;
+  resource: string | null;
+  revocation: { endpoint: string; authMethods: string[] | null } | null;
+  tokenAuthMethods: string[] | null;
   authorizationEndpoint: string;
   tokenEndpoint: string;
   codeChallengeMethodsSupported: string[] | null;
 }> {
   const { mcpServerUrl, mcpServerName } = params;
-  let discovered: Awaited<ReturnType<typeof discoverOAuthServerInfo>>;
+  let discovered: Awaited<ReturnType<typeof discoverMcpServerInfo>>;
   try {
-    discovered = await discoverOAuthServerInfo(mcpServerUrl, { fetchFn: mcpOAuthFetch });
+    discovered = await discoverMcpServerInfo({ mcpServerUrl, resourceMetadataUrl: params.resourceMetadataUrl });
   } catch (error: unknown) {
     if (error instanceof McpOAuthAddressRefusedError) {
       throw error;
@@ -239,6 +355,11 @@ async function discoverMcpAuthorizationServerMetadata(params: {
     );
   }
   return {
+    issuer: metadata.issuer,
+    issuerResponseRequired: Reflect.get(metadata, 'authorization_response_iss_parameter_supported') === true,
+    resource: discovered.resourceMetadata?.resource ?? null,
+    revocation: revocationMetadata(metadata),
+    tokenAuthMethods: metadata.token_endpoint_auth_methods_supported ?? null,
     authorizationEndpoint: metadata.authorization_endpoint,
     tokenEndpoint: metadata.token_endpoint,
     codeChallengeMethodsSupported: pkceMethods ?? null,
@@ -256,11 +377,12 @@ export async function createMcpOAuthClient(params: {
   /** Registered together; the first is the one this request uses. */
   redirectUris: string[];
   clientName: string;
+  resourceMetadataUrl?: string | undefined;
 }): Promise<OAuthClientRecord> {
   const { mcpServerUrl, mcpServerName, redirectUris, clientName } = params;
-  let discovered: Awaited<ReturnType<typeof discoverOAuthServerInfo>>;
+  let discovered: Awaited<ReturnType<typeof discoverMcpServerInfo>>;
   try {
-    discovered = await discoverOAuthServerInfo(mcpServerUrl, { fetchFn: mcpOAuthFetch });
+    discovered = await discoverMcpServerInfo({ mcpServerUrl, resourceMetadataUrl: params.resourceMetadataUrl });
   } catch (error: unknown) {
     if (error instanceof McpOAuthAddressRefusedError) {
       throw error;
@@ -291,6 +413,7 @@ export async function createMcpOAuthClient(params: {
   const register = (uris: string[]): Promise<OAuthClientRecord> =>
     registerMcpClientWithAuthMethodFallback({
       authorizationServerUrl,
+      resource: discovered.resourceMetadata?.resource ?? null,
       metadata,
       clientMetadata: {
         client_name: clientName,
@@ -326,16 +449,35 @@ async function createMcpOAuthClientFromManifest(params: {
   clientSecret: string;
   mcpServerUrl: string;
   mcpServerName: string;
+  resourceMetadataUrl?: string | undefined;
 }): Promise<OAuthClientRecord> {
   const metadata = await discoverMcpAuthorizationServerMetadata({
     mcpServerUrl: params.mcpServerUrl,
     mcpServerName: params.mcpServerName,
+    resourceMetadataUrl: params.resourceMetadataUrl,
   });
+  const tokenAuthMethod = metadata.tokenAuthMethods?.includes('client_secret_post')
+    ? 'client_secret_post'
+    : 'client_secret_basic';
+  if (metadata.tokenAuthMethods !== null && !metadata.tokenAuthMethods.includes(tokenAuthMethod)) {
+    throw new McpDcrConfigurationError(
+      'The service does not support the configured sign-in method. Check the connector settings.',
+    );
+  }
   return {
-    server: metadata,
+    server: {
+      issuer: metadata.issuer,
+      issuerResponseRequired: metadata.issuerResponseRequired,
+      resource: metadata.resource,
+      revocation: metadata.revocation,
+      authorizationEndpoint: metadata.authorizationEndpoint,
+      tokenEndpoint: metadata.tokenEndpoint,
+      codeChallengeMethodsSupported: metadata.codeChallengeMethodsSupported,
+    },
     client: {
       clientId: params.clientId,
       clientSecret: params.clientSecret,
+      tokenAuthMethod,
     },
   };
 }
@@ -343,7 +485,7 @@ async function createMcpOAuthClientFromManifest(params: {
 /**
  * Returns the stored OAuth client for `serverId`, or discovers + creates one via DCR or oauth_client.
  * For DCR: discovers + registers and persists a new client.
- * For oauth_client: discovers metadata and builds client from manifest credentials without persisting the client.
+ * For oauth_client: stores the configured credentials for the callback.
  * Used from `resolveMcpAuth` only — callers that already hold the client should pass it through.
  */
 export async function ensureMcpClientRegistered(params: {
@@ -353,11 +495,16 @@ export async function ensureMcpClientRegistered(params: {
   mcpServerName: string;
   clientName: string;
   authType: 'dcr' | 'oauth_client';
+  resourceMetadataUrl?: string | undefined;
   oauthClientId?: string | undefined;
   oauthClientSecret?: string | undefined;
 }): Promise<OAuthClientRecord> {
   const existing = await params.mcpServerStore.getClient({ id: params.serverId });
-  if (existing) {
+  if (
+    existing &&
+    (params.authType === 'dcr' ||
+      (existing.client.clientId === params.oauthClientId && existing.client.clientSecret === params.oauthClientSecret))
+  ) {
     return existing;
   }
   if (params.authType === 'oauth_client') {
@@ -367,18 +514,22 @@ export async function ensureMcpClientRegistered(params: {
         400,
       );
     }
-    return createMcpOAuthClientFromManifest({
+    const client = await createMcpOAuthClientFromManifest({
       clientId: params.oauthClientId,
       clientSecret: params.oauthClientSecret,
       mcpServerUrl: params.mcpServerUrl,
       mcpServerName: params.mcpServerName,
+      resourceMetadataUrl: params.resourceMetadataUrl,
     });
+    await params.mcpServerStore.saveClient({ id: params.serverId, record: client });
+    return client;
   }
   const client = await createMcpOAuthClient({
     mcpServerUrl: params.mcpServerUrl,
     mcpServerName: params.mcpServerName,
     redirectUris: mcpOAuthRedirectUris(),
     clientName: params.clientName,
+    resourceMetadataUrl: params.resourceMetadataUrl,
   });
   await params.mcpServerStore.saveClient({ id: params.serverId, record: client });
   return client;
@@ -393,6 +544,7 @@ export async function buildMcpAuthorizationUrl(params: {
   mcpServerUrl: string;
   mcpServerName: string;
   returnTo?: string;
+  scope?: string | undefined;
 }): Promise<{ authorizationUrl: URL; state: string }> {
   const state = generateOAuthState();
   const redirectUri = mcpOAuthCallbackUrl();
@@ -402,8 +554,9 @@ export async function buildMcpAuthorizationUrl(params: {
       metadata: mcpAuthorizationServerMetadata(params.client.server),
       clientInformation: mcpClientInformation(params.client.client),
       redirectUrl: redirectUri,
-      resource: resourceUrlFromServerUrl(params.mcpServerUrl),
+      resource: params.client.server.resource ?? resourceUrlFromServerUrl(params.mcpServerUrl),
       state,
+      ...(params.scope !== undefined ? { scope: params.scope } : {}),
     });
   } catch (error: unknown) {
     throw new McpConnectionError(`Failed to start OAuth authorization for MCP server '${params.mcpServerName}'`, 424, {
@@ -416,6 +569,7 @@ export async function buildMcpAuthorizationUrl(params: {
     userRef: params.userRef,
     mcpServerUrl: params.mcpServerUrl,
     codeVerifier: started.codeVerifier,
+    redirectUri,
     returnTo: params.returnTo ?? null,
   });
   return { authorizationUrl: started.authorizationUrl, state };
@@ -430,14 +584,17 @@ export async function resolveMcpAuth(params: {
   mcpServerName: string;
   clientName: string;
   authType: 'dcr' | 'oauth_client';
+  resourceMetadataUrl?: string | undefined;
   oauthClientId?: string;
   oauthClientSecret?: string;
   returnTo?: string;
+  scope?: string | undefined;
+  forceRefresh?: boolean | undefined;
 }): Promise<ResolveMcpAuthResult> {
   const nowMs = Date.now();
   const tokenKey = { id: params.serverId, userRef: params.userRef };
   const token = await params.tokenStore.getToken(tokenKey);
-  if (token && isOAuthAccessTokenUsable(token.expiresAt, nowMs)) {
+  if (token && !params.forceRefresh && isOAuthAccessTokenUsable(token.expiresAt, nowMs)) {
     return { headers: { Authorization: `Bearer ${token.accessToken}` } };
   }
   const client = await ensureMcpClientRegistered({
@@ -447,6 +604,7 @@ export async function resolveMcpAuth(params: {
     mcpServerName: params.mcpServerName,
     clientName: params.clientName,
     authType: params.authType,
+    resourceMetadataUrl: params.resourceMetadataUrl,
     oauthClientId: params.oauthClientId,
     oauthClientSecret: params.oauthClientSecret,
   });
@@ -456,7 +614,7 @@ export async function resolveMcpAuth(params: {
         metadata: mcpAuthorizationServerMetadata(client.server),
         clientInformation: mcpClientInformation(client.client),
         refreshToken: token.refreshToken,
-        resource: resourceUrlFromServerUrl(params.mcpServerUrl),
+        resource: client.server.resource ?? resourceUrlFromServerUrl(params.mcpServerUrl),
         fetchFn: mcpOAuthFetch,
       });
       const saved = oauthTokensToOAuthToken(refreshed, nowMs, token.refreshToken);
@@ -476,6 +634,7 @@ export async function resolveMcpAuth(params: {
     userRef: params.userRef,
     mcpServerUrl: params.mcpServerUrl,
     mcpServerName: params.mcpServerName,
+    scope: params.scope,
     ...(params.returnTo !== undefined ? { returnTo: params.returnTo } : {}),
   });
   return { authUrl };
@@ -506,6 +665,9 @@ export async function completeMcpAuthorization<TTransaction>(params: {
   if (pending.codeVerifier === null) {
     throw new McpConnectionError('Pending authorization is missing PKCE code_verifier; re-run authorize', 400);
   }
+  if (pending.redirectUri !== null && pending.redirectUri !== mcpOAuthCallbackUrl()) {
+    throw new McpConnectionError('Sign-in returned to a different address. Start connecting again.', 400);
+  }
   let tokens: OAuthTokens;
   try {
     tokens = await exchangeAuthorization(mcpAuthorizationServerOrigin(client.server), {
@@ -513,8 +675,8 @@ export async function completeMcpAuthorization<TTransaction>(params: {
       clientInformation: mcpClientInformation(client.client),
       authorizationCode: params.code,
       codeVerifier: pending.codeVerifier,
-      redirectUri: mcpOAuthCallbackUrl(),
-      resource: resourceUrlFromServerUrl(pending.mcpServerUrl),
+      redirectUri: pending.redirectUri ?? mcpOAuthCallbackUrl(),
+      resource: client.server.resource ?? resourceUrlFromServerUrl(pending.mcpServerUrl),
       fetchFn: mcpOAuthFetch,
     });
   } catch (error: unknown) {
@@ -534,4 +696,60 @@ export async function completeMcpAuthorization<TTransaction>(params: {
     userRef: pending.userRef,
     token: oauthTokensToOAuthToken(tokens, nowMs, null),
   });
+}
+
+/** Revoke the refresh and access tokens when the service publishes a revocation endpoint. */
+export async function revokeMcpTokens(params: {
+  client: OAuthClientRecord;
+  accessToken: string;
+  refreshToken: string | null;
+}): Promise<void> {
+  const revocation = params.client.server.revocation;
+  if (revocation === null) {
+    return;
+  }
+  const { clientId, clientSecret } = params.client.client;
+  const methods = revocation.authMethods;
+  const method =
+    clientSecret === null
+      ? 'none'
+      : methods === null || methods.includes('client_secret_basic')
+        ? 'client_secret_basic'
+        : 'client_secret_post';
+  if (methods !== null && !methods.includes(method)) {
+    throw new McpConnectionError('Could not sign out at the service. Remove access in the service settings.', 424);
+  }
+  for (const [token, tokenType] of [
+    [params.refreshToken, 'refresh_token'],
+    [params.accessToken, 'access_token'],
+  ]) {
+    if (token === null || token === undefined) {
+      continue;
+    }
+    const form = new URLSearchParams({ token, token_type_hint: tokenType ?? 'access_token' });
+    const headers = new Headers({ 'content-type': 'application/x-www-form-urlencoded' });
+    if (method === 'client_secret_basic' && clientSecret !== null) {
+      const encode = (value: string): string => new URLSearchParams({ v: value }).toString().slice(2);
+      headers.set(
+        'authorization',
+        `Basic ${Buffer.from(`${encode(clientId)}:${encode(clientSecret)}`).toString('base64')}`,
+      );
+    } else {
+      form.set('client_id', clientId);
+      if (method === 'client_secret_post' && clientSecret !== null) {
+        form.set('client_secret', clientSecret);
+      }
+    }
+    try {
+      const response = await mcpOAuthFetch(revocation.endpoint, { method: 'POST', headers, body: form });
+      await response.body?.cancel();
+      if (!response.ok) {
+        throw new Error('revocation refused');
+      }
+    } catch (error) {
+      throw new McpConnectionError('Could not sign out at the service. Remove access in the service settings.', 424, {
+        cause: error,
+      });
+    }
+  }
 }

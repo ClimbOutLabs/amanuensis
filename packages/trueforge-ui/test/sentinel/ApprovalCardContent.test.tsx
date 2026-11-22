@@ -79,7 +79,7 @@ describe('approval card content', () => {
     expect(screen.getByText('Lease')).toBeInTheDocument();
     expect(screen.getByText('Thursday works.')).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/gmail_send|send_draft|exec_shell/);
     expect(container.querySelector('.uppercase')).toBeNull();
@@ -127,7 +127,7 @@ describe('approval card content', () => {
           location: 'Cafe',
           description: '',
           attendees: ['ana@example.com'],
-          guests_emailed: true,
+          guests_line: 'Google will email every guest about this.',
           one_of_repeating: false,
           before: null,
         },

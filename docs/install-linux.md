@@ -1,6 +1,6 @@
 # Install on Linux
 
-This guide installs the latest release of Aman on Ubuntu or Debian. It takes about 45 minutes. Most of that is waiting while things download and build. You answer a few questions and choose a password at the start. Later, you type your computer password when a step needs it.
+This guide installs the latest release of Aman on Ubuntu or Debian. It may take a while, depending on your internet connection. Most of that is waiting while things download and build. You answer a few questions and choose a password at the start. Later, you type your computer password when a step needs it.
 
 Using another computer? Follow [Install on a Mac](install-mac.md) or [Install on Windows](install-windows.md) instead.
 

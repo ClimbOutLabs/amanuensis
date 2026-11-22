@@ -3,7 +3,15 @@ import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
 import { collect, DEFAULT_CONFIG, makeClient, makeExecution, makeLogger } from './memoryCapabilityTestKit';
 
 /** The day the memory step hands the page loader, for one instant and time zone. */
-async function dayHandedOver({ instant, timeZone }: { instant: string; timeZone: string }): Promise<unknown> {
+async function dayHandedOver({
+  instant,
+  timeZone,
+  pulled = [],
+}: {
+  instant: string;
+  timeZone: string;
+  pulled?: string[];
+}): Promise<unknown> {
   jest.useFakeTimers({
     now: new Date(instant),
     doNotFake: ['hrtime', 'nextTick', 'performance', 'queueMicrotask', 'setImmediate', 'setInterval', 'setTimeout'],
@@ -22,6 +30,7 @@ async function dayHandedOver({ instant, timeZone }: { instant: string; timeZone:
       sessionId: 's1',
       previousTurnId: null,
       timeZone,
+      loadRecallExclusions: () => Promise.resolve(pulled),
     });
     const processor = capability.preLLMProcessors?.[0];
     if (processor === undefined) {
@@ -52,5 +61,14 @@ describe('what the memory step hands the page loader', () => {
     });
     const tokyo = await dayHandedOver({ instant: '2026-11-10T23:30:00Z', timeZone: 'Asia/Tokyo' });
     expect(tokyo).toMatchObject({ today: '2026-11-11' });
+  });
+
+  it('gives the lines this chat pulled out, so a page does not show them', async () => {
+    const handed = await dayHandedOver({
+      instant: '2026-11-10T23:30:00Z',
+      timeZone: 'UTC',
+      pulled: ['Nora cannot eat peanuts.'],
+    });
+    expect(handed).toMatchObject({ exclusions: new Set(['Nora cannot eat peanuts.']) });
   });
 });
