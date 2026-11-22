@@ -554,6 +554,7 @@ export * from "./SessionSourceSchedule.js";
 export * from "./SessionSourceType.js";
 export * from "./SetDefaultCalendarAccountResponse.js";
 export * from "./SetDefaultEmailAccountResponse.js";
+export * from "./SetSessionArchiveResponse.js";
 export * from "./SetSessionFolderResponse.js";
 export * from "./SetSpaceFolderResponse.js";
 export * from "./SettingsCapability.js";

@@ -7,6 +7,8 @@ import {
   GetSessionFolderResponseSchema,
   ListSessionFoldersResponseSchema,
   SessionFolderIdParamsSchema,
+  SetSessionArchiveRequestSchema,
+  SetSessionArchiveResponseSchema,
   SetSessionFolderRequestSchema,
   SetSessionFolderResponseSchema,
   UpdateSessionFolderRequestSchema,
@@ -145,6 +147,38 @@ export const clearSessionFolderRoute = createRoute({
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Session not found.',
+    },
+  },
+});
+
+export const setSessionArchiveRoute = createRoute({
+  method: 'put',
+  path: '/{session_id}/archive',
+  tags: [OpenApiTag.AGENT_SESSIONS],
+  summary: 'Archive or restore a chat',
+  description: 'Hides a chat from the everyday list or restores it. Its messages remain searchable.',
+  'x-fern-sdk-group-name': ['sessions'],
+  'x-fern-sdk-method-name': 'set_archive',
+  request: {
+    params: SessionIdParamsSchema,
+    body: { content: { 'application/json': { schema: SetSessionArchiveRequestSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: SetSessionArchiveResponseSchema } },
+      description: 'Archive preference saved.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Caller is not the chat owner.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Chat not found.',
+    },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Incognito chats cannot be archived.',
     },
   },
 });

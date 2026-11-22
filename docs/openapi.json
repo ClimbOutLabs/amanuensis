@@ -13184,6 +13184,22 @@
         ],
         "type": "object"
       },
+      "SetSessionArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "archived"
+        ],
+        "type": "object"
+      },
+      "SetSessionArchiveResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "SetSessionFolderRequest": {
         "additionalProperties": false,
         "properties": {
@@ -25491,6 +25507,85 @@
           "sessions"
         ],
         "x-fern-sdk-method-name": "update"
+      }
+    },
+    "/api/v1/sessions/{session_id}/archive": {
+      "put": {
+        "description": "Hides a chat from the everyday list or restores it. Its messages remain searchable.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSessionArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSessionArchiveResponse"
+                }
+              }
+            },
+            "description": "Archive preference saved."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Caller is not the chat owner."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Chat not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Incognito chats cannot be archived."
+          }
+        },
+        "summary": "Archive or restore a chat",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "set_archive"
       }
     },
     "/api/v1/sessions/{session_id}/audit-log": {

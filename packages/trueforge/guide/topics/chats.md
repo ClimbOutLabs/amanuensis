@@ -142,3 +142,13 @@ Each browser keeps its own marks, so reading a chat on your phone doesn't clear 
 - [Files and pictures](files.md)
 - [Talk to Aman](voice.md)
 - [Incognito chat](incognito.md)
+
+## Archive a chat
+
+Open the chat’s three-dot menu and choose **Archive chat**. It moves out of your everyday chat list.
+
+Choose **Archived chats** above the list to find it again. Open its menu and choose **Restore chat** to put it back. Its folder stays the same.
+
+Searching chats includes archived chats. Aman can also find their messages when the "Let Aman search your past chats when you ask" switch is on, following your existing persona and privacy settings.
+
+Archiving keeps the chat and its messages. Use **Delete** when you want to remove a chat. Incognito chats cannot be archived.

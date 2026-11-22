@@ -241,6 +241,43 @@ export function ThreadListItemActions({
   // A private chat is never kept, so it is never filed either.
   const isPrivate = useIsPrivateChat(sessionId);
   const canMoveToFolder = chatFolders !== null && !isPrivate;
+  const canArchive = chatFolders?.setArchived !== undefined && !isPrivate;
+  const archived = chatFolders?.archivedSessionIds?.has(sessionId) === true;
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const archiveChat = async () => {
+    if (archiveBusy || chatFolders?.setArchived === undefined) {
+      return;
+    }
+    setArchiveBusy(true);
+    setArchiveError(null);
+    try {
+      await chatFolders.setArchived({ sessionId, archived: !archived });
+      setSheetOpen(false);
+    } catch {
+      setArchiveError('Could not change the archive. Try again.');
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+  const archiveAction = canArchive ? (
+    <button
+      type="button"
+      role="menuitem"
+      className={menuItemClass}
+      disabled={archiveBusy}
+      onClick={() => void archiveChat()}
+    >
+      <Icon name="box-archive" className="size-3.5" />
+      {archived ? 'Restore chat' : 'Archive chat'}
+    </button>
+  ) : null;
+  const archiveFailure =
+    archiveError === null ? null : (
+      <p role="alert" className="px-2 text-sm text-failure-bg">
+        {archiveError}
+      </p>
+    );
   const [sheetOpen, setSheetOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -301,6 +338,8 @@ export function ThreadListItemActions({
         {sheetOpen ? (
           <BottomSheet open onOpenChange={setSheetOpen} aria-label="Session actions">
             <div className="flex flex-col gap-1 p-2" role="menu">
+              {archiveAction}
+              {archiveFailure}
               {canRename ? (
                 <button
                   type="button"
@@ -365,6 +404,8 @@ export function ThreadListItemActions({
         className="z-50 min-w-[10rem] rounded-[1.25rem] border border-border bg-card-bg p-1 text-text-primary"
       >
         <div role="menu" className="flex flex-col">
+          {archiveAction}
+          {archiveFailure}
           {canRename ? (
             <button type="button" role="menuitem" className={menuItemClass} onClick={() => setRenameOpen(true)}>
               <Icon name="pencil" className="size-3.5" />

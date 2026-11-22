@@ -3,5 +3,6 @@ export { CreateSessionBugReportRequest } from "./CreateSessionBugReportRequest.j
 export { CreateSessionRequest } from "./CreateSessionRequest.js";
 export { CreateTurnSessionsRequest } from "./CreateTurnSessionsRequest.js";
 export { CreateTurnSessionsStreamRequest } from "./CreateTurnSessionsStreamRequest.js";
+export { SetSessionArchiveRequest } from "./SetSessionArchiveRequest.js";
 export { SetSessionFolderRequest } from "./SetSessionFolderRequest.js";
 export { UpdateSessionRequest } from "./UpdateSessionRequest.js";
