@@ -84,7 +84,7 @@ const SOURCE_LABELS: Readonly<Record<MemoryPageLineSource, string>> = {
   mail: 'External source: email',
   calendar: 'External source: calendar',
   read_content: 'External source: read content',
-  inferred: 'External source: Aman’s guess',
+  inferred: 'Worked out from your conversations, not confirmed',
   unreadable: 'Aman could not read where this came from',
 };
 
