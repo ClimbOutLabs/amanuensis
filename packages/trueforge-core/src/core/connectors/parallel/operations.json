@@ -1,0 +1,4155 @@
+[
+  {
+    "name": "web_search",
+    "method": "POST",
+    "path": "/v1/search",
+    "description": "Web",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "search_queries": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["turbo", "fast", "basic", "advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_chars_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "source_policy": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "include_domains": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "exclude_domains": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "after_date": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fetch_policy": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_age_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timeout_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "disable_cache_fallback": {
+                          "type": "boolean"
+                        },
+                        "as_of": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "format": "date-time"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "excerpt_settings": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_chars_per_result": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["search_queries"]
+    },
+    "beta": false
+  },
+  {
+    "name": "flight_search",
+    "method": "POST",
+    "path": "/v1/flights/search",
+    "description": "Flight search",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "origins": {
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "type": "array",
+          "maxItems": 7,
+          "minItems": 1
+        },
+        "destinations": {
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "type": "array",
+          "maxItems": 7,
+          "minItems": 1
+        },
+        "departure_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "return_date": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "adults": {
+          "type": "integer",
+          "maximum": 9.0,
+          "minimum": 1.0
+        },
+        "children": {
+          "type": "integer",
+          "maximum": 8.0,
+          "minimum": 0.0
+        },
+        "infants_in_seat": {
+          "type": "integer",
+          "maximum": 8.0,
+          "minimum": 0.0
+        },
+        "infants_on_lap": {
+          "type": "integer",
+          "maximum": 8.0,
+          "minimum": 0.0
+        },
+        "cabin": {
+          "type": "string",
+          "enum": ["economy", "premium_economy", "business", "first"]
+        },
+        "max_stops": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "maximum": 2.0,
+              "minimum": 0.0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_price": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "max_duration_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "include_airlines": {
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{2}$"
+          },
+          "type": "array",
+          "maxItems": 10
+        },
+        "exclude_airlines": {
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{2}$"
+          },
+          "type": "array",
+          "maxItems": 10
+        },
+        "departure_hours": {
+          "anyOf": [
+            {
+              "properties": {
+                "earliest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                },
+                "latest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["earliest", "latest"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "arrival_hours": {
+          "anyOf": [
+            {
+              "properties": {
+                "earliest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                },
+                "latest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["earliest", "latest"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "return_hours": {
+          "anyOf": [
+            {
+              "properties": {
+                "earliest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                },
+                "latest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["earliest", "latest"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "return_arrival_hours": {
+          "anyOf": [
+            {
+              "properties": {
+                "earliest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                },
+                "latest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["earliest", "latest"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sort": {
+          "type": "string",
+          "enum": ["best", "price", "duration", "departure_time", "arrival_time"]
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["origins", "destinations", "departure_date"]
+    },
+    "beta": false
+  },
+  {
+    "name": "hotel_search",
+    "method": "POST",
+    "path": "/v1/hotels/search",
+    "description": "Hotel search",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "location": {
+          "type": "string"
+        },
+        "check_in_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "check_out_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "adults": {
+          "type": "integer",
+          "maximum": 16.0,
+          "minimum": 1.0
+        },
+        "children_ages": {
+          "items": {
+            "type": "integer",
+            "maximum": 17.0,
+            "minimum": 0.0
+          },
+          "type": "array",
+          "maxItems": 8
+        },
+        "rooms": {
+          "type": "integer",
+          "maximum": 8.0,
+          "minimum": 1.0
+        },
+        "property_types": {
+          "items": {
+            "type": "string",
+            "enum": ["hotel", "vacation_rental"]
+          },
+          "type": "array",
+          "minItems": 1
+        },
+        "min_price": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0.0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_price": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_rating": {
+          "anyOf": [
+            {
+              "type": "number",
+              "maximum": 5.0,
+              "minimum": 1.0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hotel_classes": {
+          "items": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0
+          },
+          "type": "array",
+          "maxItems": 5
+        },
+        "free_cancellation": {
+          "type": "boolean"
+        },
+        "sort": {
+          "type": "string",
+          "enum": ["relevance", "price", "rating"]
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{3}$"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["location", "check_in_date", "check_out_date"]
+    },
+    "beta": false
+  },
+  {
+    "name": "image_search",
+    "method": "POST",
+    "path": "/v1/images/search",
+    "description": "Image search",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "search_queries": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["fast", "advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["search_queries"]
+    },
+    "beta": false
+  },
+  {
+    "name": "place_search",
+    "method": "POST",
+    "path": "/v1/places/search",
+    "description": "Place search",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latitude": {
+          "anyOf": [
+            {
+              "type": "number",
+              "maximum": 90.0,
+              "minimum": -90.0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "longitude": {
+          "anyOf": [
+            {
+              "type": "number",
+              "maximum": 180.0,
+              "minimum": -180.0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_distance_km": {
+          "anyOf": [
+            {
+              "type": "number",
+              "maximum": 200.0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "open_now": {
+          "type": "boolean"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["fast", "advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_results": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1.0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["query"]
+    },
+    "beta": false
+  },
+  {
+    "name": "shopping_search",
+    "method": "POST",
+    "path": "/v1/shopping/search",
+    "description": "Shopping search",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "search_queries": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "maxItems": 5
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_price": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0.0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_price": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["new", "used", "refurbished"]
+            },
+            {
+              "type": "string",
+              "const": "any"
+            }
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["search_queries"]
+    },
+    "beta": false
+  },
+  {
+    "name": "extract_pages",
+    "method": "POST",
+    "path": "/v1/extract",
+    "description": "Extract",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "urls": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "search_queries": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_chars_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "fetch_policy": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_age_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timeout_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "disable_cache_fallback": {
+                          "type": "boolean"
+                        },
+                        "as_of": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "format": "date-time"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "excerpt_settings": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_chars_per_result": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "full_content": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_chars_per_result": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "links": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["urls"]
+    },
+    "beta": false
+  },
+  {
+    "name": "web_decisions",
+    "method": "POST",
+    "path": "/v1/decisions",
+    "description": "Decisions",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "after_date": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "include_excerpts": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "const": "fast"
+        },
+        "state": {},
+        "questions": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["state", "questions"]
+    },
+    "beta": false
+  },
+  {
+    "name": "create_task_group",
+    "method": "POST",
+    "path": "/v1/tasks/groups",
+    "description": "Create Task Group",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "beta": false
+  },
+  {
+    "name": "retrieve_task_group",
+    "method": "GET",
+    "path": "/v1/tasks/groups/{taskgroup_id}",
+    "description": "Retrieve Task Group",
+    "query": [],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string"
+      }
+    },
+    "required": ["taskgroup_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "stream_task_group_events",
+    "method": "GET",
+    "path": "/v1/tasks/groups/{taskgroup_id}/events",
+    "description": "Stream Task Group Events",
+    "query": ["last_event_id", "timeout"],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string"
+      },
+      "last_event_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "timeout": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": ["taskgroup_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "add_runs_to_task_group",
+    "method": "POST",
+    "path": "/v1/tasks/groups/{taskgroup_id}/runs",
+    "description": "Add Runs to Task Group",
+    "query": ["refresh_status"],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string"
+      },
+      "refresh_status": {
+        "type": "boolean"
+      }
+    },
+    "required": ["taskgroup_id"],
+    "body": {
+      "properties": {
+        "default_task_spec": {
+          "anyOf": [
+            {
+              "properties": {
+                "output_schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "properties": {
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "text"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "auto"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "input_schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "properties": {
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "text"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object",
+              "required": ["output_schema"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inputs": {
+          "items": {
+            "properties": {
+              "processor": {
+                "type": "string"
+              },
+              "metadata": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ]
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "memory_scope_key": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9_-]+$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source_policy": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "include_domains": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "exclude_domains": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "after_date": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "advanced_settings": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "location": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "data_sources": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "pay_per_use": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "free": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "excluded": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "fetch_policy": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "max_age_seconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "timeout_seconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "disable_cache_fallback": {
+                                "type": "boolean"
+                              },
+                              "as_of": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "format": "date-time"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "task_spec": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "output_schema": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "json_schema": {
+                                "additionalProperties": true,
+                                "type": "object"
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "json"
+                              }
+                            },
+                            "type": "object",
+                            "required": ["json_schema"]
+                          },
+                          {
+                            "properties": {
+                              "description": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "text"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "auto"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "input_schema": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "properties": {
+                              "json_schema": {
+                                "additionalProperties": true,
+                                "type": "object"
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "json"
+                              }
+                            },
+                            "type": "object",
+                            "required": ["json_schema"]
+                          },
+                          {
+                            "properties": {
+                              "description": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "text"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "type": "object",
+                    "required": ["output_schema"]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "input": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  }
+                ]
+              },
+              "previous_interaction_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mcp_servers": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "url"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "headers": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": {
+                                "type": "string",
+                                "format": "password"
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "allowed_tools": {
+                          "anyOf": [
+                            {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object",
+                      "required": ["url", "name"]
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "enable_events": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "webhook": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "url": {
+                        "type": "string"
+                      },
+                      "event_types": {
+                        "items": {
+                          "type": "string",
+                          "enum": ["task_run.status"]
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "type": "object",
+                    "required": ["url"]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "type": "object",
+            "required": ["processor", "input"]
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "required": ["inputs"]
+    },
+    "beta": true
+  },
+  {
+    "name": "fetch_task_group_runs",
+    "method": "GET",
+    "path": "/v1/tasks/groups/{taskgroup_id}/runs",
+    "description": "Fetch Task Group Runs",
+    "query": ["last_event_id", "status", "include_input", "include_output"],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string"
+      },
+      "last_event_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "status": {
+        "anyOf": [
+          {
+            "enum": ["queued", "action_required", "running", "completed", "failed", "cancelling", "cancelled"],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "include_input": {
+        "type": "boolean"
+      },
+      "include_output": {
+        "type": "boolean"
+      }
+    },
+    "required": ["taskgroup_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "retrieve_task_group_run",
+    "method": "GET",
+    "path": "/v1/tasks/groups/{taskgroup_id}/runs/{run_id}",
+    "description": "Retrieve Task Group Run",
+    "query": [],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string"
+      },
+      "run_id": {
+        "type": "string"
+      }
+    },
+    "required": ["taskgroup_id", "run_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "create_task_run",
+    "method": "POST",
+    "path": "/v1/tasks/runs",
+    "description": "Create Task Run",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "processor": {
+          "type": "string"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_policy": {
+          "anyOf": [
+            {
+              "properties": {
+                "include_domains": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "exclude_domains": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "after_date": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "data_sources": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "pay_per_use": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "free": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "excluded": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fetch_policy": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_age_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timeout_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "disable_cache_fallback": {
+                          "type": "boolean"
+                        },
+                        "as_of": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "format": "date-time"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "task_spec": {
+          "anyOf": [
+            {
+              "properties": {
+                "output_schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "properties": {
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "text"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "auto"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "input_schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "properties": {
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "text"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object",
+              "required": ["output_schema"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            }
+          ]
+        },
+        "previous_interaction_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mcp_servers": {
+          "anyOf": [
+            {
+              "items": {
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "url"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "type": "string",
+                          "format": "password"
+                        },
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "allowed_tools": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "type": "object",
+                "required": ["url", "name"]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enable_events": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "webhook": {
+          "anyOf": [
+            {
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "event_types": {
+                  "items": {
+                    "type": "string",
+                    "enum": ["task_run.status"]
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object",
+              "required": ["url"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object",
+      "required": ["processor", "input"]
+    },
+    "beta": true
+  },
+  {
+    "name": "retrieve_task_run",
+    "method": "GET",
+    "path": "/v1/tasks/runs/{run_id}",
+    "description": "Retrieve Task Run",
+    "query": [],
+    "inputs": {
+      "run_id": {
+        "type": "string"
+      }
+    },
+    "required": ["run_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "stream_task_run_events",
+    "method": "GET",
+    "path": "/v1/tasks/runs/{run_id}/events",
+    "description": "Stream Task Run Events",
+    "query": [],
+    "inputs": {
+      "run_id": {
+        "type": "string"
+      }
+    },
+    "required": ["run_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "retrieve_task_run_input",
+    "method": "GET",
+    "path": "/v1/tasks/runs/{run_id}/input",
+    "description": "Retrieve Task Run Input",
+    "query": [],
+    "inputs": {
+      "run_id": {
+        "type": "string"
+      }
+    },
+    "required": ["run_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "retrieve_task_run_result",
+    "method": "GET",
+    "path": "/v1/tasks/runs/{run_id}/result",
+    "description": "Retrieve Task Run Result",
+    "query": ["timeout"],
+    "inputs": {
+      "run_id": {
+        "type": "string"
+      },
+      "timeout": {
+        "type": "integer"
+      }
+    },
+    "required": ["run_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "fast_entity_search",
+    "method": "POST",
+    "path": "/v1beta/findall/entity-search",
+    "description": "Fast Entity Search",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "entity_type": {
+          "type": "string",
+          "enum": ["people", "companies"]
+        },
+        "objective": {
+          "type": "string"
+        },
+        "match_limit": {
+          "type": "integer",
+          "maximum": 1000.0,
+          "minimum": 5.0
+        }
+      },
+      "type": "object",
+      "required": ["entity_type", "objective"]
+    },
+    "beta": false
+  },
+  {
+    "name": "ingest_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/ingest",
+    "description": "Ingest FindAll Run",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "objective": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": ["objective"]
+    },
+    "beta": true
+  },
+  {
+    "name": "create_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/runs",
+    "description": "Create FindAll Run",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "objective": {
+          "type": "string"
+        },
+        "entity_type": {
+          "type": "string"
+        },
+        "match_conditions": {
+          "items": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "type": "object",
+            "required": ["name", "description"]
+          },
+          "type": "array"
+        },
+        "generator": {
+          "type": "string",
+          "enum": ["base", "core", "pro", "preview"]
+        },
+        "match_limit": {
+          "type": "integer"
+        },
+        "exclude_list": {
+          "anyOf": [
+            {
+              "items": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "required": ["name", "url"]
+              },
+              "type": "array",
+              "maxItems": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "webhook": {
+          "anyOf": [
+            {
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "event_types": {
+                  "items": {
+                    "type": "string",
+                    "enum": ["task_run.status"]
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object",
+              "required": ["url"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object",
+      "required": ["objective", "entity_type", "match_conditions", "generator", "match_limit"]
+    },
+    "beta": true
+  },
+  {
+    "name": "retrieve_findall_run_status",
+    "method": "GET",
+    "path": "/v1beta/findall/runs/{findall_id}",
+    "description": "Retrieve FindAll Run Status",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string"
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "cancel_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/runs/{findall_id}/cancel",
+    "description": "Cancel FindAll Run",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string"
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "add_enrichment_to_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/runs/{findall_id}/enrich",
+    "description": "Add Enrichment to FindAll Run",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string"
+      }
+    },
+    "required": ["findall_id"],
+    "body": {
+      "properties": {
+        "processor": {
+          "type": "string"
+        },
+        "output_schema": {
+          "properties": {
+            "json_schema": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": {
+              "type": "string",
+              "const": "json"
+            }
+          },
+          "type": "object",
+          "required": ["json_schema"]
+        },
+        "mcp_servers": {
+          "anyOf": [
+            {
+              "items": {
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "url"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "type": "string",
+                          "format": "password"
+                        },
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "allowed_tools": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "type": "object",
+                "required": ["url", "name"]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object",
+      "required": ["output_schema"]
+    },
+    "beta": true
+  },
+  {
+    "name": "stream_findall_events",
+    "method": "GET",
+    "path": "/v1beta/findall/runs/{findall_id}/events",
+    "description": "Stream FindAll Events",
+    "query": ["last_event_id", "timeout"],
+    "inputs": {
+      "findall_id": {
+        "type": "string"
+      },
+      "last_event_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "timeout": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "extend_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/runs/{findall_id}/extend",
+    "description": "Extend FindAll Run",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string"
+      }
+    },
+    "required": ["findall_id"],
+    "body": {
+      "properties": {
+        "additional_match_limit": {
+          "type": "integer"
+        }
+      },
+      "type": "object",
+      "required": ["additional_match_limit"]
+    },
+    "beta": true
+  },
+  {
+    "name": "findall_run_result",
+    "method": "GET",
+    "path": "/v1beta/findall/runs/{findall_id}/result",
+    "description": "FindAll Run Result",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string"
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "get_findall_run_schema",
+    "method": "GET",
+    "path": "/v1beta/findall/runs/{findall_id}/schema",
+    "description": "Get FindAll Run Schema",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string"
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "create_monitor",
+    "method": "POST",
+    "path": "/v1/monitors",
+    "description": "Create Monitor",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["event_stream", "snapshot"]
+        },
+        "frequency": {
+          "type": "string"
+        },
+        "processor": {
+          "type": "string",
+          "enum": ["lite", "base", "core"]
+        },
+        "webhook": {
+          "anyOf": [
+            {
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "event_types": {
+                  "items": {
+                    "type": "string",
+                    "enum": ["monitor.event.detected", "monitor.execution.completed", "monitor.execution.failed"]
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object",
+              "required": ["url"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "query": {
+                  "type": "string"
+                },
+                "output_schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "include_backfill": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "advanced_settings": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "source_policy": {
+                          "anyOf": [
+                            {
+                              "properties": {
+                                "include_domains": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "exclude_domains": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "after_date": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "location": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object",
+              "required": ["query"]
+            },
+            {
+              "properties": {
+                "task_run_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object",
+              "required": ["task_run_id"]
+            }
+          ]
+        }
+      },
+      "type": "object",
+      "required": ["type", "frequency", "settings"]
+    },
+    "beta": false
+  },
+  {
+    "name": "list_monitors",
+    "method": "GET",
+    "path": "/v1/monitors",
+    "description": "List Monitors",
+    "query": ["cursor", "limit", "type", "status"],
+    "inputs": {
+      "cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "limit": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "maximum": 10000,
+            "minimum": 1
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "enum": ["event_stream", "snapshot"],
+              "type": "string"
+            }
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "status": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "enum": ["active", "cancelled"],
+              "type": "string"
+            }
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "monitor_stats",
+    "method": "GET",
+    "path": "/v1/monitors/stats",
+    "description": "Monitor Stats",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "retrieve_monitor",
+    "method": "GET",
+    "path": "/v1/monitors/{monitor_id}",
+    "description": "Retrieve Monitor",
+    "query": [],
+    "inputs": {
+      "monitor_id": {
+        "type": "string"
+      }
+    },
+    "required": ["monitor_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "cancel_monitor",
+    "method": "POST",
+    "path": "/v1/monitors/{monitor_id}/cancel",
+    "description": "Cancel Monitor",
+    "query": [],
+    "inputs": {
+      "monitor_id": {
+        "type": "string"
+      }
+    },
+    "required": ["monitor_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "list_monitor_events",
+    "method": "GET",
+    "path": "/v1/monitors/{monitor_id}/events",
+    "description": "List Monitor Events",
+    "query": ["event_group_id", "cursor", "limit", "include_completions"],
+    "inputs": {
+      "monitor_id": {
+        "type": "string"
+      },
+      "event_group_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "limit": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "maximum": 100,
+            "minimum": 1
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "include_completions": {
+        "type": "boolean"
+      }
+    },
+    "required": ["monitor_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "trigger_monitor_run",
+    "method": "POST",
+    "path": "/v1/monitors/{monitor_id}/trigger",
+    "description": "Trigger Monitor Run",
+    "query": [],
+    "inputs": {
+      "monitor_id": {
+        "type": "string"
+      }
+    },
+    "required": ["monitor_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "update_monitor",
+    "method": "POST",
+    "path": "/v1/monitors/{monitor_id}/update",
+    "description": "Update Monitor",
+    "query": [],
+    "inputs": {
+      "monitor_id": {
+        "type": "string"
+      }
+    },
+    "required": ["monitor_id"],
+    "body": {
+      "properties": {
+        "type": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["event_stream", "snapshot"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frequency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "processor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["lite", "base", "core"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "webhook": {
+          "anyOf": [
+            {
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "event_types": {
+                  "items": {
+                    "type": "string",
+                    "enum": ["monitor.event.detected", "monitor.execution.completed", "monitor.execution.failed"]
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object",
+              "required": ["url"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "query": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "advanced_settings": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "source_policy": {
+                          "anyOf": [
+                            {
+                              "properties": {
+                                "include_domains": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "exclude_domains": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "after_date": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "location": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "beta": false
+  },
+  {
+    "name": "clear_research_memory",
+    "method": "POST",
+    "path": "/v1beta/memory/clear",
+    "description": "Clear Memory",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "beta": false
+  },
+  {
+    "name": "evict_from_research_memory",
+    "method": "POST",
+    "path": "/v1beta/memory/evict",
+    "description": "Evict from Memory",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["task", "monitor", "findall"]
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        }
+      },
+      "type": "object",
+      "required": ["kind", "id"]
+    },
+    "beta": false
+  },
+  {
+    "name": "retrieve_research_memory",
+    "method": "POST",
+    "path": "/v1beta/memory/retrieve",
+    "description": "Retrieve Memory",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "maximum": 25.0,
+          "minimum": 1.0
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["task", "monitor", "findall"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "format": "date-time"
+        },
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "beta": false
+  },
+  {
+    "name": "chat_completions",
+    "method": "POST",
+    "path": "/v1beta/chat/completions",
+    "description": "Chat Completions",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "messages": {
+          "items": {
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": ["system", "user", "assistant"]
+              },
+              "content": {
+                "type": "string"
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "type": "object",
+            "required": ["role", "content"]
+          },
+          "type": "array"
+        },
+        "stream": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "response_format": {
+          "anyOf": [
+            {
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "text"
+                }
+              },
+              "type": "object",
+              "required": ["type"]
+            },
+            {
+              "properties": {
+                "json_schema": {
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "schema": {
+                      "additionalProperties": false,
+                      "type": "object"
+                    },
+                    "strict": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "type": "object",
+                  "required": ["name"]
+                },
+                "type": {
+                  "type": "string",
+                  "const": "json_schema"
+                }
+              },
+              "type": "object",
+              "required": ["json_schema", "type"]
+            },
+            {
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "json_object"
+                }
+              },
+              "type": "object",
+              "required": ["type"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "top_p": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "n": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "presence_penalty": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frequency_penalty": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_interaction_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object",
+      "required": ["model", "messages"]
+    },
+    "beta": false
+  },
+  {
+    "name": "create_response",
+    "method": "POST",
+    "path": "/v1/responses",
+    "description": "Create Response",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "input": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": ["user", "assistant", "system", "developer"]
+                  },
+                  "content": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "items": {
+                          "properties": {
+                            "type": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "text": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    ]
+                  }
+                },
+                "type": "object",
+                "required": ["role", "content"]
+              },
+              "type": "array"
+            }
+          ]
+        },
+        "instructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_response_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stream": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "format": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "properties": {
+                        "type": {
+                          "const": "text",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type"],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "const": "json_schema",
+                          "type": "string"
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "strict": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["name", "schema", "type"],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "properties": {
+                        "type": {
+                          "const": "json_object",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type"],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "verbosity": {
+                  "anyOf": [
+                    {
+                      "enum": ["low", "medium", "high"],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "properties": {
+                "effort": {
+                  "anyOf": [
+                    {
+                      "enum": ["low", "medium", "high", "auto"],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "background": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "enum": ["web_search", "web_search_2025_08_26"],
+                        "type": "string"
+                      },
+                      "filters": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "allowed_domains": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "blocked_domains": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "search_context_size": {
+                        "anyOf": [
+                          {
+                            "enum": ["low", "medium", "high"],
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "user_location": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "city": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "country": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "region": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "timezone": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "type": {
+                                "anyOf": [
+                                  {
+                                    "const": "approximate",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["type"],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "server_label": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "const": "mcp",
+                        "type": "string"
+                      },
+                      "allowed_tools": {
+                        "anyOf": [
+                          {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "authorization": {
+                        "anyOf": [
+                          {
+                            "format": "password",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "headers": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": {
+                              "format": "password",
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "require_approval": {
+                        "const": "never",
+                        "type": "string"
+                      },
+                      "server_description": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "server_url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["server_label", "type", "require_approval", "server_url"],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "data_sources": {
+          "anyOf": [
+            {
+              "properties": {
+                "pay_per_use": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "free": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "excluded": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object",
+      "required": ["model", "input"]
+    },
+    "beta": false
+  },
+  {
+    "name": "suggest_task",
+    "method": "POST",
+    "path": "/v1beta/tasks/suggest",
+    "description": "Suggest a research task specification",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "type": "object",
+      "properties": {
+        "user_intent": {
+          "type": "string"
+        },
+        "previous_task": {
+          "type": "object"
+        }
+      },
+      "required": ["user_intent"]
+    },
+    "beta": false
+  },
+  {
+    "name": "suggest_processor",
+    "method": "POST",
+    "path": "/v1beta/tasks/suggest-processor",
+    "description": "Suggest a research processor",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "type": "object",
+      "properties": {
+        "task_spec": {
+          "type": "object"
+        },
+        "choose_processors_from": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["task_spec"]
+    },
+    "beta": false
+  }
+]
