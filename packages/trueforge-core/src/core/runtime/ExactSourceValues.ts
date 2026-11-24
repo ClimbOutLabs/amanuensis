@@ -66,13 +66,22 @@ export interface ExactContextPresentation {
 const EXACT_SOURCE_INSTRUCTIONS =
   'For a reply reporting exact values from these rows, call present_exact_values by itself. Select row references and field paths. Call it again by itself to show more values. Finish with an empty message when every value is shown; the host writes the reply from the values shown.';
 
+const ExactFieldValue = z.union([z.string(), z.number(), z.boolean()]);
+
 const ReplacedContentSchema = z.object({
   connector_result: z.unknown(),
-  // The same result as parsed by the decimal-preserving parse, so plain decimal literals
-  // survive as their source text. Null or absent when that parse was unavailable, or in
-  // results persisted before this field existed.
-  exact_source_result: z.unknown().nullable().optional(),
-  exact_source_rows: z.array(z.object({ ref: RowReference, path: FieldPath, fields: z.array(FieldPath) })),
+  exact_source_rows: z.array(
+    z.object({
+      ref: RowReference,
+      path: FieldPath,
+      fields: z.array(FieldPath),
+      // The exact value of each advertised field, as prepare() derived it from the
+      // admitted result text. A stored envelope in the earlier shape, whose rows name
+      // fields but carry no values, does not match this schema and is not adopted:
+      // its values could only be re-derived from a plainer copy of the result.
+      values: z.record(FieldPath, ExactFieldValue),
+    }),
+  ),
   exact_source_instructions: z.literal(EXACT_SOURCE_INSTRUCTIONS),
 });
 type ReplacedContent = z.infer<typeof ReplacedContentSchema>;
@@ -189,31 +198,53 @@ function parseWithExactDecimals(text: string): unknown {
   return JSON.parse(rewritten);
 }
 
-const MAX_ADOPT_DEPTH = 12;
+/**
+ * The value at a JSON Pointer path inside a plainly parsed result, or undefined when
+ * the path does not resolve. Segments are the pointer's own: '~1' stands for a slash
+ * and '~0' for a tilde inside a key, and an array member is named by its index.
+ */
+function valueAtPath(root: unknown, path: string): unknown {
+  if (path === '') {
+    return root;
+  }
+  let current: unknown = root;
+  for (const segment of path.slice(1).split('/')) {
+    const key = segment.replaceAll('~1', '/').replaceAll('~0', '~');
+    if (Array.isArray(current)) {
+      if (!/^\d+$/.test(key)) {
+        return undefined;
+      }
+      current = current[Number(key)];
+    } else if (isRecord(current)) {
+      current = current[key];
+    } else {
+      return undefined;
+    }
+    if (current === undefined) {
+      return undefined;
+    }
+  }
+  return current;
+}
 
 /**
- * Rebuild an adoptable copy of a persisted connector result whose exact parse is
- * unavailable. The plain parse has already rounded every number it held: a fractional
- * value's printed text can differ from the source digits, and a value the source wrote
- * with a fraction can land on a whole number. No number from a plain parse is therefore
- * adopted (each is replaced with null, which no field collects), so a field that held a
- * number fails verification instead of being quoted from the rounded replacement.
- * Strings and booleans survive a plain parse exactly, so they are adopted as they stand.
+ * Whether the plainly parsed result agrees that a field stands at its path with a
+ * value of the kind the row record carries. The plain parse preserves strings and
+ * booleans exactly, so those must match. Its numbers are already rounded, so a number
+ * in the plain copy is only asked to confirm that the source wrote a number at this
+ * path: the digits presented are always the row record's own, never the plain copy's.
  */
-function adoptableValue(value: unknown, depth: number): unknown {
+function plainCopyAgrees(plain: unknown, value: ExactValue): boolean {
+  if (typeof value === 'string') {
+    if (typeof plain === 'string') {
+      return plain === value;
+    }
+    return typeof plain === 'number' && DECIMAL.test(value);
+  }
   if (typeof value === 'number') {
-    return null;
+    return typeof plain === 'number';
   }
-  if (depth >= MAX_ADOPT_DEPTH) {
-    return null;
-  }
-  if (Array.isArray(value)) {
-    return value.map(member => adoptableValue(member, depth + 1));
-  }
-  if (isRecord(value)) {
-    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, adoptableValue(child, depth + 1)]));
-  }
-  return value;
+  return plain === value;
 }
 
 /** Collect leaf fields within one row. Arrays are different rows, never siblings to merge. */
@@ -311,7 +342,11 @@ type SectionOutcome = { text: string } | { refusal: string };
  * Text carrying no such character is returned unchanged, so ordinary values render as
  * before. Text that does carry one has each Markdown delimiter in it escaped with a
  * backslash, which the renderer shows as the literal character. A doubled dollar sign is
- * a delimiter too, because the renderer treats it as the start of a math span.
+ * a delimiter too, because the renderer treats it as the start of a math span. The
+ * ampersand is escaped in the same single pass as the rest: an entity the source wrote,
+ * such as &amp;, must show as those very characters, and escaping the ampersand in an
+ * earlier pass let the backslash that pass introduced be escaped again, which left a
+ * stray backslash in front of the decoded character.
  */
 const MARKDOWN_DELIMITER = /[\\*_`[\]<~]|\$\$/;
 const HTML_ENTITY = /&(?=#\d+;|#x[0-9a-fA-F]+;|[a-zA-Z][a-zA-Z0-9]+;)/;
@@ -320,7 +355,23 @@ function markdownText(text: string): string {
   if (!MARKDOWN_DELIMITER.test(text) && !HTML_ENTITY.test(text)) {
     return text;
   }
-  return text.replaceAll('&', '\\&').replace(/[\\*_`[\]<~$]/g, character => `\\${character}`);
+  return text.replace(/[\\&*_`[\]<~$]/g, character => `\\${character}`);
+}
+
+/**
+ * Write a label where it will stand at the start of its line. Away from the start of a
+ * line, the characters Markdown reads as block markers are ordinary text, but a leading
+ * "# ", "- " or "+ " opens a heading or a list, a leading ">" opens a quotation, and a
+ * leading "1. " or "2) " opens a numbered list, each swallowing the marker itself. Put a
+ * backslash in front of the one character the parser keys on, so the line stays a plain
+ * line and shows the label exactly as the source wrote it. The Source line and the sum
+ * line need no such care: both begin with a fixed word, so the connector name and the
+ * unit never stand at the start of a line.
+ */
+function markdownLabel(text: string): string {
+  return markdownText(text)
+    .replace(/(^|\n)( {0,3})(?=#+[ \t]|>|[-+][ \t])/g, '$1$2\\')
+    .replace(/(^|\n)( {0,3}\d{1,9})(?=[.)][ \t])/g, '$1$2\\');
 }
 
 /** A field path as a plain label a person reads: the path segments in words, in order. */
@@ -413,7 +464,8 @@ function checkedSum(
  * one constraint that failed, so the model can correct the call instead of repeating it.
  * The render is person-facing: plain labels, values as ordinary text, and the connector
  * named once per group as the only provenance on the face of the answer. Source text is
- * passed through markdownText, so what the reader sees matches the source exactly.
+ * passed through markdownText, and labels through markdownLabel, so what the reader
+ * sees matches the source exactly.
  */
 function renderSection(input: PresentExactValuesInput, rows: ReadonlyMap<string, ExactRow>): SectionOutcome {
   const fieldCount = input.rows.reduce((count, row) => count + row.fields.length, 0);
@@ -455,11 +507,11 @@ function renderSection(input: PresentExactValuesInput, rows: ReadonlyMap<string,
     const labelSeen = new Map<string, number>();
     const lines = entries.map(entry => {
       if ((labelCounts.get(entry.label) ?? 0) < 2) {
-        return `${markdownText(entry.label)}: ${markdownText(String(entry.value))}`;
+        return `${markdownLabel(entry.label)}: ${markdownText(String(entry.value))}`;
       }
       const occurrence = (labelSeen.get(entry.label) ?? 0) + 1;
       labelSeen.set(entry.label, occurrence);
-      return `${markdownText(entry.label)} (${String(occurrence)}): ${markdownText(String(entry.value))}`;
+      return `${markdownLabel(entry.label)} (${String(occurrence)}): ${markdownText(String(entry.value))}`;
     });
     const group = groups.get(row.source.connector) ?? [];
     group.push(lines.join('\n'));
@@ -586,14 +638,15 @@ export class ExactSourceValues extends LocalToolMCP {
   /**
    * Adopt rows from connector results persisted in the current request's context. A request
    * that pauses for an approval resumes in a fresh instance of this class, so rows prepared
-   * before the pause are rebuilt here from the stored results. A stored result is held to
-   * the same gates prepare() applied when the result arrived: the schema above only accepts
-   * the complete envelope prepare() writes, the source size cap applies to the stored
-   * result, and the rows and fields are re-derived from the stored result itself: from
-   * its persisted exact parse when it carries one, and otherwise through adoptableValue,
-   * which never treats a float-derived number as source text. The envelope's
-   * advertised rows only choose which of the re-derived rows and fields are kept, under
-   * the same references the model was shown.
+   * before the pause are rebuilt here from the stored results. The schema above only accepts
+   * the complete envelope prepare() writes. The values adopted are the ones the envelope's
+   * row records carry: the very values prepare() derived from the admitted result text when
+   * the result arrived, so a replayed value and the row the model was shown come from that
+   * one derivation, and no value is re-derived from a second stored copy of the result,
+   * whose own size and digits the cap and the parse would judge differently. The plain
+   * result the model read is never a source of values, because its numbers are already
+   * rounded; it only confirms, through plainCopyAgrees, that each advertised field stands
+   * at its path in the result with a value of the same kind.
    */
   adoptContextResults(results: readonly ExactContextResult[]): void {
     const knownCallIds = new Set([...this.rows.values()].map(row => row.source.call_id));
@@ -606,36 +659,23 @@ export class ExactSourceValues extends LocalToolMCP {
       if (replaced === undefined) {
         continue;
       }
-      if (JSON.stringify(replaced.connector_result).length > MAX_SOURCE_CHARS) {
-        continue;
-      }
-      // Rows are rebuilt from the persisted exact parse when prepare() stored one, so a
-      // number's source digits come back digit for digit. Without one, the plain parse is
-      // filtered through adoptableValue, which drops every number it rounded.
-      const exact = replaced.exact_source_result;
-      if (exact !== undefined && exact !== null && JSON.stringify(exact).length > MAX_SOURCE_CHARS) {
-        continue;
-      }
-      const recomputed =
-        exact !== undefined && exact !== null ? rowsOf(exact) : rowsOf(adoptableValue(replaced.connector_result, 0));
-      const byPath = new Map(recomputed.map(row => [row.path, row.fields]));
       for (const advertised of replaced.exact_source_rows) {
         if (this.rows.has(advertised.ref) || this.rows.size >= MAX_ROWS) {
           continue;
         }
         // prepare() writes the containing path of a direct record as '/', where the
-        // re-derived rows carry it as the empty path.
+        // row itself carries it as the empty path.
         const path = advertised.path === '/' ? '' : advertised.path;
-        const fields = byPath.get(path);
-        if (fields === undefined) {
-          continue;
-        }
         const kept = new Map<string, ExactValue>();
         for (const fieldPath of advertised.fields) {
-          const value = fields.get(fieldPath);
-          if (value !== undefined) {
-            kept.set(fieldPath, value);
+          const value = advertised.values[fieldPath];
+          if (value === undefined) {
+            continue;
           }
+          if (!plainCopyAgrees(valueAtPath(replaced.connector_result, path + fieldPath), value)) {
+            continue;
+          }
+          kept.set(fieldPath, value);
         }
         if (kept.size === 0) {
           continue;
@@ -715,10 +755,8 @@ export class ExactSourceValues extends LocalToolMCP {
       return [];
     }
     let rowSource: unknown;
-    let exactSource: unknown = null;
     try {
       rowSource = parseWithExactDecimals(result.rawContent);
-      exactSource = rowSource;
     } catch {
       rowSource = original;
     }
@@ -739,14 +777,16 @@ export class ExactSourceValues extends LocalToolMCP {
     }
     result.message.content = JSON.stringify({
       connector_result: original,
-      // Persist the exact parse beside the plain one the model reads, so a request that
-      // resumes after an approval pause rebuilds its rows from the source digits rather
-      // than from numbers the plain parse already rounded.
-      exact_source_result: exactSource,
+      // Each advertised row carries the exact values this derivation produced, so a
+      // request that resumes after an approval pause replays those very values. No
+      // second copy of the result is stored for the replay: a copy would be measured
+      // against the size cap by its own, larger serialization, and its digits could
+      // disagree with the rows it is meant to vouch for.
       exact_source_rows: rows.map(row => ({
         ref: row.ref,
         path: row.source.path || '/',
         fields: [...row.fields.keys()],
+        values: Object.fromEntries(row.fields),
       })),
       exact_source_instructions: EXACT_SOURCE_INSTRUCTIONS,
     });

@@ -1,3 +1,8 @@
+import { toString } from 'mdast-util-to-string';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
 import { z } from 'zod';
 import { Sessions } from '../../src/agent-session/Sessions';
 import { InMemorySessionStore } from '../../src/agent-session/store/InMemorySessionStore';
@@ -205,6 +210,22 @@ function liveText(events: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>
       return typeof event.content === 'string' ? [event.content] : [];
     })
     .join('');
+}
+
+/**
+ * The text a reader sees, taken from the real Markdown parser the chat view is built on:
+ * unified with remark-parse, remark-gfm and remark-math (single-dollar math off, as the
+ * chat view configures it), each block's visible text read with mdast-util-to-string.
+ * Resolving backslash escapes with a pattern instead cannot see the ways the render
+ * itself changes text, such as decoding an entity into the character it names.
+ */
+function renderedText(markdown: string): string {
+  const tree = unified()
+    .use(remarkParse)
+    .use(remarkGfm)
+    .use(remarkMath, { singleDollarTextMath: false })
+    .parse(markdown);
+  return tree.children.map(child => toString(child)).join('\n');
 }
 
 function ledgerAmount(index: number): number | string {
@@ -485,10 +506,10 @@ describe('exact source values through the live and saved chat', () => {
     // The reply is Markdown, so each delimiter is escaped in the text the host writes.
     expect(visible).toContain('Lot id: LOT\\*12\\*A');
     expect(visible).toContain('Batch code: BATCH\\_0042');
-    // Resolving the escapes the way a Markdown reader does recovers the source text
-    // character for character, where the unescaped asterisks would have rendered the
-    // digits in italics and dropped the asterisks themselves.
-    const rendered = visible.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, '$1');
+    // Through the real Markdown parser, the visible text is the source text character
+    // for character, where the unescaped asterisks would have rendered the digits in
+    // italics and dropped the asterisks themselves.
+    const rendered = renderedText(visible);
     expect(rendered).toContain('Lot id: LOT*12*A');
     expect(rendered).toContain('Batch code: BATCH_0042');
     expect(visible).toContain('Amount: 10.5');
