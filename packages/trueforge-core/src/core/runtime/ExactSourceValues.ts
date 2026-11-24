@@ -638,8 +638,10 @@ export class ExactSourceValues extends LocalToolMCP {
   /**
    * Adopt rows from connector results persisted in the current request's context. A request
    * that pauses for an approval resumes in a fresh instance of this class, so rows prepared
-   * before the pause are rebuilt here from the stored results. The schema above only accepts
-   * the complete envelope prepare() writes. The values adopted are the ones the envelope's
+   * before the pause are rebuilt here from the stored results. The schema above accepts any
+   * complete envelope of the shape prepare() writes, whoever authored it. What makes an
+   * envelope trustworthy in the normal flow is that prepare() itself writes it into the
+   * persisted message when it processes a result. The values adopted are the ones the envelope's
    * row records carry: the very values prepare() derived from the admitted result text when
    * the result arrived, so a replayed value and the row the model was shown come from that
    * one derivation, and no value is re-derived from a second stored copy of the result,
