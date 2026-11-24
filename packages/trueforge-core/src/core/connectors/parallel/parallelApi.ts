@@ -22,6 +22,17 @@ interface Operation {
 
 const byName = new Map<string, Operation>(operations.map(operation => [operation.name, operation]));
 
+/**
+ * Event feeds yield one complete event per call, so progress reaches the caller while the run
+ * is still going instead of being held until the feed closes. The task run feed declares no
+ * cursor parameter, so membership here, not a parameter check, is what marks a feed.
+ */
+const EVENT_FEED_OPERATIONS: ReadonlySet<string> = new Set([
+  'stream_task_group_events',
+  'stream_task_run_events',
+  'stream_findall_events',
+]);
+
 function schema(operation: Operation): ToolSchema {
   const properties: Record<string, object> = { ...operation.inputs };
   const required = [...operation.required];
@@ -151,7 +162,7 @@ export function parallelProductConnection(options: {
       return invalid(`Parallel returned HTTP ${String(response.status)}. ${next}`);
     }
     const feed = response.headers.get('content-type')?.includes('text/event-stream') === true;
-    const text = await readAnswer(response, options.maxBytes, feed && operation.query.includes('last_event_id'));
+    const text = await readAnswer(response, options.maxBytes, feed && EVENT_FEED_OPERATIONS.has(operation.name));
     return { content: [{ type: 'text', text: text.replaceAll(key, '[redacted]') }] };
   }
   return {
