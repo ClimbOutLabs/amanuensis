@@ -411,6 +411,10 @@
       "set": "code",
       "tests": []
     },
+    "route:sandboxWorkspace": {
+      "set": "code",
+      "tests": ["packages/trueforge/tests/unit/apis/sandboxWorkspaces.test.ts"]
+    },
     "route:schedule": {
       "set": "reminders",
       "tests": []

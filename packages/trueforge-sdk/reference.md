@@ -4171,6 +4171,79 @@ await client.sessions.update("session_id");
 </dl>
 </details>
 
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">setArchive</a>(session_id, { ...params }) -> TrueForge.SetSessionArchiveResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Hides a chat from the everyday list or restores it. Its messages remain searchable.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.setArchive("session_id", {
+    archived: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.SetSessionArchiveRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">getAuditLog</a>(session_id, { ...params }) -> TrueForge.ListSessionAuditLogResponse</code></summary>
 <dl>
 <dd>
@@ -12951,6 +13024,62 @@ await client.settings.sandboxProviders.upgradeImage("provider_id");
 <dd>
 
 **requestOptions:** `SandboxProvidersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings SandboxWorkspaces
+<details><summary><code>client.settings.sandboxWorkspaces.<a href="/src/api/resources/settings/resources/sandboxWorkspaces/client/Client.ts">list</a>() -> TrueForge.ListSandboxWorkspacesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Asks every sandbox slot which chat workspaces it holds and joins them to their chats, with the space each takes and the room left on each slot. Read-only: nothing is created, moved or removed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.sandboxWorkspaces.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `SandboxWorkspacesClient.RequestOptions`
 
 </dd>
 </dl>

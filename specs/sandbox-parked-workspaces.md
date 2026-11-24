@@ -29,9 +29,40 @@ The work lands in stages, each its own pull request against this spec:
    bytes, entry count, last used) and a health fact for the free space on
    the filesystem the workspaces are on. The server contract and client
    learn the new answers. Nothing reads them yet.
-2. Later stages make the holders visible in Settings and the doctor, move
-   workspace creation to a question the agent answers from real free
-   space, move the trees into the store, and retire the fixed seat count.
+2. The holders become visible. A read-only settings route asks every slot
+   for its sessions and joins each one to the chat whose last turn used
+   it, answering per workspace the chat and its title, the slot, the size,
+   the entry count and the last use, plus one summary per slot with its
+   free room. The Settings sandbox page gains a read-only "Chat
+   workspaces" card with the same list, and the doctor gains one line per
+   slot: how many workspaces it holds and how much room is left. A
+   workspace no chat holds is listed honestly, with no chat attached.
+   Nothing is created, moved or removed.
+3. Workspace creation becomes a question the agent answers. The server
+   no longer counts how many chats would fit on a slot's disk; it asks
+   the slot agent to create the workspace, and the agent answers from
+   the real free space on its storage, refusing only when the new
+   workspace's size limit plus the free-space reserve does not fit. The
+   size limits already promised to the slot's workspaces count in full
+   against its storage alongside the new one, so the reserve survives
+   every workspace growing to its limit and a chat that holds a
+   workspace can always start. A recorded limit that grows is checked
+   the same way before it is recorded: the increase must fit beside the
+   promises already counted and the reserve, and a raise that does not
+   fit is refused with the old limit standing, so raising the limit
+   later cannot promise away the reserve creation protected. The
+   same check runs whenever any call first makes a tree (a command or a
+   file write into a chat whose tree the idle sweep removed), so no path
+   makes a tree without it, and making an empty tree never waits for
+   another chat's running call. The refusal reaches the person as one
+   plain sentence: the storage is almost full, delete old chats, then try
+   again; where the workspaces share the machine's disk it also says that
+   freeing disk space helps. A slot whose
+   storage is full never blocks a chat another slot has room for, and
+   whether the sandbox reports ready no longer depends on how many
+   chats exist, so chats that already hold a workspace keep working
+   whatever happens to new ones.
+4. Later stages move the trees into the store.
 
 ## Key design decisions
 
@@ -45,6 +76,10 @@ The work lands in stages, each its own pull request against this spec:
 - A session listing is served from a cached walk, refreshed at most every
   30 seconds, so asking never walks every tree and never waits behind a
   running call.
+- Creation asks the agent that will hold the tree, because only the agent
+  sees its storage's real free space; the server counts nothing. Creating
+  a workspace that already exists is a success, so a retried request is
+  never refused for room the workspace already holds.
 - The agent version and the server's pin for it move together whenever the
   agent's answers change shape.
 
@@ -56,6 +91,14 @@ agent on the same machine, like every other slot answer. It names no chats
 and carries no file names or contents. The free-space fact is a number
 about the machine's disk. Nothing leaves the device.
 
+From stage 2, the server joins that listing to chat titles to show who
+holds each workspace. The join happens on the server, and the joined list
+is served only on the instance's own admin settings surface, to the
+signed-in owner of the same instance. Another person's chat is shown only
+as theirs, without its title, and an incognito (private) chat is shown to
+its owner as "Incognito chat", without its title, so the card never
+becomes a list of incognito chats. No title or workspace detail leaves the device.
+
 ## Testing
 
 Tests use synthetic data only: agent tests build throwaway session trees in
@@ -64,8 +107,34 @@ against a fake agent on a local socket. Stage 1 is proved by the agent's Go
 tests and the core contract and client tests, with a live health read on a
 running slot as a manual check at the gate.
 
-## Out of scope for stage 1
+Stage 2 is proved by server tests with a stubbed slot listing and a fake
+session store (sessions joined to the right chat titles, a session with no
+matching chat shown with no chat attached, several slots, and the empty
+case), by doctor tests for the new per-slot line, and by Settings page
+tests for the card: the holders list, an untitled chat, an incognito chat, the orphan, the
+empty state, and the card staying hidden on the Docker backend.
 
-Any change to capacity, creation, deletion, the idle sweep, Settings, the
-doctor or the capabilities answers. Those arrive in later stages against
-this same spec.
+Stage 3 is proved by provider tests against fake slot agents (slots
+holding more chats than the old per-disk count still create, a full slot
+passes the chat to a slot with room, every slot full refuses with the
+plain sentence while the sandbox still reports ready, creation waits
+out a busy slot, and a creation whose answer is lost is retried on the
+same slot with the same session id), by contract and client tests for the create call, and
+by agent tests: a tree is created, creation is refused with no tree left
+behind when the storage cannot fit the quota plus the reserve, creation
+is refused when the quotas already promised plus the new quota and the
+reserve pass the volume's size, a second chat still starts after the
+first writes within its quota, a recorded limit raised for one chat
+still leaves the other chat able to start, a raise past what the volume
+can promise is refused with the old record standing, a tree made before
+limits were recorded is checked when its limit is first recorded, an
+existing tree needs no new room, bad requests are refused, a command or
+file write that makes a tree is refused the same way, and a new chat's
+tree is made while another chat's call runs. A live
+check on an instance holding more chats than the old capacity is a
+manual check at the gate.
+
+## Out of scope so far
+
+Any change to where the trees live, to deletion, or to the idle sweep.
+Those arrive in later stages against this same spec.

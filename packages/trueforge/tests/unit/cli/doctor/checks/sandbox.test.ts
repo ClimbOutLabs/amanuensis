@@ -1,4 +1,4 @@
-import { checkAttachments, checkRunCode } from '../../../../../src/cli/doctor/checks/sandbox';
+import { checkAttachments, checkRunCode, checkWorkspaces } from '../../../../../src/cli/doctor/checks/sandbox';
 import { fakeDeps } from '../fakeDeps';
 
 const SLOT_ENV = { SANDBOX_BACKEND: 'slots', SANDBOX_SLOTS: '2', SANDBOX_SLOTS_DIR: '/run/aman-slots' };
@@ -141,6 +141,87 @@ describe('attachments', () => {
 
   it('fails when the sandbox settings are incomplete', async () => {
     const check = await checkAttachments({ deps: fakeDeps({ env: { SANDBOX_BACKEND: 'slots' } }), timeoutMs: 1000 });
+    expect(check.state).toBe('fail');
+    expect(check.detail).toBe('The sandbox settings for this instance are incomplete.');
+    expect(check.fix).toBe('Run aman doctor sandbox --fix');
+  });
+});
+
+describe('workspaces', () => {
+  const GIB = 1024 ** 3;
+
+  it('is off, with the reason, when the instance has no sandbox', async () => {
+    const check = await checkWorkspaces({ deps: fakeDeps({ env: {} }), timeoutMs: 1000 });
+    expect(check).toMatchObject({ id: 'workspaces', state: 'off' });
+    expect(check.detail).toContain('installed without the sandbox');
+  });
+
+  it('asks the slots by their control sockets and reports each slot workspaces and room', async () => {
+    const asked: string[][] = [];
+    const deps = fakeDeps({
+      env: SLOT_ENV,
+      slotsWorkspaces: ({ socketPaths }) => {
+        asked.push(socketPaths);
+        return Promise.resolve([
+          { sessions: 10, storeFreeBytes: 12 * GIB },
+          { sessions: 1, storeFreeBytes: 5 * GIB },
+        ]);
+      },
+    });
+    const check = await checkWorkspaces({ deps, timeoutMs: 1000 });
+    expect(check).toMatchObject({ id: 'workspaces', state: 'ok' });
+    expect(asked).toEqual([['/run/aman-slots/1/agent.sock', '/run/aman-slots/2/agent.sock']]);
+    expect(check.detail).toContain('Slot 1 holds 10 chat workspaces and has 12.0 GB of room left.');
+    expect(check.detail).toContain('Slot 2 holds 1 chat workspace and has 5.0 GB of room left.');
+  });
+
+  it('says plainly when a slot holds no workspaces', async () => {
+    const deps = fakeDeps({
+      env: SLOT_ENV,
+      slotsWorkspaces: () =>
+        Promise.resolve([
+          { sessions: 0, storeFreeBytes: 16 * GIB },
+          { sessions: 0, storeFreeBytes: 16 * GIB },
+        ]),
+    });
+    const check = await checkWorkspaces({ deps, timeoutMs: 1000 });
+    expect(check.state).toBe('ok');
+    expect(check.detail).toContain('Slot 1 holds no chat workspaces and has 16.0 GB of room left.');
+  });
+
+  it('warns and still lists the answering slot when one slot does not answer', async () => {
+    const deps = fakeDeps({
+      env: SLOT_ENV,
+      slotsWorkspaces: () => Promise.resolve([{ sessions: 3, storeFreeBytes: 8 * GIB }, null]),
+    });
+    const check = await checkWorkspaces({ deps, timeoutMs: 1000 });
+    expect(check.state).toBe('warn');
+    expect(check.detail).toContain('Slot 1 holds 3 chat workspaces and has 8.0 GB of room left.');
+    expect(check.detail).toContain('Slot 2 did not answer, so its workspaces are not listed.');
+    expect(check.fix).toBe('Run aman doctor sandbox --fix');
+  });
+
+  it('warns, rather than failing, when no slot answers: the listing is not a readiness gate', async () => {
+    const deps = fakeDeps({
+      env: SLOT_ENV,
+      slotsWorkspaces: () => Promise.resolve([null, null]),
+    });
+    const check = await checkWorkspaces({ deps, timeoutMs: 1000 });
+    expect(check.state).toBe('warn');
+    expect(check.detail).toBe('The chat workspaces could not be listed: the sandbox slots did not answer.');
+    expect(check.fix).toBe('Run aman doctor sandbox --fix');
+  });
+
+  it('warns with a plain reason when asking throws', async () => {
+    const deps = fakeDeps({ env: SLOT_ENV, slotsWorkspaces: () => Promise.reject(new Error('boom')) });
+    const check = await checkWorkspaces({ deps, timeoutMs: 1000 });
+    expect(check.state).toBe('warn');
+    expect(check.detail).not.toContain('boom');
+    expect(check.fix).toContain('aman doctor sandbox --fix');
+  });
+
+  it('fails when the sandbox settings are incomplete', async () => {
+    const check = await checkWorkspaces({ deps: fakeDeps({ env: { SANDBOX_BACKEND: 'slots' } }), timeoutMs: 1000 });
     expect(check.state).toBe('fail');
     expect(check.detail).toBe('The sandbox settings for this instance are incomplete.');
     expect(check.fix).toBe('Run aman doctor sandbox --fix');

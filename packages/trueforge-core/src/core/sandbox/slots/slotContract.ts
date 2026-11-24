@@ -57,7 +57,7 @@ export function slotSkillNetworkSocketPathsIn({ dir, count }: { dir: string; cou
 export const DEFAULT_SESSION_DISK_MB = 2048;
 
 /** The agent build and gVisor release this server was written against; a slot reporting others is refused. */
-export const SLOT_AGENT_VERSION = '0.6.0';
+export const SLOT_AGENT_VERSION = '0.7.0';
 export const SLOT_RUNSC_VERSION = 'runsc version release-20260928.0';
 export const SLOT_PLATFORM = 'systrap';
 
@@ -217,6 +217,13 @@ export const SlotExecResponseSchema = z.object({
   duration_ms: z.number().int(),
 });
 export type SlotExecResponse = z.infer<typeof SlotExecResponseSchema>;
+
+export const SlotCreateSessionRequestSchema = z.object({
+  session_id: z.string().regex(/^[0-9a-f]{32}$/),
+  /** The new tree's quota in MiB; the agent fits it against its volume's real free space before creating. */
+  disk_mb: z.number().int(),
+});
+export type SlotCreateSessionRequest = z.infer<typeof SlotCreateSessionRequestSchema>;
 
 export const SlotFsReadResponseSchema = z.object({
   content_base64: z.string(),

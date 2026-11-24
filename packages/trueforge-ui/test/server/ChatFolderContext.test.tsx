@@ -44,6 +44,7 @@ function Probe({ capture }: { capture: (value: FolderContextValue) => void }) {
       <div data-testid="unfiled">{(value?.unfiledSessions ?? []).map(session => session.sessionId).join(',')}</div>
       <div data-testid="folders">{(value?.folders ?? []).map(folder => folder.name).join(',')}</div>
       <div data-testid="titles">{(value?.unfiledSessions ?? []).map(session => session.title).join(',')}</div>
+      <div data-testid="archived">{[...(value?.archivedSessionIds ?? [])].join(',')}</div>
     </>
   );
 }
@@ -237,6 +238,84 @@ describe('ChatFolderProvider local edits', () => {
     });
 
     expect(screen.getByTestId('folders').textContent).toBe('');
+  });
+
+  it('returns a chat restored in another tab to the ordinary list on the next refresh', async () => {
+    // The server's archive state, which another tab can change without this one acting.
+    const serverArchived = new Set<string>();
+    const store: ChatFolderStore = {
+      ...storeReturning(async () => ({ ...snapshotWith(['session-1']), archivedSessionIds: [...serverArchived] })),
+      setSessionArchived: async ({ sessionId, archived }) => {
+        if (archived) {
+          serverArchived.add(sessionId);
+        } else {
+          serverArchived.delete(sessionId);
+        }
+      },
+    };
+    let captured: FolderContextValue = null;
+    render(
+      <ChatFolderProvider store={store}>
+        <Probe
+          capture={value => {
+            captured = value;
+          }}
+        />
+      </ChatFolderProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('unfiled')).toHaveTextContent('session-1');
+    });
+
+    await act(async () => {
+      await captured?.setArchived?.({ sessionId: 'session-1', archived: true });
+    });
+    expect(screen.getByTestId('archived')).toHaveTextContent('session-1');
+
+    // Another tab restores the chat, then this tab refreshes.
+    serverArchived.delete('session-1');
+    act(() => {
+      captured?.reload();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('archived').textContent).toBe('');
+    });
+  });
+
+  it('keeps a chat archived when a load started before the archive lands after it', async () => {
+    const before = snapshotWith(['session-1']);
+    const deferred = deferredLaterLoads(before);
+    const store: ChatFolderStore = { ...deferred.store, setSessionArchived: async () => {} };
+    let captured: FolderContextValue = null;
+    render(
+      <ChatFolderProvider store={store}>
+        <Probe
+          capture={value => {
+            captured = value;
+          }}
+        />
+      </ChatFolderProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('unfiled')).toHaveTextContent('session-1');
+    });
+
+    act(() => {
+      captured?.reload();
+    });
+    await act(async () => {
+      await captured?.setArchived?.({ sessionId: 'session-1', archived: true });
+    });
+    expect(screen.getByTestId('archived')).toHaveTextContent('session-1');
+
+    await act(async () => {
+      deferred.releaseLoad(before);
+    });
+
+    expect(screen.getByTestId('archived')).toHaveTextContent('session-1');
   });
 
   it('keeps a renamed chat title when a load started before the rename lands after it', async () => {
