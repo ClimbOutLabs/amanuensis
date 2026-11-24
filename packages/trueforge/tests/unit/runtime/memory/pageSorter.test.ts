@@ -661,7 +661,7 @@ describe('words that were only read never reach a line marked as the person’s'
       ],
     });
 
-  it('leaves the person’s line alone and keeps a change that borrows a read word as Aman’s guess', async () => {
+  it('leaves the person’s line alone and keeps a change that borrows a read word as an unconfirmed line', async () => {
     const vaultDir = await carVault();
     const result = await sortWith({
       vaultDir,
@@ -707,7 +707,7 @@ describe('words that were only read never reach a line marked as the person’s'
     );
   });
 
-  it('writes a new line that borrows a read word as an unconfirmed guess, also with a changed ending', async () => {
+  it('writes a new line that borrows a read word as an unconfirmed line, also with a changed ending', async () => {
     const vaultDir = await carVault();
     const result = await sortWith({
       vaultDir,
@@ -718,7 +718,7 @@ describe('words that were only read never reach a line marked as the person’s'
             about: 'my-car',
             page_kind: 'matter',
             section: 'Now',
-            text: 'The Subarus get a service in spring.',
+            text: 'The Subaru car gets a service in spring.',
             reason,
           },
         ],
@@ -728,7 +728,7 @@ describe('words that were only read never reach a line marked as the person’s'
 
     expect(result).toMatchObject({ status: 'sorted', decisions: [{ decision: 'unconfirmed' }] });
     expect(await read(vaultDir, 'matter', 'my-car')).toContain(
-      `- The Subarus get a service in spring. <!-- fact: id=f_s1 src=inferred seen=${DAY} -->`,
+      `- The Subaru car gets a service in spring. <!-- fact: id=f_s1 src=inferred seen=${DAY} -->`,
     );
   });
 

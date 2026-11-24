@@ -12,7 +12,7 @@ import { statementHits } from '../../../../src/runtime/memory/statementIndex';
 import { askAbout, gateFor, HandChosenModel, makeVault, writeKitNotes, type KitNote } from './statementTestKit';
 
 const DAY = '2026-11-06';
-const MAIL_TEXT = 'Mail says topic2 mail';
+const MAIL_TEXT = 'Mail about Nora and topic2';
 const OWN_TEXT = 'Remember topic2 own';
 
 function saying(decisions: unknown[]): SortModel {

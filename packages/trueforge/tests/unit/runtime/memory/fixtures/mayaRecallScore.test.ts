@@ -222,8 +222,8 @@ const PAGES_SORTED_BY_MEANING: Condition = {
   meaning: true,
   scores: PAGES_SORTED_BY_MEANING_SCORES,
   misses: PAGES_SORTED_BY_MEANING_MISSES,
-  unrelatedShown: 'shown a memory 20/300',
-  unrelatedShownAt: '1, 5, 20, 62, 73, 78, 102, 112, 121, 124, 125, 136, 138, 141, 177, 200, 218, 238, 258, 270',
+  unrelatedShown: 'shown a memory 19/300',
+  unrelatedShownAt: '1, 5, 20, 62, 73, 78, 102, 112, 121, 124, 125, 136, 138, 141, 177, 200, 218, 238, 258',
 };
 
 function scoreLine(score: RecallScore): string {

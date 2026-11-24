@@ -147,6 +147,7 @@ export async function sortWrittenNotes({
         askModel,
         options: { vaultDir, runner: execFileRunner, today, logger },
         similarPages,
+        identity: { personName: summarize?.personName, assistantName: summarize?.assistantName },
       });
     }
   } catch (error) {

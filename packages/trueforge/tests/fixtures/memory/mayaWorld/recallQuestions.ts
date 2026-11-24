@@ -389,7 +389,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Did Hotel Lumbre refund the deposit?',
     category: 'matter_status',
     expected_text: 'refunded the deposit',
-    page_wording: ['Hotel Lumbre has to refund the deposit of 120', 'to 2026-09-19'],
+    page_wording: ['Hotel Lumbre has to refund the Madrid trip deposit of 120', 'to 2026-09-19'],
     source_entry_ids: ['d50_e02'],
   },
 

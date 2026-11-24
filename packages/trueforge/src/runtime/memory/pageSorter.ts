@@ -149,7 +149,7 @@ async function applyPlanned({
     pages.set(`${entry.kind}/${entry.slug}`, entry);
   };
 
-  for (const { decision, kind, target, guessed } of planned) {
+  for (const { decision, kind, target, inferred } of planned) {
     switch (decision.decision) {
       case 'ignore':
         break;
@@ -226,7 +226,7 @@ async function applyPlanned({
                   fact: statementWith({
                     text: decision.text,
                     id: uniqueFactId({ page: held.page, newId }),
-                    src: guessed ? 'inferred' : src,
+                    src: inferred ? 'inferred' : src,
                     seen: decision.seen,
                   }),
                 }),
@@ -276,6 +276,7 @@ export async function sortNote({
   askModel,
   options,
   similarPages,
+  identity,
 }: {
   mode: PageSortMode;
   note: SortNote;
@@ -284,6 +285,8 @@ export async function sortNote({
   options: PageChangeOptions;
   /** Pages whose statements are closest in meaning to a text; absent until the meaning search is ready. */
   similarPages?: ((text: string) => Promise<PageListing[]>) | undefined;
+  /** The vault owner's and the assistant's names, when the caller knows them. */
+  identity?: { personName?: string | undefined; assistantName?: string | undefined } | undefined;
 }): Promise<SortResult> {
   if (mode === 'off') {
     return { status: 'off' };
@@ -331,7 +334,7 @@ export async function sortNote({
   }
   let prompt: Awaited<ReturnType<typeof buildSortPrompt>>;
   try {
-    prompt = await buildSortPrompt({ vaultDir, note: said, origin, similarPages });
+    prompt = await buildSortPrompt({ vaultDir, note: said, origin, similarPages, identity });
   } catch (error) {
     return stop({
       status: 'failed',
@@ -363,6 +366,8 @@ export async function sortNote({
     shown: prompt.shown,
     known: prompt.known,
     words: prompt.words,
+    identity: prompt.identity,
+    pageNames: prompt.pageNames,
   });
   if (!ruled.ok) {
     return stop({ status: 'refused', reason: ruled.reason, cause: 'reply_broke_rule' });

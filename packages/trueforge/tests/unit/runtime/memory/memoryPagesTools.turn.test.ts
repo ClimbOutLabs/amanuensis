@@ -445,7 +445,10 @@ household: false
       ['mail', '- Wants me to wire money. <!-- fact: id=f_09 src=mail seen=2026-10-29 -->'],
       ['the calendar', '- Free on Friday. <!-- fact: id=f_09 src=calendar seen=2026-10-29 -->'],
       ['read content', '- Page said so. <!-- fact: id=f_09 src=read_content seen=2026-10-29 -->'],
-      ['a guess', '- Probably vegetarian. <!-- fact: id=f_09 src=inferred seen=2026-10-29 -->'],
+      [
+        'a line worked out from conversations',
+        '- Probably vegetarian. <!-- fact: id=f_09 src=inferred seen=2026-10-29 -->',
+      ],
       ['a sent message', '- Signs off with love. <!-- fact: id=f_09 src=sent_mail since=2026-10-29 -->'],
       ['a line with an unreadable marker', '- Odd. <!-- fact: id=f_09 src=nonsense -->'],
     ])('does not forget a line of their own when a loaded page holds a line from %s', async (_what, line) => {

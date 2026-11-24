@@ -178,7 +178,7 @@ describe('memory pages API', () => {
     );
     const page = await readPage();
     const labels = new Map(page.sections.flatMap(section => section.lines.map(line => [line.text, line.source_label])));
-    expect(labels.get('Guessed.')).toBe('External source: Aman’s guess');
+    expect(labels.get('Guessed.')).toBe('Worked out from your conversations, not confirmed');
     expect(labels.get('On the calendar.')).toBe('External source: calendar');
     expect(labels.get('Edited by you.')).toBe('From you');
   });

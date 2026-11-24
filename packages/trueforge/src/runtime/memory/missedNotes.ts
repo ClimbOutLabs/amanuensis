@@ -51,6 +51,7 @@ export async function sortMissedNotes({
   askModel,
   similarPages,
   countFailedNight,
+  identity,
 }: {
   mode: PageSortMode;
   baseDir: string;
@@ -61,6 +62,8 @@ export async function sortMissedNotes({
   similarPages: ((text: string) => Promise<PageListing[]>) | undefined;
   /** Whether a note that fails in this run moves one night closer to being left alone. */
   countFailedNight: boolean;
+  /** The vault owner's and the assistant's names, when the caller knows them. */
+  identity?: { personName?: string | undefined; assistantName?: string | undefined } | undefined;
 }): Promise<MissedNotesResult> {
   const result: MissedNotesResult = { asked: 0, sorted: 0, reasons: [] };
   if (mode === 'off') {
@@ -96,7 +99,7 @@ export async function sortMissedNotes({
   let failuresInARow = 0;
   for (const entry of missed) {
     const note = noteOf({ entry, today });
-    const outcome = await sortNote({ mode, note, askModel, options, similarPages });
+    const outcome = await sortNote({ mode, note, askModel, options, similarPages, identity });
     // A note of the assistant's own reply is settled without the model, so it counts as neither asked nor sorted.
     const modelAsked = noteOriginOf(note.metadata).kind !== 'assistant_reply';
     if (modelAsked) {
