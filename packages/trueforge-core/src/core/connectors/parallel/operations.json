@@ -1,0 +1,4346 @@
+[
+  {
+    "name": "web_search",
+    "method": "POST",
+    "path": "/v1/search",
+    "description": "Search the web and return results with excerpts from the pages found. Use it to look up current facts, news, and topics that need live sources",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the search should find or accomplish, stated in plain words."
+        },
+        "search_queries": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Keyword queries to search with. At least one is required."
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["turbo", "fast", "basic", "advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How much effort to spend, from the fastest setting to the most thorough."
+        },
+        "max_chars_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The most source text to return, counted in characters across all results."
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional id that groups related calls into one session."
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional label naming the model that made the call."
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "source_policy": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "include_domains": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "exclude_domains": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "after_date": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fetch_policy": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_age_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timeout_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "disable_cache_fallback": {
+                          "type": "boolean"
+                        },
+                        "as_of": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "format": "date-time"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "excerpt_settings": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_chars_per_result": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra settings for this call, such as limits on which sources may be used."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["search_queries"]
+    },
+    "beta": false
+  },
+  {
+    "name": "flight_search",
+    "method": "POST",
+    "path": "/v1/flights/search",
+    "description": "Search for flights between airports on given dates and return matching flights with prices. Use it to compare flight options for a trip",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "origins": {
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "type": "array",
+          "maxItems": 7,
+          "minItems": 1,
+          "description": "Departure airport codes, such as SFO. At least one is required."
+        },
+        "destinations": {
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "type": "array",
+          "maxItems": 7,
+          "minItems": 1,
+          "description": "Arrival airport codes, such as ORD. At least one is required."
+        },
+        "departure_date": {
+          "type": "string",
+          "format": "date",
+          "description": "The day the trip leaves, as YYYY-MM-DD."
+        },
+        "return_date": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The day the trip returns, as YYYY-MM-DD. Leave out for a one-way trip."
+        },
+        "adults": {
+          "type": "integer",
+          "maximum": 9.0,
+          "minimum": 1.0,
+          "description": "How many adult travellers there are."
+        },
+        "children": {
+          "type": "integer",
+          "maximum": 8.0,
+          "minimum": 0.0,
+          "description": "How many child travellers there are."
+        },
+        "infants_in_seat": {
+          "type": "integer",
+          "maximum": 8.0,
+          "minimum": 0.0,
+          "description": "How many infants travel in a seat of their own."
+        },
+        "infants_on_lap": {
+          "type": "integer",
+          "maximum": 8.0,
+          "minimum": 0.0,
+          "description": "How many infants travel on an adult lap."
+        },
+        "cabin": {
+          "type": "string",
+          "enum": ["economy", "premium_economy", "business", "first"],
+          "description": "The cabin class to search for."
+        },
+        "max_stops": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "maximum": 2.0,
+              "minimum": 0.0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The most stops a returned flight may have."
+        },
+        "max_price": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The highest total price to return."
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "The currency prices should be returned in."
+        },
+        "max_duration_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The longest travel time to return, in minutes."
+        },
+        "include_airlines": {
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{2}$"
+          },
+          "type": "array",
+          "maxItems": 10,
+          "description": "Only return flights from these airlines."
+        },
+        "exclude_airlines": {
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{2}$"
+          },
+          "type": "array",
+          "maxItems": 10,
+          "description": "Leave out flights from these airlines."
+        },
+        "departure_hours": {
+          "anyOf": [
+            {
+              "properties": {
+                "earliest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                },
+                "latest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["earliest", "latest"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Departure times to allow, as hours of the day."
+        },
+        "arrival_hours": {
+          "anyOf": [
+            {
+              "properties": {
+                "earliest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                },
+                "latest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["earliest", "latest"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Arrival times to allow, as hours of the day."
+        },
+        "return_hours": {
+          "anyOf": [
+            {
+              "properties": {
+                "earliest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                },
+                "latest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["earliest", "latest"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Return departure times to allow, as hours of the day."
+        },
+        "return_arrival_hours": {
+          "anyOf": [
+            {
+              "properties": {
+                "earliest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                },
+                "latest": {
+                  "type": "integer",
+                  "maximum": 23.0,
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": ["earliest", "latest"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Return arrival times to allow, as hours of the day."
+        },
+        "sort": {
+          "type": "string",
+          "enum": ["best", "price", "duration", "departure_time", "arrival_time"],
+          "description": "How to order the flights returned."
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra settings for this call, such as limits on which sources may be used."
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How much effort to spend, from the fastest setting to the most thorough."
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional id that groups related calls into one session."
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional label naming the model that made the call."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["origins", "destinations", "departure_date"]
+    },
+    "beta": false
+  },
+  {
+    "name": "hotel_search",
+    "method": "POST",
+    "path": "/v1/hotels/search",
+    "description": "Search for hotels in a place for given check-in and check-out dates and return matching stays with prices. Use it to compare places to stay",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "location": {
+          "type": "string",
+          "description": "The place to stay in, such as a city or neighbourhood name."
+        },
+        "check_in_date": {
+          "type": "string",
+          "format": "date",
+          "description": "The first day of the stay, as YYYY-MM-DD."
+        },
+        "check_out_date": {
+          "type": "string",
+          "format": "date",
+          "description": "The day the stay ends, as YYYY-MM-DD."
+        },
+        "adults": {
+          "type": "integer",
+          "maximum": 16.0,
+          "minimum": 1.0,
+          "description": "How many adults are staying."
+        },
+        "children_ages": {
+          "items": {
+            "type": "integer",
+            "maximum": 17.0,
+            "minimum": 0.0
+          },
+          "type": "array",
+          "maxItems": 8,
+          "description": "The age of each child staying."
+        },
+        "rooms": {
+          "type": "integer",
+          "maximum": 8.0,
+          "minimum": 1.0,
+          "description": "How many rooms are needed."
+        },
+        "property_types": {
+          "items": {
+            "type": "string",
+            "enum": ["hotel", "vacation_rental"]
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "The kinds of property to return, such as hotels or apartments."
+        },
+        "min_price": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0.0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The lowest nightly price to return."
+        },
+        "max_price": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The highest nightly price to return."
+        },
+        "min_rating": {
+          "anyOf": [
+            {
+              "type": "number",
+              "maximum": 5.0,
+              "minimum": 1.0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The lowest guest rating to return."
+        },
+        "hotel_classes": {
+          "items": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0
+          },
+          "type": "array",
+          "maxItems": 5,
+          "description": "The star classes to return."
+        },
+        "free_cancellation": {
+          "type": "boolean",
+          "description": "Set to true to only return stays that can be cancelled for free."
+        },
+        "sort": {
+          "type": "string",
+          "enum": ["relevance", "price", "rating"],
+          "description": "How to order the stays returned."
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{3}$",
+          "description": "The currency prices should be returned in."
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How much effort to spend, from the fastest setting to the most thorough."
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional id that groups related calls into one session."
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional label naming the model that made the call."
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra settings for this call, such as limits on which sources may be used."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["location", "check_in_date", "check_out_date"]
+    },
+    "beta": false
+  },
+  {
+    "name": "image_search",
+    "method": "POST",
+    "path": "/v1/images/search",
+    "description": "Search the web for images that match a topic and return image results. Use it when pictures are needed rather than text pages",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the search should find or accomplish, stated in plain words."
+        },
+        "search_queries": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Keyword queries to search with. At least one is required."
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["fast", "advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How much effort to spend, from the fastest setting to the most thorough."
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional id that groups related calls into one session."
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional label naming the model that made the call."
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra settings for this call, such as limits on which sources may be used."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["search_queries"]
+    },
+    "beta": false
+  },
+  {
+    "name": "place_search",
+    "method": "POST",
+    "path": "/v1/places/search",
+    "description": "Search for real places such as restaurants, shops, and landmarks in or near a location. Use it to find places and their details",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "What to look for, such as coffee shops or a place name."
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The area to search in, as a place name."
+        },
+        "latitude": {
+          "anyOf": [
+            {
+              "type": "number",
+              "maximum": 90.0,
+              "minimum": -90.0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The latitude of the centre of the search area."
+        },
+        "longitude": {
+          "anyOf": [
+            {
+              "type": "number",
+              "maximum": 180.0,
+              "minimum": -180.0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The longitude of the centre of the search area."
+        },
+        "max_distance_km": {
+          "anyOf": [
+            {
+              "type": "number",
+              "maximum": 200.0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How far from the centre to search, in kilometres."
+        },
+        "open_now": {
+          "type": "boolean",
+          "description": "Set to true to only return places that are open right now."
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["fast", "advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How much effort to spend, from the fastest setting to the most thorough."
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional id that groups related calls into one session."
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional label naming the model that made the call."
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra settings for this call, such as limits on which sources may be used."
+        },
+        "max_results": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1.0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The most places to return."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["query"]
+    },
+    "beta": false
+  },
+  {
+    "name": "shopping_search",
+    "method": "POST",
+    "path": "/v1/shopping/search",
+    "description": "Search shopping listings for products and return matches with prices. Use it to find something to buy or to compare product prices",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "search_queries": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "maxItems": 5,
+          "description": "Product names or keywords to search for. At least one is required."
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the search should find or accomplish, stated in plain words."
+        },
+        "min_price": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0.0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The lowest price to return."
+        },
+        "max_price": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The highest price to return."
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["new", "used", "refurbished"]
+            },
+            {
+              "type": "string",
+              "const": "any"
+            }
+          ],
+          "description": "The condition of the products to return: new, used, or refurbished."
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["advanced"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How much effort to spend, from the fastest setting to the most thorough."
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional id that groups related calls into one session."
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional label naming the model that made the call."
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "max_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra settings for this call, such as limits on which sources may be used."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["search_queries"]
+    },
+    "beta": false
+  },
+  {
+    "name": "extract_pages",
+    "method": "POST",
+    "path": "/v1/extract",
+    "description": "Read one or more web pages in full and return their content, focused on an objective if one is given. Use it when search excerpts are not enough and the actual page content is needed",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "urls": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "The full web addresses of the pages to read. At least one is required."
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What to pull out of the pages, stated in plain words."
+        },
+        "search_queries": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional keyword queries that point at the parts of the pages that matter."
+        },
+        "max_chars_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The most source text to return, counted in characters across all results."
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional id that groups related calls into one session."
+        },
+        "client_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional label naming the model that made the call."
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "fetch_policy": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_age_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timeout_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "disable_cache_fallback": {
+                          "type": "boolean"
+                        },
+                        "as_of": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "format": "date-time"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "excerpt_settings": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_chars_per_result": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "full_content": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_chars_per_result": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "links": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra settings for this call, such as limits on which sources may be used."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["urls"]
+    },
+    "beta": false
+  },
+  {
+    "name": "web_decisions",
+    "method": "POST",
+    "path": "/v1/decisions",
+    "description": "Weigh a set of questions against current web evidence and return a reasoned answer for each one. Use it for a choice that should rest on up-to-date sources",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "after_date": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "include_excerpts": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional settings, such as a location, a date to search after, or whether to include source excerpts."
+        },
+        "mode": {
+          "type": "string",
+          "const": "fast",
+          "description": "How much effort to spend, from the fastest setting to the most thorough."
+        },
+        "state": {
+          "description": "The current state of the decision, including what is already known. Required."
+        },
+        "questions": {
+          "type": "object",
+          "description": "The questions to weigh against current web evidence. Required."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": ["state", "questions"]
+    },
+    "beta": false
+  },
+  {
+    "name": "create_task_group",
+    "method": "POST",
+    "path": "/v1/tasks/groups",
+    "description": "Create an empty task group so several related research runs can be tracked together. Use it before starting runs that belong to one job",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional labels to store with the record, as key and value pairs."
+        }
+      },
+      "type": "object"
+    },
+    "beta": false
+  },
+  {
+    "name": "retrieve_task_group",
+    "method": "GET",
+    "path": "/v1/tasks/groups/{taskgroup_id}",
+    "description": "Return the details and status of one task group",
+    "query": [],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string",
+        "description": "The id of the task group, as returned when the group was created."
+      }
+    },
+    "required": ["taskgroup_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "stream_task_group_events",
+    "method": "GET",
+    "path": "/v1/tasks/groups/{taskgroup_id}/events",
+    "description": "Return the next event from a task group event feed, continuing from the last event id if one is given. Use it to follow the group while its runs work",
+    "query": ["last_event_id", "timeout"],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string",
+        "description": "The id of the task group, as returned when the group was created."
+      },
+      "last_event_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The id of the last event already seen, so the feed continues from the next one."
+      },
+      "timeout": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "How long to wait for the next event before giving up, in seconds."
+      }
+    },
+    "required": ["taskgroup_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "add_runs_to_task_group",
+    "method": "POST",
+    "path": "/v1/tasks/groups/{taskgroup_id}/runs",
+    "description": "Start one or more research runs inside a task group, each answering its input under a shared task specification. Use it to run a batch of related research in one call",
+    "query": ["refresh_status"],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string",
+        "description": "The id of the task group, as returned when the group was created."
+      },
+      "refresh_status": {
+        "type": "boolean",
+        "description": "Set to true to refresh the run statuses before answering."
+      }
+    },
+    "required": ["taskgroup_id"],
+    "body": {
+      "properties": {
+        "default_task_spec": {
+          "anyOf": [
+            {
+              "properties": {
+                "output_schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "properties": {
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "text"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "auto"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "input_schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "properties": {
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "text"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object",
+              "required": ["output_schema"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The task specification every run in this call follows, unless a run carries its own."
+        },
+        "inputs": {
+          "items": {
+            "properties": {
+              "processor": {
+                "type": "string"
+              },
+              "metadata": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ]
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "memory_scope_key": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9_-]+$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source_policy": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "include_domains": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "exclude_domains": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "after_date": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "advanced_settings": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "location": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "data_sources": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "pay_per_use": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "free": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "excluded": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "fetch_policy": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "max_age_seconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "timeout_seconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "disable_cache_fallback": {
+                                "type": "boolean"
+                              },
+                              "as_of": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "format": "date-time"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "task_spec": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "output_schema": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "json_schema": {
+                                "additionalProperties": true,
+                                "type": "object"
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "json"
+                              }
+                            },
+                            "type": "object",
+                            "required": ["json_schema"]
+                          },
+                          {
+                            "properties": {
+                              "description": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "text"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "auto"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "input_schema": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "properties": {
+                              "json_schema": {
+                                "additionalProperties": true,
+                                "type": "object"
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "json"
+                              }
+                            },
+                            "type": "object",
+                            "required": ["json_schema"]
+                          },
+                          {
+                            "properties": {
+                              "description": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "text"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "type": "object",
+                    "required": ["output_schema"]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "input": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  }
+                ]
+              },
+              "previous_interaction_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mcp_servers": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "url"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "headers": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": {
+                                "type": "string",
+                                "format": "password"
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "allowed_tools": {
+                          "anyOf": [
+                            {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object",
+                      "required": ["url", "name"]
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "enable_events": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "webhook": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "url": {
+                        "type": "string"
+                      },
+                      "event_types": {
+                        "items": {
+                          "type": "string",
+                          "enum": ["task_run.status"]
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "type": "object",
+                    "required": ["url"]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "type": "object",
+            "required": ["processor", "input"]
+          },
+          "type": "array",
+          "description": "The runs to start. Each entry is the input for one run."
+        }
+      },
+      "type": "object",
+      "required": ["inputs"]
+    },
+    "beta": true
+  },
+  {
+    "name": "fetch_task_group_runs",
+    "method": "GET",
+    "path": "/v1/tasks/groups/{taskgroup_id}/runs",
+    "description": "List the runs in a task group with their statuses, including inputs or outputs when asked for them",
+    "query": ["last_event_id", "status", "include_input", "include_output"],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string",
+        "description": "The id of the task group, as returned when the group was created."
+      },
+      "last_event_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The id of the last event already seen, so the feed continues from the next one."
+      },
+      "status": {
+        "anyOf": [
+          {
+            "enum": ["queued", "action_required", "running", "completed", "failed", "cancelling", "cancelled"],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Only return runs with this status."
+      },
+      "include_input": {
+        "type": "boolean",
+        "description": "Set to true to include each run input in the answer."
+      },
+      "include_output": {
+        "type": "boolean",
+        "description": "Set to true to include each run output in the answer."
+      }
+    },
+    "required": ["taskgroup_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "retrieve_task_group_run",
+    "method": "GET",
+    "path": "/v1/tasks/groups/{taskgroup_id}/runs/{run_id}",
+    "description": "Return one run from a task group with its status and result",
+    "query": [],
+    "inputs": {
+      "taskgroup_id": {
+        "type": "string",
+        "description": "The id of the task group, as returned when the group was created."
+      },
+      "run_id": {
+        "type": "string",
+        "description": "The id of the run, as returned when the run was started."
+      }
+    },
+    "required": ["taskgroup_id", "run_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "create_task_run",
+    "method": "POST",
+    "path": "/v1/tasks/runs",
+    "description": "Start a single deep research run that searches the web and writes a structured answer to the given input. Use it for a substantial research question that a quick search cannot settle",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "processor": {
+          "type": "string",
+          "description": "The processor to run the research with. Heavier processors dig deeper and take longer. Required."
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional labels to store with the record, as key and value pairs."
+        },
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional key naming the research memory scope this work may draw on."
+        },
+        "source_policy": {
+          "anyOf": [
+            {
+              "properties": {
+                "include_domains": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "exclude_domains": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "after_date": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional limits on which sources the run may use, such as domains to include or leave out."
+        },
+        "advanced_settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "location": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "data_sources": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "pay_per_use": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "free": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "excluded": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fetch_policy": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "max_age_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timeout_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "disable_cache_fallback": {
+                          "type": "boolean"
+                        },
+                        "as_of": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "format": "date-time"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra settings for this call, such as limits on which sources may be used."
+        },
+        "task_spec": {
+          "anyOf": [
+            {
+              "properties": {
+                "output_schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "properties": {
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "text"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "auto"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "input_schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "properties": {
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "text"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object",
+              "required": ["output_schema"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional specification of the answer shape, such as a JSON schema for the output."
+        },
+        "input": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            }
+          ],
+          "description": "The question or material the run should research. Required."
+        },
+        "previous_interaction_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional earlier interaction to continue from."
+        },
+        "mcp_servers": {
+          "anyOf": [
+            {
+              "items": {
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "url"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "type": "string",
+                          "format": "password"
+                        },
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "allowed_tools": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "type": "object",
+                "required": ["url", "name"]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra tool servers the work may call."
+        },
+        "enable_events": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set to true to emit progress events while the run works."
+        },
+        "webhook": {
+          "anyOf": [
+            {
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "event_types": {
+                  "items": {
+                    "type": "string",
+                    "enum": ["task_run.status"]
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object",
+              "required": ["url"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional web address to notify when the work finishes or reports."
+        }
+      },
+      "type": "object",
+      "required": ["processor", "input"]
+    },
+    "beta": true
+  },
+  {
+    "name": "retrieve_task_run",
+    "method": "GET",
+    "path": "/v1/tasks/runs/{run_id}",
+    "description": "Return the current status of one task run",
+    "query": [],
+    "inputs": {
+      "run_id": {
+        "type": "string",
+        "description": "The id of the run, as returned when the run was started."
+      }
+    },
+    "required": ["run_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "stream_task_run_events",
+    "method": "GET",
+    "path": "/v1/tasks/runs/{run_id}/events",
+    "description": "Return events from a task run event feed as they arrive. The call stays open until the run finishes or the request times out, so use it only to watch a long run",
+    "query": [],
+    "inputs": {
+      "run_id": {
+        "type": "string",
+        "description": "The id of the run, as returned when the run was started."
+      }
+    },
+    "required": ["run_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "retrieve_task_run_input",
+    "method": "GET",
+    "path": "/v1/tasks/runs/{run_id}/input",
+    "description": "Return the exact input a task run was started with",
+    "query": [],
+    "inputs": {
+      "run_id": {
+        "type": "string",
+        "description": "The id of the run, as returned when the run was started."
+      }
+    },
+    "required": ["run_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "retrieve_task_run_result",
+    "method": "GET",
+    "path": "/v1/tasks/runs/{run_id}/result",
+    "description": "Return the finished result of a task run, waiting for it when it is still running",
+    "query": ["timeout"],
+    "inputs": {
+      "run_id": {
+        "type": "string",
+        "description": "The id of the run, as returned when the run was started."
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "How long to wait for the run to finish before giving up, in seconds."
+      }
+    },
+    "required": ["run_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "fast_entity_search",
+    "method": "POST",
+    "path": "/v1beta/findall/entity-search",
+    "description": "Quickly find people or companies that match an objective and return the best matches. Use it for a fast first pass before a full FindAll run",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "entity_type": {
+          "type": "string",
+          "enum": ["people", "companies"],
+          "description": "Whether to look for people or companies."
+        },
+        "objective": {
+          "type": "string",
+          "description": "What the matches should be, stated in plain words."
+        },
+        "match_limit": {
+          "type": "integer",
+          "maximum": 1000.0,
+          "minimum": 5.0,
+          "description": "The most matches to return."
+        }
+      },
+      "type": "object",
+      "required": ["entity_type", "objective"]
+    },
+    "beta": false
+  },
+  {
+    "name": "ingest_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/ingest",
+    "description": "Start a FindAll search from a plain objective and let the service work out the matching criteria. Use it when the goal is clear but ready-made match conditions are not",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "objective": {
+          "type": "string",
+          "description": "What the search should find, stated in plain words."
+        }
+      },
+      "type": "object",
+      "required": ["objective"]
+    },
+    "beta": true
+  },
+  {
+    "name": "create_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/runs",
+    "description": "Start a FindAll run that finds every person or company meeting the given match conditions, up to the match limit. Use it to build a list of entities that fit a description",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "objective": {
+          "type": "string",
+          "description": "What the run should find, stated in plain words."
+        },
+        "entity_type": {
+          "type": "string",
+          "description": "The kind of entity to find, such as companies or people."
+        },
+        "match_conditions": {
+          "items": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "type": "object",
+            "required": ["name", "description"]
+          },
+          "type": "array",
+          "description": "The conditions a match must meet. Each condition has a short name and a plain description."
+        },
+        "generator": {
+          "type": "string",
+          "enum": ["base", "core", "pro", "preview"],
+          "description": "How thorough the search should be, from base up to preview."
+        },
+        "match_limit": {
+          "type": "integer",
+          "description": "The most matches to collect."
+        },
+        "exclude_list": {
+          "anyOf": [
+            {
+              "items": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "required": ["name", "url"]
+              },
+              "type": "array",
+              "maxItems": 10000
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional list of entities to leave out of the matches."
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional labels to store with the record, as key and value pairs."
+        },
+        "webhook": {
+          "anyOf": [
+            {
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "event_types": {
+                  "items": {
+                    "type": "string",
+                    "enum": ["task_run.status"]
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object",
+              "required": ["url"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional web address to notify when the work finishes or reports."
+        },
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional key naming the research memory scope this work may draw on."
+        }
+      },
+      "type": "object",
+      "required": ["objective", "entity_type", "match_conditions", "generator", "match_limit"]
+    },
+    "beta": true
+  },
+  {
+    "name": "retrieve_findall_run_status",
+    "method": "GET",
+    "path": "/v1beta/findall/runs/{findall_id}",
+    "description": "Return the current status of one FindAll run",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string",
+        "description": "The id of the FindAll run, as returned when the run was created."
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "cancel_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/runs/{findall_id}/cancel",
+    "description": "Cancel a FindAll run that is still in progress",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string",
+        "description": "The id of the FindAll run, as returned when the run was created."
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "add_enrichment_to_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/runs/{findall_id}/enrich",
+    "description": "Add an enrichment step to a FindAll run so each match gains extra researched fields in the given output shape. Use it when the basic matches are not detailed enough",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string",
+        "description": "The id of the FindAll run, as returned when the run was created."
+      }
+    },
+    "required": ["findall_id"],
+    "body": {
+      "properties": {
+        "processor": {
+          "type": "string",
+          "description": "The processor to do the enrichment research."
+        },
+        "output_schema": {
+          "properties": {
+            "json_schema": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": {
+              "type": "string",
+              "const": "json"
+            }
+          },
+          "type": "object",
+          "required": ["json_schema"],
+          "description": "The JSON shape each enriched match should follow."
+        },
+        "mcp_servers": {
+          "anyOf": [
+            {
+              "items": {
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "url"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "type": "string",
+                          "format": "password"
+                        },
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "allowed_tools": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "type": "object",
+                "required": ["url", "name"]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional extra tool servers the work may call."
+        }
+      },
+      "type": "object",
+      "required": ["output_schema"]
+    },
+    "beta": true
+  },
+  {
+    "name": "stream_findall_events",
+    "method": "GET",
+    "path": "/v1beta/findall/runs/{findall_id}/events",
+    "description": "Return the next event from a FindAll run event feed, continuing from the last event id if one is given. Use it to follow matches as they are found",
+    "query": ["last_event_id", "timeout"],
+    "inputs": {
+      "findall_id": {
+        "type": "string",
+        "description": "The id of the FindAll run, as returned when the run was created."
+      },
+      "last_event_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The id of the last event already seen, so the feed continues from the next one."
+      },
+      "timeout": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "How long to wait for the next event before giving up, in seconds."
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "extend_findall_run",
+    "method": "POST",
+    "path": "/v1beta/findall/runs/{findall_id}/extend",
+    "description": "Raise the match limit of a FindAll run so it can collect more matches than first allowed",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string",
+        "description": "The id of the FindAll run, as returned when the run was created."
+      }
+    },
+    "required": ["findall_id"],
+    "body": {
+      "properties": {
+        "additional_match_limit": {
+          "type": "integer",
+          "description": "How many more matches the run may collect."
+        }
+      },
+      "type": "object",
+      "required": ["additional_match_limit"]
+    },
+    "beta": true
+  },
+  {
+    "name": "findall_run_result",
+    "method": "GET",
+    "path": "/v1beta/findall/runs/{findall_id}/result",
+    "description": "Return the matches collected by a FindAll run",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string",
+        "description": "The id of the FindAll run, as returned when the run was created."
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "get_findall_run_schema",
+    "method": "GET",
+    "path": "/v1beta/findall/runs/{findall_id}/schema",
+    "description": "Return the output schema a FindAll run was set up with",
+    "query": [],
+    "inputs": {
+      "findall_id": {
+        "type": "string",
+        "description": "The id of the FindAll run, as returned when the run was created."
+      }
+    },
+    "required": ["findall_id"],
+    "body": null,
+    "beta": true
+  },
+  {
+    "name": "create_monitor",
+    "method": "POST",
+    "path": "/v1/monitors",
+    "description": "Create a monitor that checks the web again and again on a schedule and reports new events or snapshots matching its settings. Use it when something needs watching over time",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["event_stream", "snapshot"],
+          "description": "What the monitor produces: an event stream of new findings, or a snapshot each time it runs."
+        },
+        "frequency": {
+          "type": "string",
+          "description": "How often the monitor runs, such as every day."
+        },
+        "processor": {
+          "type": "string",
+          "enum": ["lite", "base", "core"],
+          "description": "How much research effort each run uses: lite, base, or core."
+        },
+        "webhook": {
+          "anyOf": [
+            {
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "event_types": {
+                  "items": {
+                    "type": "string",
+                    "enum": ["monitor.event.detected", "monitor.execution.completed", "monitor.execution.failed"]
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object",
+              "required": ["url"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional web address to notify when the work finishes or reports."
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional labels to store with the record, as key and value pairs."
+        },
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional key naming the research memory scope this work may draw on."
+        },
+        "settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "query": {
+                  "type": "string"
+                },
+                "output_schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "json_schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "json"
+                        }
+                      },
+                      "type": "object",
+                      "required": ["json_schema"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "include_backfill": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "advanced_settings": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "source_policy": {
+                          "anyOf": [
+                            {
+                              "properties": {
+                                "include_domains": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "exclude_domains": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "after_date": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "location": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object",
+              "required": ["query"]
+            },
+            {
+              "properties": {
+                "task_run_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object",
+              "required": ["task_run_id"]
+            }
+          ],
+          "description": "What the monitor watches for, including its search query."
+        }
+      },
+      "type": "object",
+      "required": ["type", "frequency", "settings"]
+    },
+    "beta": false
+  },
+  {
+    "name": "list_monitors",
+    "method": "GET",
+    "path": "/v1/monitors",
+    "description": "List monitors, with filters for type and status and paging for long lists",
+    "query": ["cursor", "limit", "type", "status"],
+    "inputs": {
+      "cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The cursor from a previous answer, to fetch the next page."
+      },
+      "limit": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "maximum": 10000,
+            "minimum": 1
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The most monitors to return in one page."
+      },
+      "type": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "enum": ["event_stream", "snapshot"],
+              "type": "string"
+            }
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Only return monitors of these types."
+      },
+      "status": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "enum": ["active", "cancelled"],
+              "type": "string"
+            }
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Only return monitors with these statuses."
+      }
+    },
+    "required": [],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "monitor_stats",
+    "method": "GET",
+    "path": "/v1/monitors/stats",
+    "description": "Return summary counts for monitors",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "retrieve_monitor",
+    "method": "GET",
+    "path": "/v1/monitors/{monitor_id}",
+    "description": "Return the details of one monitor",
+    "query": [],
+    "inputs": {
+      "monitor_id": {
+        "type": "string",
+        "description": "The id of the monitor, as returned when the monitor was created."
+      }
+    },
+    "required": ["monitor_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "cancel_monitor",
+    "method": "POST",
+    "path": "/v1/monitors/{monitor_id}/cancel",
+    "description": "Cancel a monitor so it stops running",
+    "query": [],
+    "inputs": {
+      "monitor_id": {
+        "type": "string",
+        "description": "The id of the monitor, as returned when the monitor was created."
+      }
+    },
+    "required": ["monitor_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "list_monitor_events",
+    "method": "GET",
+    "path": "/v1/monitors/{monitor_id}/events",
+    "description": "List the events a monitor has reported, with paging for long lists",
+    "query": ["event_group_id", "cursor", "limit", "include_completions"],
+    "inputs": {
+      "monitor_id": {
+        "type": "string",
+        "description": "The id of the monitor, as returned when the monitor was created."
+      },
+      "event_group_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Only return events that belong to this event group."
+      },
+      "cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The cursor from a previous answer, to fetch the next page."
+      },
+      "limit": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "maximum": 100,
+            "minimum": 1
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The most events to return in one page."
+      },
+      "include_completions": {
+        "type": "boolean",
+        "description": "Set to true to include completed run records along with the events."
+      }
+    },
+    "required": ["monitor_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "trigger_monitor_run",
+    "method": "POST",
+    "path": "/v1/monitors/{monitor_id}/trigger",
+    "description": "Run a monitor once right away, outside its usual schedule",
+    "query": [],
+    "inputs": {
+      "monitor_id": {
+        "type": "string",
+        "description": "The id of the monitor, as returned when the monitor was created."
+      }
+    },
+    "required": ["monitor_id"],
+    "body": null,
+    "beta": false
+  },
+  {
+    "name": "update_monitor",
+    "method": "POST",
+    "path": "/v1/monitors/{monitor_id}/update",
+    "description": "Change a monitor, such as its type, schedule, processor, webhook, or settings",
+    "query": [],
+    "inputs": {
+      "monitor_id": {
+        "type": "string",
+        "description": "The id of the monitor, as returned when the monitor was created."
+      }
+    },
+    "required": ["monitor_id"],
+    "body": {
+      "properties": {
+        "type": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["event_stream", "snapshot"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the monitor produces: an event stream of new findings, or a snapshot each time it runs."
+        },
+        "frequency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How often the monitor runs, such as every day."
+        },
+        "processor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["lite", "base", "core"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How much research effort each run uses: lite, base, or core."
+        },
+        "webhook": {
+          "anyOf": [
+            {
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "event_types": {
+                  "items": {
+                    "type": "string",
+                    "enum": ["monitor.event.detected", "monitor.execution.completed", "monitor.execution.failed"]
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object",
+              "required": ["url"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An optional web address to notify when the work finishes or reports."
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional labels to store with the record, as key and value pairs."
+        },
+        "settings": {
+          "anyOf": [
+            {
+              "properties": {
+                "query": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "advanced_settings": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "source_policy": {
+                          "anyOf": [
+                            {
+                              "properties": {
+                                "include_domains": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "exclude_domains": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "after_date": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "location": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the monitor watches for, including its search query."
+        }
+      },
+      "type": "object"
+    },
+    "beta": false
+  },
+  {
+    "name": "clear_research_memory",
+    "method": "POST",
+    "path": "/v1beta/memory/clear",
+    "description": "Clear saved research memory, for one scope when a scope key is given and otherwise in full. Use it when earlier research should no longer inform new work",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The scope to clear. Leave out to clear all saved research memory."
+        }
+      },
+      "type": "object"
+    },
+    "beta": false
+  },
+  {
+    "name": "evict_from_research_memory",
+    "method": "POST",
+    "path": "/v1beta/memory/evict",
+    "description": "Remove one task, monitor, or FindAll run from saved research memory so it no longer informs new work",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The scope the entry was saved under, when it has one."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["task", "monitor", "findall"],
+          "description": "The kind of entry to remove: a task, a monitor, or a FindAll run."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "The id of the entry to remove."
+        }
+      },
+      "type": "object",
+      "required": ["kind", "id"]
+    },
+    "beta": false
+  },
+  {
+    "name": "retrieve_research_memory",
+    "method": "POST",
+    "path": "/v1beta/memory/retrieve",
+    "description": "Look up earlier research saved in memory and return the entries that best match. Use it to reuse past findings instead of researching again",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What to look for in saved research."
+        },
+        "limit": {
+          "type": "integer",
+          "maximum": 25.0,
+          "minimum": 1.0,
+          "description": "The most entries to return."
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["task", "monitor", "findall"]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only return entries of this kind: a task, a monitor, or a FindAll run."
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "format": "date-time",
+          "description": "Only return entries saved at or after this time."
+        },
+        "memory_scope_key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The scope to look in, when the research was saved under one."
+        }
+      },
+      "type": "object"
+    },
+    "beta": false
+  },
+  {
+    "name": "chat_completions",
+    "method": "POST",
+    "path": "/v1beta/chat/completions",
+    "description": "Send a conversation to a chat model and return its reply, read to the end when it streams. Use it for a direct model answer rather than a research run",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "The chat model that should answer."
+        },
+        "messages": {
+          "items": {
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": ["system", "user", "assistant"]
+              },
+              "content": {
+                "type": "string"
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "type": "object",
+            "required": ["role", "content"]
+          },
+          "type": "array",
+          "description": "The conversation so far, as role and content pairs."
+        },
+        "stream": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set to true to receive the reply as it is written."
+        },
+        "response_format": {
+          "anyOf": [
+            {
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "text"
+                }
+              },
+              "type": "object",
+              "required": ["type"]
+            },
+            {
+              "properties": {
+                "json_schema": {
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "schema": {
+                      "additionalProperties": false,
+                      "type": "object"
+                    },
+                    "strict": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "type": "object",
+                  "required": ["name"]
+                },
+                "type": {
+                  "type": "string",
+                  "const": "json_schema"
+                }
+              },
+              "type": "object",
+              "required": ["json_schema", "type"]
+            },
+            {
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "json_object"
+                }
+              },
+              "type": "object",
+              "required": ["type"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "top_p": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "n": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "presence_penalty": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frequency_penalty": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_interaction_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object",
+      "required": ["model", "messages"]
+    },
+    "beta": false
+  },
+  {
+    "name": "create_response",
+    "method": "POST",
+    "path": "/v1/responses",
+    "description": "Send input to a model and return its response. Use it for a direct model answer in the responses format",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "The model that should answer."
+        },
+        "input": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": ["user", "assistant", "system", "developer"]
+                  },
+                  "content": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "items": {
+                          "properties": {
+                            "type": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "text": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    ]
+                  }
+                },
+                "type": "object",
+                "required": ["role", "content"]
+              },
+              "type": "array"
+            }
+          ],
+          "description": "The prompt or conversation to answer."
+        },
+        "instructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional guidance for how the model should answer."
+        },
+        "previous_response_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stream": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "format": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "properties": {
+                        "type": {
+                          "const": "text",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type"],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "schema": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "const": "json_schema",
+                          "type": "string"
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "strict": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["name", "schema", "type"],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "properties": {
+                        "type": {
+                          "const": "json_object",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type"],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "verbosity": {
+                  "anyOf": [
+                    {
+                      "enum": ["low", "medium", "high"],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional labels to store with the record, as key and value pairs."
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "properties": {
+                "effort": {
+                  "anyOf": [
+                    {
+                      "enum": ["low", "medium", "high", "auto"],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "background": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "enum": ["web_search", "web_search_2025_08_26"],
+                        "type": "string"
+                      },
+                      "filters": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "allowed_domains": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "blocked_domains": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "search_context_size": {
+                        "anyOf": [
+                          {
+                            "enum": ["low", "medium", "high"],
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "user_location": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "city": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "country": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "region": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "timezone": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "type": {
+                                "anyOf": [
+                                  {
+                                    "const": "approximate",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["type"],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "server_label": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "const": "mcp",
+                        "type": "string"
+                      },
+                      "allowed_tools": {
+                        "anyOf": [
+                          {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "authorization": {
+                        "anyOf": [
+                          {
+                            "format": "password",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "headers": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": {
+                              "format": "password",
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "require_approval": {
+                        "const": "never",
+                        "type": "string"
+                      },
+                      "server_description": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "server_url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["server_label", "type", "require_approval", "server_url"],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "data_sources": {
+          "anyOf": [
+            {
+              "properties": {
+                "pay_per_use": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "free": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "excluded": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object",
+      "required": ["model", "input"]
+    },
+    "beta": false
+  },
+  {
+    "name": "suggest_task",
+    "method": "POST",
+    "path": "/v1beta/tasks/suggest",
+    "description": "Turn a plain statement of intent into a ready-to-run research task specification. Use it when the goal is known but the task shape is not",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "type": "object",
+      "properties": {
+        "user_intent": {
+          "type": "string",
+          "description": "The goal, in the words the person used."
+        },
+        "previous_task": {
+          "type": "object",
+          "description": "An optional earlier task specification to revise."
+        }
+      },
+      "required": ["user_intent"]
+    },
+    "beta": false
+  },
+  {
+    "name": "suggest_processor",
+    "method": "POST",
+    "path": "/v1beta/tasks/suggest-processor",
+    "description": "Recommend which processor should run a given task specification. Use it when a task is ready and the right depth of research is unclear",
+    "query": [],
+    "inputs": {},
+    "required": [],
+    "body": {
+      "type": "object",
+      "properties": {
+        "task_spec": {
+          "type": "object",
+          "description": "The task specification to choose a processor for."
+        },
+        "choose_processors_from": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "An optional list of processors to choose between."
+        }
+      },
+      "required": ["task_spec"]
+    },
+    "beta": false
+  }
+]

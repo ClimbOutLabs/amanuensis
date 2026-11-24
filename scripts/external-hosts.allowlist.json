@@ -231,6 +231,11 @@
       "reason": "Default walking and cycling routes for the maps card; can be changed in settings."
     },
     {
+      "host": "api.parallel.ai",
+      "category": "connector",
+      "reason": "Parallel product API, contacted when the person enables the authenticated Parallel connector."
+    },
+    {
       "host": "search.parallel.ai",
       "category": "connector",
       "reason": "Parallel MCP server preset in the MCP catalog; contacted only if the person adds it."
