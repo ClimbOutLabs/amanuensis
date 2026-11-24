@@ -28,6 +28,83 @@ test('the configured product endpoint advertises distinct typed tools for every 
   expect((await connection.callTool({name: 'list_monitors'})).isError).toBe(true);
 });
 
+const bareTitles: Record<string, string> = {
+  web_search: 'Web',
+  flight_search: 'Flight search',
+  hotel_search: 'Hotel search',
+  image_search: 'Image search',
+  place_search: 'Place search',
+  shopping_search: 'Shopping search',
+  extract_pages: 'Extract',
+  web_decisions: 'Decisions',
+  create_task_group: 'Create Task Group',
+  retrieve_task_group: 'Retrieve Task Group',
+  stream_task_group_events: 'Stream Task Group Events',
+  add_runs_to_task_group: 'Add Runs to Task Group',
+  fetch_task_group_runs: 'Fetch Task Group Runs',
+  retrieve_task_group_run: 'Retrieve Task Group Run',
+  create_task_run: 'Create Task Run',
+  retrieve_task_run: 'Retrieve Task Run',
+  stream_task_run_events: 'Stream Task Run Events',
+  retrieve_task_run_input: 'Retrieve Task Run Input',
+  retrieve_task_run_result: 'Retrieve Task Run Result',
+  fast_entity_search: 'Fast Entity Search',
+  ingest_findall_run: 'Ingest FindAll Run',
+  create_findall_run: 'Create FindAll Run',
+  retrieve_findall_run_status: 'Retrieve FindAll Run Status',
+  cancel_findall_run: 'Cancel FindAll Run',
+  add_enrichment_to_findall_run: 'Add Enrichment to FindAll Run',
+  stream_findall_events: 'Stream FindAll Events',
+  extend_findall_run: 'Extend FindAll Run',
+  findall_run_result: 'FindAll Run Result',
+  get_findall_run_schema: 'Get FindAll Run Schema',
+  create_monitor: 'Create Monitor',
+  list_monitors: 'List Monitors',
+  monitor_stats: 'Monitor Stats',
+  retrieve_monitor: 'Retrieve Monitor',
+  cancel_monitor: 'Cancel Monitor',
+  list_monitor_events: 'List Monitor Events',
+  trigger_monitor_run: 'Trigger Monitor Run',
+  update_monitor: 'Update Monitor',
+  clear_research_memory: 'Clear Memory',
+  evict_from_research_memory: 'Evict from Memory',
+  retrieve_research_memory: 'Retrieve Memory',
+  chat_completions: 'Chat Completions',
+  create_response: 'Create Response',
+  suggest_task: 'Suggest a research task specification',
+  suggest_processor: 'Suggest a research processor',
+};
+
+test('presents plain descriptions that say what each tool and its main inputs do', async () => {
+  const { connection } = fixture(Response.json({}));
+  const { tools } = await connection.listTools();
+  expect(tools).toHaveLength(44);
+  for (const tool of tools) {
+    const bare = bareTitles[tool.name];
+    expect(bare).toBeDefined();
+    expect(tool.description ?? '').not.toBe(`${bare ?? ''} on Parallel.`);
+    expect((tool.description ?? '').trim().length).toBeGreaterThan(0);
+  }
+  expect(tools.find(tool => tool.name === 'web_search')?.description).toContain('Search the web');
+  const bodyOf = (name: string) => tools.find(tool => tool.name === name)?.inputSchema.properties?.['body'];
+  expect(bodyOf('web_search')).toMatchObject({
+    properties: { search_queries: { description: expect.any(String) }, objective: { description: expect.any(String) } },
+  });
+  expect(bodyOf('extract_pages')).toMatchObject({ properties: { urls: { description: expect.any(String) } } });
+  expect(bodyOf('create_task_run')).toMatchObject({
+    properties: { processor: { description: expect.any(String) }, input: { description: expect.any(String) } },
+  });
+  expect(bodyOf('create_findall_run')).toMatchObject({
+    properties: { match_conditions: { description: expect.any(String) } },
+  });
+  expect(bodyOf('create_monitor')).toMatchObject({
+    properties: { settings: { description: expect.any(String) }, frequency: { description: expect.any(String) } },
+  });
+  expect(tools.find(tool => tool.name === 'retrieve_task_run')?.inputSchema.properties?.['run_id']).toMatchObject({
+    description: expect.any(String),
+  });
+});
+
 test('sends a typed body only to the product origin and refuses redirects', async () => {
   const { connection, fetch } = fixture(Response.json({ result: 'found' }));
   // The documented search contract requires at least one keyword query; an objective alone is refused with a 422.
