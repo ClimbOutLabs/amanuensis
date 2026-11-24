@@ -462,6 +462,40 @@ describe('exact source values through the live and saved chat', () => {
     expect(result.turn.state).toMatchObject({ status: 'done', output: { content: visible } });
   });
 
+  it('shows identifiers with Markdown delimiters exactly as the source wrote them', async () => {
+    const stockResult = {
+      items: [{ lot_id: 'LOT*12*A', batch_code: 'BATCH_0042', amount: 10.5, currency: 'USD' }],
+    };
+    const harness = await fixture([stockResult]);
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) return finalAnswerStream(WRONG_GUESS);
+        const row = selectedRow(sourceRows(request), '/items/0');
+        return presentation({
+          rows: [{ ref: row.ref, fields: ['/lot_id', '/batch_code', '/amount', '/currency'] }],
+        });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    const visible = liveText(result.events);
+    // The reply is Markdown, so each delimiter is escaped in the text the host writes.
+    expect(visible).toContain('Lot id: LOT\\*12\\*A');
+    expect(visible).toContain('Batch code: BATCH\\_0042');
+    // Resolving the escapes the way a Markdown reader does recovers the source text
+    // character for character, where the unescaped asterisks would have rendered the
+    // digits in italics and dropped the asterisks themselves.
+    const rendered = visible.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, '$1');
+    expect(rendered).toContain('Lot id: LOT*12*A');
+    expect(rendered).toContain('Batch code: BATCH_0042');
+    expect(visible).toContain('Amount: 10.5');
+    expect(visible).not.toContain(WRONG_GUESS);
+    expect(result.turn.state).toMatchObject({ status: 'done', output: { content: visible } });
+  });
+
   it('shows a three-row result with a nested object field in one answer', async () => {
     const nestedResult = {
       transactions: [0, 1, 2].map(index => ({

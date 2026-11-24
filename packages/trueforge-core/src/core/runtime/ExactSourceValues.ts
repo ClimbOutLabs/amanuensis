@@ -68,6 +68,10 @@ const EXACT_SOURCE_INSTRUCTIONS =
 
 const ReplacedContentSchema = z.object({
   connector_result: z.unknown(),
+  // The same result as parsed by the decimal-preserving parse, so plain decimal literals
+  // survive as their source text. Null or absent when that parse was unavailable, or in
+  // results persisted before this field existed.
+  exact_source_result: z.unknown().nullable().optional(),
   exact_source_rows: z.array(z.object({ ref: RowReference, path: FieldPath, fields: z.array(FieldPath) })),
   exact_source_instructions: z.literal(EXACT_SOURCE_INSTRUCTIONS),
 });
@@ -188,21 +192,17 @@ function parseWithExactDecimals(text: string): unknown {
 const MAX_ADOPT_DEPTH = 12;
 
 /**
- * Rebuild an adoptable copy of a persisted connector result. The persisted form holds the
- * plain parse, so a number's source text is gone. A whole number in the safe range and a
- * fractional value's shortest text still name the value the source wrote, apart from
- * trailing zeros. An integer text from a float outside the safe range has already lost
- * digits, so it is dropped (replaced with null, which no field collects) rather than
- * quoted as exact. The same goes for exponent forms, which a plain parse cannot show
- * digit for digit either.
+ * Rebuild an adoptable copy of a persisted connector result whose exact parse is
+ * unavailable. The plain parse has already rounded every number it held: a fractional
+ * value's printed text can differ from the source digits, and a value the source wrote
+ * with a fraction can land on a whole number. No number from a plain parse is therefore
+ * adopted (each is replaced with null, which no field collects), so a field that held a
+ * number fails verification instead of being quoted from the rounded replacement.
+ * Strings and booleans survive a plain parse exactly, so they are adopted as they stand.
  */
 function adoptableValue(value: unknown, depth: number): unknown {
   if (typeof value === 'number') {
-    if (Number.isSafeInteger(value)) {
-      return value;
-    }
-    const text = String(value);
-    return DECIMAL.test(text) && text.includes('.') ? text : null;
+    return null;
   }
   if (depth >= MAX_ADOPT_DEPTH) {
     return null;
@@ -303,6 +303,26 @@ function decimal(value: ExactValue | undefined): { coefficient: bigint; scale: n
 /** The outcome of checking one presentation call: the rendered section, or the refusal to report. */
 type SectionOutcome = { text: string } | { refusal: string };
 
+/**
+ * Write one piece of source text into the Markdown reply so the rendered text matches the
+ * source character for character. The reply is rendered as Markdown, where characters
+ * such as asterisks, underscores, backticks and brackets change the visible text: an
+ * identifier like LOT*12*A would show its digits in italics with the asterisks gone.
+ * Text carrying no such character is returned unchanged, so ordinary values render as
+ * before. Text that does carry one has each Markdown delimiter in it escaped with a
+ * backslash, which the renderer shows as the literal character. A doubled dollar sign is
+ * a delimiter too, because the renderer treats it as the start of a math span.
+ */
+const MARKDOWN_DELIMITER = /[\\*_`[\]<~]|\$\$/;
+const HTML_ENTITY = /&(?=#\d+;|#x[0-9a-fA-F]+;|[a-zA-Z][a-zA-Z0-9]+;)/;
+
+function markdownText(text: string): string {
+  if (!MARKDOWN_DELIMITER.test(text) && !HTML_ENTITY.test(text)) {
+    return text;
+  }
+  return text.replaceAll('&', '\\&').replace(/[\\*_`[\]<~$]/g, character => `\\${character}`);
+}
+
 /** A field path as a plain label a person reads: the path segments in words, in order. */
 function labelOf(path: string): string {
   const words = path
@@ -392,7 +412,8 @@ function checkedSum(
  * Check one presentation call and render its section of the reply. Every refusal names the
  * one constraint that failed, so the model can correct the call instead of repeating it.
  * The render is person-facing: plain labels, values as ordinary text, and the connector
- * named once per group as the only provenance on the face of the answer.
+ * named once per group as the only provenance on the face of the answer. Source text is
+ * passed through markdownText, so what the reader sees matches the source exactly.
  */
 function renderSection(input: PresentExactValuesInput, rows: ReadonlyMap<string, ExactRow>): SectionOutcome {
   const fieldCount = input.rows.reduce((count, row) => count + row.fields.length, 0);
@@ -434,11 +455,11 @@ function renderSection(input: PresentExactValuesInput, rows: ReadonlyMap<string,
     const labelSeen = new Map<string, number>();
     const lines = entries.map(entry => {
       if ((labelCounts.get(entry.label) ?? 0) < 2) {
-        return `${entry.label}: ${String(entry.value)}`;
+        return `${markdownText(entry.label)}: ${markdownText(String(entry.value))}`;
       }
       const occurrence = (labelSeen.get(entry.label) ?? 0) + 1;
       labelSeen.set(entry.label, occurrence);
-      return `${entry.label} (${String(occurrence)}): ${String(entry.value)}`;
+      return `${markdownText(entry.label)} (${String(occurrence)}): ${markdownText(String(entry.value))}`;
     });
     const group = groups.get(row.source.connector) ?? [];
     group.push(lines.join('\n'));
@@ -446,14 +467,14 @@ function renderSection(input: PresentExactValuesInput, rows: ReadonlyMap<string,
   }
   const blocks: string[] = [];
   for (const [connector, rowBlocks] of groups) {
-    blocks.push([`Source: ${connector}`, ...rowBlocks].join('\n\n'));
+    blocks.push([`Source: ${markdownText(connector)}`, ...rowBlocks].join('\n\n'));
   }
   if (input.sum !== null) {
     const summed = checkedSum(input.sum, rows, input.rows);
     if ('refusal' in summed) {
       return summed;
     }
-    blocks.push(`Total: ${summed.total} ${summed.unit}`);
+    blocks.push(`Total: ${summed.total} ${markdownText(summed.unit)}`);
   }
   return { text: blocks.join('\n\n') };
 }
@@ -568,8 +589,9 @@ export class ExactSourceValues extends LocalToolMCP {
    * before the pause are rebuilt here from the stored results. A stored result is held to
    * the same gates prepare() applied when the result arrived: the schema above only accepts
    * the complete envelope prepare() writes, the source size cap applies to the stored
-   * result, and the rows and fields are re-derived from the stored result itself through
-   * adoptableValue, which never treats a float-derived text as source text. The envelope's
+   * result, and the rows and fields are re-derived from the stored result itself: from
+   * its persisted exact parse when it carries one, and otherwise through adoptableValue,
+   * which never treats a float-derived number as source text. The envelope's
    * advertised rows only choose which of the re-derived rows and fields are kept, under
    * the same references the model was shown.
    */
@@ -587,7 +609,15 @@ export class ExactSourceValues extends LocalToolMCP {
       if (JSON.stringify(replaced.connector_result).length > MAX_SOURCE_CHARS) {
         continue;
       }
-      const recomputed = rowsOf(adoptableValue(replaced.connector_result, 0));
+      // Rows are rebuilt from the persisted exact parse when prepare() stored one, so a
+      // number's source digits come back digit for digit. Without one, the plain parse is
+      // filtered through adoptableValue, which drops every number it rounded.
+      const exact = replaced.exact_source_result;
+      if (exact !== undefined && exact !== null && JSON.stringify(exact).length > MAX_SOURCE_CHARS) {
+        continue;
+      }
+      const recomputed =
+        exact !== undefined && exact !== null ? rowsOf(exact) : rowsOf(adoptableValue(replaced.connector_result, 0));
       const byPath = new Map(recomputed.map(row => [row.path, row.fields]));
       for (const advertised of replaced.exact_source_rows) {
         if (this.rows.has(advertised.ref) || this.rows.size >= MAX_ROWS) {
@@ -685,8 +715,10 @@ export class ExactSourceValues extends LocalToolMCP {
       return [];
     }
     let rowSource: unknown;
+    let exactSource: unknown = null;
     try {
       rowSource = parseWithExactDecimals(result.rawContent);
+      exactSource = rowSource;
     } catch {
       rowSource = original;
     }
@@ -707,6 +739,10 @@ export class ExactSourceValues extends LocalToolMCP {
     }
     result.message.content = JSON.stringify({
       connector_result: original,
+      // Persist the exact parse beside the plain one the model reads, so a request that
+      // resumes after an approval pause rebuilds its rows from the source digits rather
+      // than from numbers the plain parse already rounded.
+      exact_source_result: exactSource,
       exact_source_rows: rows.map(row => ({
         ref: row.ref,
         path: row.source.path || '/',
