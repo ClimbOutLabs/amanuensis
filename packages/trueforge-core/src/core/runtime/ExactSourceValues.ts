@@ -7,8 +7,13 @@ import type { AgentTracing } from '../tracing/AgentTracing';
 import { isRecord } from '../util/records';
 
 const TOOL_NAME = 'present_exact_values';
+/** The tool result text a successful presentation leaves in the persisted context. */
+const PRESENTATION_ACCEPTED_TEXT =
+  'Those values will be shown in the reply. Call this tool again by itself to show more values, or finish with an empty message.';
 const MAX_ROWS = 50;
 const MAX_FIELDS = 24;
+// One presentation call renders one section of the reply. A result with more fields is
+// shown across successive calls, and the host joins the sections in the order presented.
 const MAX_FIELDS_IN_ANSWER = 40;
 const MAX_SOURCE_CHARS = 32_000;
 const MAX_FIELD_CHARS = 160;
@@ -23,11 +28,11 @@ const PresentExactValuesSchema = z.strictObject({
   rows: z
     .array(z.strictObject({ ref: RowReference, fields: z.array(FieldPath).min(1).max(MAX_FIELDS) }))
     .min(1)
-    .max(12)
+    .max(MAX_ROWS)
     .describe('Rows and field paths from the exact_source_rows list on this turn’s connector results.'),
   sum: z
     .strictObject({
-      refs: z.array(RowReference).min(1).max(12),
+      refs: z.array(RowReference).min(1).max(MAX_ROWS),
       value_field: FieldPath,
       unit_field: FieldPath,
     })
@@ -42,6 +47,64 @@ interface ExactRow {
   ref: string;
   source: { connector: string; tool: string; call_id: string; path: string };
   fields: ReadonlyMap<string, ExactValue>;
+}
+
+/** A connector result as persisted in the current request's context, with the names of the call that produced it. */
+export interface ExactContextResult {
+  call_id: string;
+  connector: string;
+  tool: string;
+  content: string;
+}
+
+/** A presentation call as persisted in the current request's context. */
+export interface ExactContextPresentation {
+  arguments: string;
+  succeeded: boolean;
+}
+
+const ReplacedContentSchema = z.object({
+  connector_result: z.unknown(),
+  exact_source_rows: z.array(z.object({ ref: z.string(), path: z.string(), fields: z.array(z.string()) })),
+});
+type ReplacedContent = z.infer<typeof ReplacedContentSchema>;
+
+/**
+ * Read the replaced result content out of a persisted tool message, when it carries one.
+ * The message content is the tool response envelope; its result is the content the model
+ * was shown, which prepare() replaced with the connector result and its exact source rows.
+ */
+function replacedContentOf(content: string): ReplacedContent | undefined {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(envelope)) {
+    return undefined;
+  }
+  let result: unknown = envelope['result'];
+  if (typeof result === 'string') {
+    try {
+      result = JSON.parse(result);
+    } catch {
+      return undefined;
+    }
+  }
+  const parsed = ReplacedContentSchema.safeParse(result);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** Whether a persisted presentation call was accepted, read from its tool message content. */
+export function exactPresentationSucceeded(content: string): boolean {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(content);
+  } catch {
+    return false;
+  }
+  return isRecord(envelope) && envelope['result'] === PRESENTATION_ACCEPTED_TEXT;
 }
 
 function childPath({ path, key }: { path: string; key: string }): string {
@@ -64,6 +127,58 @@ function scalar(value: unknown): ExactValue | undefined {
     return value;
   }
   return undefined;
+}
+
+/**
+ * Parse a connector result so plain decimal number literals keep their exact source text.
+ * The text is scanned once: outside string literals, a number written as a plain decimal
+ * (digits with an optional fraction, no exponent) is quoted, so the parse yields it as a
+ * string carrying the literal digit for digit. A fractional amount therefore stays exact
+ * instead of passing through a binary float, and an integer too large for a float keeps
+ * every digit. A number written with an exponent is left as a number and parsed the usual
+ * way, so it is accepted as a field only when it lands on a whole number in the safe range,
+ * exactly as before. The caller has already parsed the same text plainly, so the input is
+ * known to be valid JSON and a number sign or digit outside a string always opens a number.
+ */
+function parseWithExactDecimals(text: string): unknown {
+  let rewritten = '';
+  let inString = false;
+  let index = 0;
+  while (index < text.length) {
+    const char = text.charAt(index);
+    if (inString) {
+      rewritten += char;
+      if (char === '\\') {
+        rewritten += text.charAt(index + 1);
+        index += 2;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      rewritten += char;
+      index += 1;
+      continue;
+    }
+    if (char === '-' || (char >= '0' && char <= '9')) {
+      let end = index + 1;
+      while (end < text.length && '0123456789.eE+-'.includes(text.charAt(end))) {
+        end += 1;
+      }
+      const literal = text.slice(index, end);
+      rewritten += DECIMAL.test(literal) ? `"${literal}"` : literal;
+      index = end;
+      continue;
+    }
+    rewritten += char;
+    index += 1;
+  }
+  return JSON.parse(rewritten);
 }
 
 /** Collect leaf fields within one row. Arrays are different rows, never siblings to merge. */
@@ -138,12 +253,6 @@ function rowsOf(value: unknown): { path: string; fields: Map<string, ExactValue>
   return rows;
 }
 
-function inlineCode(text: string): string {
-  const delimiter = '`'.repeat(1 + Math.max(0, ...(text.match(/`+/g) ?? []).map(run => run.length)));
-  const pad = /^[ `]|[ `]$/.test(text) ? ' ' : '';
-  return `${delimiter}${pad}${text}${pad}${delimiter}`;
-}
-
 function decimal(value: ExactValue | undefined): { coefficient: bigint; scale: number } | undefined {
   if (typeof value !== 'string' && typeof value !== 'number') {
     return undefined;
@@ -156,35 +265,75 @@ function decimal(value: ExactValue | undefined): { coefficient: bigint; scale: n
   return { coefficient: BigInt(text.replace('.', '')), scale };
 }
 
-function totalOf(
-  input: NonNullable<PresentExactValuesInput['sum']>,
+/** The outcome of checking one presentation call: the rendered section, or the refusal to report. */
+type SectionOutcome = { text: string } | { refusal: string };
+
+/** A field path as a plain label a person reads: the path segments in words, in order. */
+function labelOf(path: string): string {
+  const words = path
+    .slice(1)
+    .split('/')
+    .map(segment => segment.replaceAll('~1', '/').replaceAll('~0', '~').replaceAll('_', ' '))
+    .join(' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function checkedSum(
+  sum: NonNullable<PresentExactValuesInput['sum']>,
   rows: ReadonlyMap<string, ExactRow>,
-): { total: string; unit: string } | undefined {
+  selections: PresentExactValuesInput['rows'],
+): { total: string; unit: string } | { refusal: string } {
+  if (new Set(sum.refs).size !== sum.refs.length) {
+    return { refusal: 'The sum names the same row more than once. Name each summed row once.' };
+  }
   if (
-    new Set(input.refs).size !== input.refs.length ||
-    input.value_field === input.unit_field ||
-    input.value_field.slice(0, input.value_field.lastIndexOf('/')) !==
-      input.unit_field.slice(0, input.unit_field.lastIndexOf('/'))
+    sum.value_field === sum.unit_field ||
+    sum.value_field.slice(0, sum.value_field.lastIndexOf('/')) !==
+      sum.unit_field.slice(0, sum.unit_field.lastIndexOf('/'))
   ) {
-    return undefined;
+    return {
+      refusal:
+        'The sum needs an amount field and a unit field that sit side by side on each row. Choose two fields from the same level.',
+    };
+  }
+  // Every operand stays visible with its provenance in the same section as the total.
+  const selectionByRef = new Map(selections.map(selection => [selection.ref, selection.fields]));
+  for (const ref of sum.refs) {
+    const fields = selectionByRef.get(ref);
+    if (fields === undefined || !fields.includes(sum.value_field) || !fields.includes(sum.unit_field)) {
+      return {
+        refusal: `Every summed row must also be shown with its ${sum.value_field} and ${sum.unit_field} fields. Add the missing fields to the shown rows.`,
+      };
+    }
   }
   let unit: string | undefined;
   let resultId: string | undefined;
   let coefficient = 0n;
   let scale = 0;
-  for (const ref of input.refs) {
+  for (const ref of sum.refs) {
     const row = rows.get(ref);
-    const value = decimal(row?.fields.get(input.value_field));
-    const rowUnit = row?.fields.get(input.unit_field);
-    if (
-      row === undefined ||
-      value === undefined ||
-      typeof rowUnit !== 'string' ||
-      rowUnit.trim() === '' ||
-      (unit !== undefined && rowUnit !== unit) ||
-      (resultId !== undefined && row.source.call_id !== resultId)
-    ) {
-      return undefined;
+    if (row === undefined) {
+      return {
+        refusal: `The row reference ${ref} is not from this request. Use only the row references listed with this turn's results.`,
+      };
+    }
+    if (resultId !== undefined && row.source.call_id !== resultId) {
+      return { refusal: 'The sum mixes rows from more than one result. Sum rows from a single result.' };
+    }
+    const value = decimal(row.fields.get(sum.value_field));
+    if (value === undefined) {
+      return {
+        refusal: `The field ${sum.value_field} on the row at ${row.source.path || '/'} is not a plain number, so it cannot be summed. Sum a field that holds plain numbers.`,
+      };
+    }
+    const rowUnit = row.fields.get(sum.unit_field);
+    if (typeof rowUnit !== 'string' || rowUnit.trim() === '') {
+      return {
+        refusal: `The field ${sum.unit_field} on the row at ${row.source.path || '/'} does not name a unit, so the sum cannot be checked. Sum rows whose unit field names a unit.`,
+      };
+    }
+    if (unit !== undefined && rowUnit !== unit) {
+      return { refusal: 'The summed rows do not share one unit. Sum rows with the same unit together.' };
     }
     unit = rowUnit;
     resultId = row.source.call_id;
@@ -194,7 +343,7 @@ function totalOf(
     scale = nextScale;
   }
   if (unit === undefined) {
-    return undefined;
+    return { refusal: 'The sum names no rows. Name at least one row to sum.' };
   }
   const sign = coefficient < 0n ? '-' : '';
   const magnitude = String(coefficient < 0n ? -coefficient : coefficient).padStart(scale + 1, '0');
@@ -202,52 +351,58 @@ function totalOf(
   return { total: sign + total, unit };
 }
 
-function answerFor(input: PresentExactValuesInput, rows: ReadonlyMap<string, ExactRow>): string | undefined {
-  if (input.rows.reduce((count, row) => count + row.fields.length, 0) > MAX_FIELDS_IN_ANSWER) {
-    return undefined;
+/**
+ * Check one presentation call and render its section of the reply. Every refusal names the
+ * one constraint that failed, so the model can correct the call instead of repeating it.
+ * The render is person-facing: plain labels, values as ordinary text, and the connector
+ * named once per group as the only provenance on the face of the answer.
+ */
+function renderSection(input: PresentExactValuesInput, rows: ReadonlyMap<string, ExactRow>): SectionOutcome {
+  const fieldCount = input.rows.reduce((count, row) => count + row.fields.length, 0);
+  if (fieldCount > MAX_FIELDS_IN_ANSWER) {
+    return {
+      refusal: `That call named ${String(fieldCount)} fields. One call can show at most ${String(MAX_FIELDS_IN_ANSWER)} fields. Split the rows across more calls, each one within the limit.`,
+    };
   }
-  const sections: string[] = [];
+  const groups = new Map<string, string[]>();
   for (const selection of input.rows) {
     const row = rows.get(selection.ref);
-    if (row === undefined || new Set(selection.fields).size !== selection.fields.length) {
-      return undefined;
+    if (row === undefined) {
+      return {
+        refusal: `The row reference ${selection.ref} is not from this request. Use only the row references listed with this turn's results.`,
+      };
     }
-    const source = [row.source.connector, row.source.tool, row.source.path || '/'].map(inlineCode).join(' · ');
-    const lines = [`Source: ${source}`];
+    const seen = new Set<string>();
+    const lines: string[] = [];
     for (const path of selection.fields) {
+      if (seen.has(path)) {
+        return { refusal: `The field ${path} was named twice for one row. Name each field once.` };
+      }
+      seen.add(path);
       const value = row.fields.get(path);
       if (value === undefined) {
-        return undefined;
+        return {
+          refusal: `The row at ${row.source.path || '/'} does not carry the field ${path}. Use only the fields listed for that row.`,
+        };
       }
-      const label = path
-        .slice(1)
-        .replaceAll('/', ' › ')
-        .replaceAll('~1', '/')
-        .replaceAll('~0', '~')
-        .replaceAll('_', ' ');
-      lines.push(`- ${inlineCode(label)}: ${inlineCode(String(value))}`);
+      lines.push(`${labelOf(path)}: ${String(value)}`);
     }
-    sections.push(lines.join('\n'));
+    const group = groups.get(row.source.connector) ?? [];
+    group.push(lines.join('\n'));
+    groups.set(row.source.connector, group);
   }
-  const sum = input.sum;
-  if (sum !== null) {
-    // Every operand is visible with its provenance in the same answer.
-    const selectionByRef = new Map(input.rows.map(selection => [selection.ref, selection.fields]));
-    if (
-      sum.refs.some(ref => {
-        const fields = selectionByRef.get(ref);
-        return !fields?.includes(sum.value_field) || !fields.includes(sum.unit_field);
-      })
-    ) {
-      return undefined;
-    }
-    const computed = totalOf(sum, rows);
-    if (computed === undefined) {
-      return undefined;
-    }
-    sections.push(`**Total**: ${inlineCode(computed.total)} ${inlineCode(computed.unit)}`);
+  const blocks: string[] = [];
+  for (const [connector, rowBlocks] of groups) {
+    blocks.push([`Source: ${connector}`, ...rowBlocks].join('\n\n'));
   }
-  return sections.join('\n\n');
+  if (input.sum !== null) {
+    const summed = checkedSum(input.sum, rows, input.rows);
+    if ('refusal' in summed) {
+      return summed;
+    }
+    blocks.push(`Total: ${summed.total} ${summed.unit}`);
+  }
+  return { text: blocks.join('\n\n') };
 }
 
 /** The rows and pending host reply live only in this request's thread. */
@@ -256,7 +411,7 @@ export class ExactSourceValues extends LocalToolMCP {
   readonly displayName = 'Exact source values';
   private readonly rows = new Map<string, ExactRow>();
   private allowedCallId: string | undefined;
-  private answer: string | undefined;
+  private sections: string[] = [];
 
   constructor(tracing: AgentTracing) {
     super({ tracing });
@@ -266,25 +421,25 @@ export class ExactSourceValues extends LocalToolMCP {
     defineTool({
       name: TOOL_NAME,
       description:
-        'Finish a reply that needs exact numbers or identifiers using only existing row references and field paths. Include surrounding fields such as route, date, unit and currency. The host writes the reply. Call this tool by itself and leave the message text empty.',
+        'Show exact numbers or identifiers from this turn’s connector results using only existing row references and field paths. Include surrounding fields such as route, date, unit and currency. The host writes the values into the reply. Call this tool by itself. Call it again by itself to show more values, then finish with an empty message.',
       schema: PresentExactValuesSchema,
       requiresNetwork: false,
       annotations: { readOnlyHint: true, openWorldHint: false },
       handler: (input, _approval, context) => {
-        const answer =
-          context?.tool_call_id === undefined || context.tool_call_id !== this.allowedCallId
-            ? undefined
-            : answerFor(input, this.rows);
-        if (answer === undefined) {
+        if (context?.tool_call_id === undefined || context.tool_call_id !== this.allowedCallId) {
           return Promise.resolve(
             toolResultResponse({
-              text: 'These values could not be checked together. Use fields from this request and retry this tool by itself.',
+              text: 'This tool must be the only tool call in its step. Call it again by itself.',
               isError: true,
             }),
           );
         }
-        this.answer = answer;
-        return Promise.resolve(toolResultResponse({ text: 'Ready to display the selected source values.' }));
+        const rendered = renderSection(input, this.rows);
+        if ('refusal' in rendered) {
+          return Promise.resolve(toolResultResponse({ text: rendered.refusal, isError: true }));
+        }
+        this.sections.push(rendered.text);
+        return Promise.resolve(toolResultResponse({ text: PRESENTATION_ACCEPTED_TEXT }));
       },
     }),
   ];
@@ -303,18 +458,90 @@ export class ExactSourceValues extends LocalToolMCP {
 
   clear(): void {
     this.rows.clear();
+    this.sections = [];
     this.beginBatch(undefined);
   }
 
   beginBatch(callId: string | undefined): void {
     this.allowedCallId = callId;
-    this.answer = undefined;
   }
 
-  takeAnswer(): string | undefined {
-    const answer = this.answer;
-    this.beginBatch(undefined);
-    return answer;
+  /**
+   * Adopt rows from connector results persisted in the current request's context. A request
+   * that pauses for an approval resumes in a fresh instance of this class, so rows prepared
+   * before the pause are rebuilt here from the stored results: the field values are
+   * recomputed from each stored result, and only the fields the earlier instance advertised
+   * for each row are kept, under the same references the model was shown.
+   */
+  adoptContextResults(results: readonly ExactContextResult[]): void {
+    const knownCallIds = new Set([...this.rows.values()].map(row => row.source.call_id));
+    for (const entry of results) {
+      if (knownCallIds.has(entry.call_id)) {
+        continue;
+      }
+      knownCallIds.add(entry.call_id);
+      const replaced = replacedContentOf(entry.content);
+      if (replaced === undefined) {
+        continue;
+      }
+      let recomputed: ReturnType<typeof rowsOf>;
+      try {
+        recomputed = rowsOf(parseWithExactDecimals(JSON.stringify(replaced.connector_result)));
+      } catch {
+        continue;
+      }
+      const byPath = new Map(recomputed.map(row => [row.path, row.fields]));
+      for (const advertised of replaced.exact_source_rows) {
+        if (this.rows.has(advertised.ref) || this.rows.size >= MAX_ROWS) {
+          continue;
+        }
+        const fields = byPath.get(advertised.path);
+        if (fields === undefined) {
+          continue;
+        }
+        const kept = new Map<string, ExactValue>();
+        for (const path of advertised.fields) {
+          const value = fields.get(path);
+          if (value !== undefined) {
+            kept.set(path, value);
+          }
+        }
+        if (kept.size === 0) {
+          continue;
+        }
+        this.rows.set(advertised.ref, {
+          ref: advertised.ref,
+          source: { connector: entry.connector, tool: entry.tool, call_id: entry.call_id, path: advertised.path },
+          fields: kept,
+        });
+      }
+    }
+  }
+
+  /**
+   * The reply the host writes for this request, in presentation order. Sections rendered by
+   * this instance are used as they stand. Sections presented by an earlier instance of this
+   * request (before an approval pause rebuilt the thread) are rendered again from the
+   * persisted presentation calls and the adopted rows.
+   */
+  composedAnswer(presentations: readonly ExactContextPresentation[]): string | undefined {
+    const successful = presentations.filter(presentation => presentation.succeeded);
+    const replayCount = Math.max(0, successful.length - this.sections.length);
+    const sections: string[] = [];
+    for (const presentation of successful.slice(0, replayCount)) {
+      let input: PresentExactValuesInput;
+      try {
+        input = PresentExactValuesSchema.parse(JSON.parse(presentation.arguments));
+      } catch {
+        continue;
+      }
+      const rendered = renderSection(input, this.rows);
+      if ('text' in rendered) {
+        sections.push(rendered.text);
+      }
+    }
+    sections.push(...this.sections);
+    return sections.length === 0 ? undefined : sections.join('\n\n');
   }
 
   prepare(result: ToolCallResult, remaining: number): ExactRow[] {
@@ -340,7 +567,13 @@ export class ExactSourceValues extends LocalToolMCP {
     } catch {
       return [];
     }
-    const rows = rowsOf(original)
+    let rowSource: unknown;
+    try {
+      rowSource = parseWithExactDecimals(result.rawContent);
+    } catch {
+      rowSource = original;
+    }
+    const rows = rowsOf(rowSource)
       .slice(0, MAX_ROWS - this.rows.size - remaining)
       .map(({ path, fields }) => ({
         ref: `row_${randomBytes(9).toString('base64url')}`,
@@ -363,7 +596,7 @@ export class ExactSourceValues extends LocalToolMCP {
         fields: [...row.fields.keys()],
       })),
       exact_source_instructions:
-        'For a reply reporting exact values from these rows, call present_exact_values by itself. Select row references and field paths. Leave assistant text empty; the host renders the answer.',
+        'For a reply reporting exact values from these rows, call present_exact_values by itself. Select row references and field paths. Call it again by itself to show more values. Finish with an empty message when every value is shown; the host writes the reply from the values shown.',
     });
     result.outputTransform = 'replaced';
     return rows;

@@ -6,6 +6,7 @@ import { EventType } from '../../src/core/events/schema';
 import type { LLMCreateParamsStreaming } from '../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
+import { isRecord } from '../../src/core/util/records';
 import { finalAnswerStream, makeMockIMCPServer, OBJECT_INPUT_SCHEMA, unknownToolStream } from '../core/harnessMocks';
 import { makeAgentSpec, makeMockILLM, makeTestResolver, mintTestTurnId } from './testHelpers';
 
@@ -28,6 +29,7 @@ const mixedResult = {
       unit: 'percent',
       dataset_id: '00018446744073709551617',
       rounded_before_admission: 0.0007,
+      p_value: 7e-8,
     },
   ],
   balances: [
@@ -85,7 +87,7 @@ async function* presentation(args: object): AsyncGenerator<ExtendedChatCompletio
   };
 }
 
-async function fixture() {
+async function fixture(results: unknown[] = [mixedResult], iterationLimit?: number, openWorldHint = true) {
   const store = new InMemorySessionStore();
   const sessions = new Sessions({ sessionStore: store });
   const session = await sessions.create({
@@ -93,7 +95,10 @@ async function fixture() {
     session_id: 'exact-values-chat',
     created_by_subject: { subject_id: 'user-test', subject_type: 'user', subject_display_name: 'Test' },
     external_id: null,
-    agent: { type: 'inline', spec: makeAgentSpec() },
+    agent: {
+      type: 'inline',
+      spec: makeAgentSpec(iterationLimit === undefined ? {} : { config: { iteration_limit: iterationLimit } }),
+    },
   });
 
   async function send(input: {
@@ -112,13 +117,17 @@ async function fixture() {
       mcp_server_name: CONNECTOR,
       original_tool_name: READ_TOOL,
       is_approval_required: false,
-      open_world_hint: true,
+      open_world_hint: openWorldHint,
       read_only_hint: true,
     });
-    jest.mocked(connector.callTool).mockResolvedValue({
-      result: { content: [], structuredContent: mixedResult },
-      wasInitialized: undefined,
-      verificationReceiptCandidate: undefined,
+    const queue = [...results];
+    jest.mocked(connector.callTool).mockImplementation(() => {
+      const next = queue.length > 1 ? queue.shift() : queue[0];
+      return Promise.resolve({
+        result: { content: [], structuredContent: isRecord(next) ? next : undefined },
+        wasInitialized: undefined,
+        verificationReceiptCandidate: undefined,
+      });
     });
     const classify = jest.fn().mockResolvedValue({ ok: true, flagged: input.withheld, score: 0.99, reasonCode: null });
     const requests: LLMCreateParamsStreaming[] = [];
@@ -145,26 +154,33 @@ async function fixture() {
       signal: new AbortController().signal,
       resolver: resolver(),
     });
-    const waiting = await Array.fromAsync(first.stream());
-    const approval = waiting.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED);
-    const callId = approval?.tool_calls[0]?.id;
-    if (callId === undefined) throw new Error('Expected an approval for the connector read');
-    expect(connector.callTool).not.toHaveBeenCalled();
-    const turn = await session.createTurn({
-      turn_id: mintTestTurnId(),
-      input: [
-        {
-          type: EventType.USER_TOOL_APPROVAL,
-          thread_id: 'main',
-          tool_call_id: callId,
-          approval: { status: 'allow' },
-        },
-      ],
-      previous_turn_id: first.id,
-      signal: new AbortController().signal,
-      resolver: resolver(),
-    });
-    const events = await Array.fromAsync(turn.stream());
+    let turn = first;
+    let events = await Array.fromAsync(first.stream());
+    // A turn can pause for more than one approval in a row (one per connector call the model
+    // makes). Approve each in turn until the chat runs to completion.
+    for (let round = 0; round < 4; round++) {
+      const approval = events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED);
+      const callId = approval?.tool_calls[0]?.id;
+      if (callId === undefined) break;
+      if (round === 0) {
+        expect(connector.callTool).not.toHaveBeenCalled();
+      }
+      turn = await session.createTurn({
+        turn_id: mintTestTurnId(),
+        input: [
+          {
+            type: EventType.USER_TOOL_APPROVAL,
+            thread_id: 'main',
+            tool_call_id: callId,
+            approval: { status: 'allow' },
+          },
+        ],
+        previous_turn_id: turn.id,
+        signal: new AbortController().signal,
+        resolver: resolver(),
+      });
+      events = await Array.fromAsync(turn.stream());
+    }
     const reloaded = await new Sessions({ sessionStore: store }).get({
       tenant_id: 'tenant-test',
       session_id: session.session_id,
@@ -191,6 +207,73 @@ function liveText(events: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>
     .join('');
 }
 
+function ledgerAmount(index: number): number | string {
+  if (index === 0) return 350;
+  if (index === 1) return 5.5;
+  if (index === 2) return -63.62;
+  return `${String(index * 7 + 13)}.42`;
+}
+
+const ledgerResult = {
+  transactions: Array.from({ length: 30 }, (_, index) => ({
+    id: `txn-${String(index + 1).padStart(3, '0')}`,
+    date: `2026-11-${String((index % 28) + 1).padStart(2, '0')}`,
+    merchant: `Merchant ${String(index + 1)}`,
+    amount: ledgerAmount(index),
+    currency: 'USD',
+    status: index % 2 === 0 ? 'posted' : 'pending',
+    category: { primary: 'Retail', detailed: 'General' },
+  })),
+  warnings: [],
+};
+
+function ledgerRows(request: LLMCreateParamsStreaming): SourceRow[] {
+  return sourceRows(request)
+    .filter(row => row.path.startsWith('/transactions/'))
+    .sort(
+      (a, b) => Number(a.path.slice(a.path.lastIndexOf('/') + 1)) - Number(b.path.slice(b.path.lastIndexOf('/') + 1)),
+    );
+}
+
+async function* pairedPresentation(
+  args: object,
+  otherArgs: object,
+): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage> {
+  const presentCall = {
+    id: 'present',
+    type: 'function',
+    function: { name: PRESENT, arguments: JSON.stringify(args) },
+  } satisfies NonNullable<RawAssistantMessageWithUsage['output']['tool_calls']>[number];
+  const otherCall = {
+    id: 'present-again',
+    type: 'function',
+    function: { name: PRESENT, arguments: JSON.stringify(otherArgs) },
+  } satisfies NonNullable<RawAssistantMessageWithUsage['output']['tool_calls']>[number];
+  yield {
+    id: 'paired-chunk',
+    object: 'chat.completion.chunk',
+    created: 0,
+    model: 'test',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            { index: 0, ...presentCall },
+            { index: 1, ...otherCall },
+          ],
+        },
+        finish_reason: null,
+      },
+    ],
+  };
+  return {
+    output: { role: 'assistant', content: null, tool_calls: [presentCall, otherCall] },
+    usage: getEmptyUsage(),
+    finish_reason: 'tool_calls',
+  };
+}
+
 describe('exact source values through the live and saved chat', () => {
   it('shows connector identifiers, statistics, and exact arithmetic in the final answer without model re-copying', async () => {
     const harness = await fixture();
@@ -210,7 +293,8 @@ describe('exact source values through the live and saved chat', () => {
         const stat = selectedRow(rows, '/stats/0');
         const checking = selectedRow(rows, '/balances/0');
         const savings = selectedRow(rows, '/balances/1');
-        expect(stat.fields).not.toContain('/rounded_before_admission');
+        expect(stat.fields).toContain('/rounded_before_admission');
+        expect(stat.fields).not.toContain('/p_value');
         const moneyFields = ['/account', '/amount', '/currency'];
         return presentation({
           rows: [
@@ -224,23 +308,28 @@ describe('exact source values through the live and saved chat', () => {
       },
     });
 
-    expect(result.create).toHaveBeenCalledTimes(2);
+    expect(result.create).toHaveBeenCalledTimes(3);
     expect(result.connector.callTool).toHaveBeenCalledTimes(1);
     expect(result.classify).toHaveBeenCalledTimes(1);
     const visible = liveText(result.events);
-    expect(visible).toContain('`AZ 0042`');
-    expect(visible).toContain('`SFO`');
+    expect(visible).toContain('Flight number: AZ 0042');
+    expect(visible).toContain('SFO');
     expect(visible).not.toContain('AZ 0024');
-    expect(visible).not.toContain('`LAX`');
-    expect(visible).toContain('`2026-11-17T09:05:00-08:00`');
-    expect(visible).toContain('`2026 Q3`');
-    expect(visible).toContain('`count`: `0`');
-    expect(visible).toContain('`0.00470`');
-    expect(visible).toContain('`00018446744073709551617`');
-    expect(visible).toContain('`percent`');
-    expect(visible).toContain('`100.10`');
-    expect(visible).toContain('`-0.010`');
-    expect(visible).toContain('**Total**: `100.090` `USD`');
+    expect(visible).not.toContain('LAX');
+    expect(visible).toContain('2026-11-17T09:05:00-08:00');
+    expect(visible).toContain('2026 Q3');
+    expect(visible).toContain('Count: 0');
+    expect(visible).toContain('0.00470');
+    expect(visible).toContain('00018446744073709551617');
+    expect(visible).toContain('percent');
+    expect(visible).toContain('100.10');
+    expect(visible).toContain('-0.010');
+    expect(visible).toContain('Total: 100.090 USD');
+    expect(visible).toContain('Source: demo-data');
+    expect(visible).not.toContain(READ_TOOL);
+    expect(visible).not.toContain('/flight_number');
+    expect(visible).not.toContain('/balances/0');
+    expect(visible).not.toContain('`');
     expect(visible).not.toContain(WRONG_GUESS);
     expect(visible).not.toContain('100.19');
     expect(result.turn.state).toMatchObject({ status: 'done', output: { content: visible } });
@@ -268,57 +357,342 @@ describe('exact source values through the live and saved chat', () => {
     expect(liveText(result.events)).toBe('The connector data was withheld.');
   });
 
-  it.each(['another turn', 'mixed currencies', 'unrepresentable amount', 'missing field'])(
-    'refuses to present values using %s',
-    async reason => {
-      const harness = await fixture();
-      let oldRef: string | undefined;
-      let previousTurnId = 'none';
-      if (reason === 'another turn') {
-        const prior = await harness.send({
-          withheld: false,
-          previousTurnId,
-          onRequest: (request, index) => {
-            if (index === 0) return read();
-            oldRef = selectedRow(sourceRows(request), '/flights/0').ref;
-            return finalAnswerStream('Source read.');
-          },
-        });
-        previousTurnId = prior.turn.id;
-      }
-      const result = await harness.send({
+  it.each([
+    {
+      reason: 'another turn',
+      refusal: 'is not from this request. Use only the row references listed with this turn',
+    },
+    {
+      reason: 'mixed currencies',
+      refusal: 'The summed rows do not share one unit. Sum rows with the same unit together.',
+    },
+    {
+      reason: 'exponent amount',
+      refusal: 'The row at /stats/0 does not carry the field /p_value. Use only the fields listed for that row.',
+    },
+    {
+      reason: 'missing field',
+      refusal: 'The row at /stats/0 does not carry the field /flight_number. Use only the fields listed for that row.',
+    },
+  ])('refuses to present values using $reason', async ({ reason, refusal }) => {
+    const harness = await fixture();
+    let oldRef: string | undefined;
+    let previousTurnId = 'none';
+    if (reason === 'another turn') {
+      const prior = await harness.send({
         withheld: false,
         previousTurnId,
         onRequest: (request, index) => {
           if (index === 0) return read();
-          if (index > 1) return finalAnswerStream(WRONG_GUESS);
-          const rows = sourceRows(request);
-          const stat = selectedRow(rows, '/stats/0');
-          const first = selectedRow(rows, '/balances/0');
-          const foreign = selectedRow(rows, '/balances/2');
-          const moneyFields = ['/amount', '/currency'];
-          if (reason === 'mixed currencies') {
-            return presentation({
-              rows: [
-                { ref: first.ref, fields: moneyFields },
-                { ref: foreign.ref, fields: moneyFields },
-              ],
-              sum: { refs: [first.ref, foreign.ref], value_field: '/amount', unit_field: '/currency' },
-            });
-          }
-          return presentation({
-            rows: [
-              {
-                ref: oldRef ?? stat.ref,
-                fields: reason === 'unrepresentable amount' ? ['/rounded_before_admission'] : ['/flight_number'],
-              },
-            ],
-          });
+          oldRef = selectedRow(sourceRows(request), '/flights/0').ref;
+          return finalAnswerStream('Source read.');
         },
       });
-      expect(result.create).toHaveBeenCalledTimes(3);
-      expect(liveText(result.events)).toBe(FAILED_NOTE);
-      expect(result.reloadedTurn?.state).toMatchObject({ status: 'done', output: { content: FAILED_NOTE } });
-    },
-  );
+      previousTurnId = prior.turn.id;
+    }
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId,
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const rows = sourceRows(request);
+        const stat = selectedRow(rows, '/stats/0');
+        const first = selectedRow(rows, '/balances/0');
+        const foreign = selectedRow(rows, '/balances/2');
+        const moneyFields = ['/amount', '/currency'];
+        if (reason === 'mixed currencies') {
+          return presentation({
+            rows: [
+              { ref: first.ref, fields: moneyFields },
+              { ref: foreign.ref, fields: moneyFields },
+            ],
+            sum: { refs: [first.ref, foreign.ref], value_field: '/amount', unit_field: '/currency' },
+          });
+        }
+        return presentation({
+          rows: [
+            {
+              ref: oldRef ?? stat.ref,
+              fields: reason === 'exponent amount' ? ['/p_value'] : ['/flight_number'],
+            },
+          ],
+        });
+      },
+    });
+    expect(result.create).toHaveBeenCalledTimes(3);
+    expect(seenByModel.join('')).toContain(refusal);
+    expect(liveText(result.events)).toBe(FAILED_NOTE);
+    expect(result.reloadedTurn?.state).toMatchObject({ status: 'done', output: { content: FAILED_NOTE } });
+  });
+  it('shows a thirty-row result in full across successive presentation calls', async () => {
+    const harness = await fixture([ledgerResult], 12);
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 6) return finalAnswerStream(WRONG_GUESS);
+        const rows = ledgerRows(request);
+        expect(rows).toHaveLength(30);
+        expect(rows[0]?.fields).toHaveLength(8);
+        const group = rows.slice((index - 1) * 5, index * 5);
+        return presentation({ rows: group.map(row => ({ ref: row.ref, fields: row.fields })) });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(8);
+    const visible = liveText(result.events);
+    for (let index = 0; index < 30; index++) {
+      expect(visible).toContain(`Merchant ${String(index + 1)}`);
+      expect(visible).toContain(`Amount: ${String(ledgerAmount(index))}`);
+    }
+    expect(visible).toContain('Amount: 350');
+    expect(visible).toContain('Amount: 5.5');
+    expect(visible).toContain('Amount: -63.62');
+    expect(visible).toContain('Category primary: Retail');
+    expect(visible.indexOf('Merchant 1')).toBeLessThan(visible.indexOf('Merchant 16'));
+    expect(visible.indexOf('Merchant 16')).toBeLessThan(visible.indexOf('Merchant 30'));
+    expect(visible).not.toContain(WRONG_GUESS);
+    expect(visible).not.toContain('`');
+    expect(result.turn.state).toMatchObject({ status: 'done', output: { content: visible } });
+  });
+
+  it('shows a three-row result with a nested object field in one answer', async () => {
+    const nestedResult = {
+      transactions: [0, 1, 2].map(index => ({
+        id: `item-${String(index + 1)}`,
+        date: '2026-11-20',
+        merchant: `Shop ${String(index + 1)}`,
+        amount: index === 0 ? 350 : index === 1 ? 5.5 : -63.62,
+        currency: 'USD',
+        status: 'posted',
+        note: `Note ${String(index + 1)}`,
+        channel: 'card',
+        category: { primary: 'Retail', detailed: 'General' },
+      })),
+      warnings: [],
+    };
+    const harness = await fixture([nestedResult]);
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) return finalAnswerStream(WRONG_GUESS);
+        const rows = ledgerRows(request);
+        expect(rows).toHaveLength(3);
+        expect(rows[0]?.fields).toHaveLength(10);
+        return presentation({ rows: rows.map(row => ({ ref: row.ref, fields: row.fields })) });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    const visible = liveText(result.events);
+    expect(visible).toContain('Shop 1');
+    expect(visible).toContain('Shop 2');
+    expect(visible).toContain('Shop 3');
+    expect(visible).toContain('Amount: 350');
+    expect(visible).toContain('Amount: 5.5');
+    expect(visible).toContain('Amount: -63.62');
+    expect(visible).toContain('Category detailed: General');
+    expect(visible).not.toContain(WRONG_GUESS);
+  });
+
+  it('shows fractional amounts and a fractional balance exactly, with a sum across the fractions', async () => {
+    const bankResult = {
+      accounts: [{ name: 'Everyday Checking', balance: { current: 1234.56, available: 1200.5 }, currency: 'USD' }],
+      transactions: [
+        { merchant: 'Payroll Deposit', amount: 350, currency: 'USD' },
+        { merchant: 'Coffee Cart', amount: 5.5, currency: 'USD' },
+        { merchant: 'Grocery Store', amount: -63.62, currency: 'USD' },
+      ],
+    };
+    const harness = await fixture([bankResult]);
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) return finalAnswerStream(WRONG_GUESS);
+        const rows = sourceRows(request);
+        const account = selectedRow(rows, '/accounts/0');
+        const deposits = [0, 1, 2].map(i => selectedRow(rows, `/transactions/${String(i)}`));
+        return presentation({
+          rows: [
+            { ref: account.ref, fields: account.fields },
+            ...deposits.map(row => ({ ref: row.ref, fields: row.fields })),
+          ],
+          sum: { refs: deposits.map(row => row.ref), value_field: '/amount', unit_field: '/currency' },
+        });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    const visible = liveText(result.events);
+    expect(visible).toContain('Balance current: 1234.56');
+    expect(visible).toContain('Balance available: 1200.5');
+    expect(visible).toContain('Payroll Deposit');
+    expect(visible).toContain('Coffee Cart');
+    expect(visible).toContain('Grocery Store');
+    expect(visible).toContain('Amount: 350');
+    expect(visible).toContain('Amount: 5.5');
+    expect(visible).toContain('Amount: -63.62');
+    expect(visible).toContain('Total: 291.88 USD');
+    expect(visible).not.toContain('/balance/current');
+    expect(visible).not.toContain(READ_TOOL);
+    expect(visible).not.toContain('`');
+    expect(visible).not.toContain(WRONG_GUESS);
+  });
+
+  it('shows values from two results in one turn in the same reply', async () => {
+    const recentResult = { transactions: [{ merchant: 'Bakery', amount: 12.5, currency: 'USD' }] };
+    const olderResult = { transactions: [{ merchant: 'Bookshop', amount: 30, currency: 'USD' }] };
+    const harness = await fixture([recentResult, olderResult], undefined, false);
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) {
+          return unknownToolStream({ toolName: READ_TOOL, callId: 'read-recent', args: '{"window":"recent"}' });
+        }
+        if (index === 1) {
+          return unknownToolStream({ toolName: READ_TOOL, callId: 'read-older', args: '{"window":"older"}' });
+        }
+        if (index > 2) return finalAnswerStream(WRONG_GUESS);
+        const rows = ledgerRows(request);
+        expect(rows).toHaveLength(2);
+        return presentation({
+          rows: rows.map(row => ({ ref: row.ref, fields: ['/merchant', '/amount', '/currency'] })),
+        });
+      },
+    });
+
+    expect(result.connector.callTool).toHaveBeenCalledTimes(2);
+    expect(result.create).toHaveBeenCalledTimes(4);
+    const visible = liveText(result.events);
+    expect(visible).toContain('Bakery');
+    expect(visible).toContain('Amount: 12.5');
+    expect(visible).toContain('Bookshop');
+    expect(visible).toContain('Amount: 30');
+    expect(visible).not.toContain(WRONG_GUESS);
+  });
+
+  it('keeps a presented section when the request pauses for another approval before finishing', async () => {
+    const firstResult = { transactions: [{ merchant: 'Bakery', amount: 12.5, currency: 'USD' }] };
+    const secondResult = { transactions: [{ merchant: 'Bookshop', amount: 30, currency: 'USD' }] };
+    const harness = await fixture([firstResult, secondResult]);
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) {
+          return unknownToolStream({ toolName: READ_TOOL, callId: 'read-recent', args: '{"window":"recent"}' });
+        }
+        if (index === 1) {
+          const row = selectedRow(sourceRows(request), '/transactions/0');
+          return presentation({ rows: [{ ref: row.ref, fields: ['/merchant', '/amount', '/currency'] }] });
+        }
+        if (index === 2) {
+          return unknownToolStream({ toolName: READ_TOOL, callId: 'read-older', args: '{"window":"older"}' });
+        }
+        return finalAnswerStream(WRONG_GUESS);
+      },
+    });
+
+    expect(result.connector.callTool).toHaveBeenCalledTimes(2);
+    expect(result.create).toHaveBeenCalledTimes(4);
+    const visible = liveText(result.events);
+    expect(visible).toContain('Bakery');
+    expect(visible).toContain('Amount: 12.5');
+    expect(visible).not.toContain('Bookshop');
+    expect(visible).not.toContain(WRONG_GUESS);
+    expect(result.turn.state).toMatchObject({ status: 'done', output: { content: visible } });
+  });
+
+  it('names the field limit on an over-full call and accepts a corrected retry', async () => {
+    const harness = await fixture([ledgerResult]);
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 2) return finalAnswerStream(WRONG_GUESS);
+        const rows = ledgerRows(request);
+        if (index === 2) {
+          seenByModel.push(JSON.stringify(request.messages));
+          const group = rows.slice(0, 5);
+          return presentation({ rows: group.map(row => ({ ref: row.ref, fields: row.fields })) });
+        }
+        const group = rows.slice(0, 6);
+        return presentation({ rows: group.map(row => ({ ref: row.ref, fields: row.fields })) });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(4);
+    expect(seenByModel.join('')).toContain(
+      'That call named 48 fields. One call can show at most 40 fields. Split the rows across more calls, each one within the limit.',
+    );
+    const visible = liveText(result.events);
+    expect(visible).toContain('Merchant 1');
+    expect(visible).toContain('Merchant 5');
+    expect(visible).not.toContain('Merchant 6');
+    expect(visible).not.toContain(WRONG_GUESS);
+  });
+
+  it('names a field that was named twice for one row', async () => {
+    const harness = await fixture();
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const checking = selectedRow(sourceRows(request), '/balances/0');
+        return presentation({ rows: [{ ref: checking.ref, fields: ['/amount', '/amount'] }] });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    expect(seenByModel.join('')).toContain('The field /amount was named twice for one row. Name each field once.');
+    expect(liveText(result.events)).toBe(FAILED_NOTE);
+  });
+
+  it('refuses a presentation call that shares its step with another call', async () => {
+    const harness = await fixture();
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const rows = sourceRows(request);
+        const flight = selectedRow(rows, '/flights/0');
+        const stat = selectedRow(rows, '/stats/0');
+        return pairedPresentation(
+          { rows: [{ ref: flight.ref, fields: ['/flight_number'] }] },
+          { rows: [{ ref: stat.ref, fields: ['/period'] }] },
+        );
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    expect(seenByModel.join('')).toContain(
+      'This tool must be the only tool call in its step. Call it again by itself.',
+    );
+    expect(liveText(result.events)).toBe(FAILED_NOTE);
+  });
 });

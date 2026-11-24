@@ -241,6 +241,7 @@ import {
   isClientSideToolResponseMessage,
   isFreshnessQuestion,
   isInputUserMessage,
+  isInternalSystemMessage,
   isLLMContextMessage,
   isLLMToolMessage,
   lastUserMessageText,
@@ -264,7 +265,12 @@ import {
   withoutEarlierThinking,
 } from './contextUtils';
 import { CALL_TOOL_NAME, DeferredTool, tryParseCallToolWrapper, tryUnwrapCallToolInput } from './DeferredTool';
-import { ExactSourceValues } from './ExactSourceValues';
+import {
+  exactPresentationSucceeded,
+  ExactSourceValues,
+  type ExactContextPresentation,
+  type ExactContextResult,
+} from './ExactSourceValues';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import {
   createEmptyAgentThreadMetrics,
@@ -3728,6 +3734,7 @@ export class AgentThread {
     tools: ConvertToolsResult['tools'],
     toolMapping: Map<string, MappedMCPTool>,
   ): ConvertToolsResult['tools'] {
+    this.syncExactSourceValuesFromContext(toolMapping);
     return tools.filter(tool => {
       const info = tool.type === 'function' ? toolMapping.get(tool.function.name) : undefined;
       if (info === undefined) {
@@ -3737,6 +3744,68 @@ export class AgentThread {
         return false;
       }
       return !this.tfyManagedServerNames.has(info.toolSet.name) || !this.withheldTools.includes(info.originalToolName);
+    });
+  }
+
+  /**
+   * Bring the exact-values state up to date with this request's persisted context, and
+   * return the request's presentation calls in order. A request that pauses for an approval
+   * resumes in a fresh thread, whose exact-values instance starts empty: the rows and
+   * presentations from before the pause are rebuilt from the context the earlier thread
+   * persisted. Only the messages after the person's latest message belong to this request.
+   */
+  private syncExactSourceValuesFromContext(toolMapping: Map<string, MappedMCPTool>): ExactContextPresentation[] {
+    const exactSourceValues = this.exactSourceValues;
+    if (exactSourceValues === undefined) {
+      return [];
+    }
+    let start = 0;
+    for (let index = this.context.length - 1; index >= 0; index--) {
+      const message = this.context[index];
+      if (
+        message !== undefined &&
+        isLLMContextMessage(message) &&
+        message.role === 'user' &&
+        !isInternalSystemMessage(message)
+      ) {
+        start = index + 1;
+        break;
+      }
+    }
+    const sources = new Map<string, { connector: string; tool: string }>();
+    const contents = new Map<string, string>();
+    const presentationCalls: { callId: string; args: string }[] = [];
+    for (const message of this.context.slice(start)) {
+      if (!isLLMContextMessage(message)) {
+        continue;
+      }
+      if (message.role === 'assistant') {
+        for (const call of message.tool_calls ?? []) {
+          if (call.tool_info.type === 'mcp') {
+            sources.set(call.id, {
+              connector: call.tool_info.mcp_server_name,
+              tool: call.tool_info.original_tool_name,
+            });
+          }
+          if (toolMapping.get(call.function.name)?.toolSet === exactSourceValues) {
+            presentationCalls.push({ callId: call.id, args: call.function.arguments });
+          }
+        }
+      } else if (message.role === 'tool') {
+        contents.set(message.tool_call_id, message.content);
+      }
+    }
+    const results: ExactContextResult[] = [];
+    for (const [callId, content] of contents) {
+      const source = sources.get(callId);
+      if (source !== undefined) {
+        results.push({ call_id: callId, connector: source.connector, tool: source.tool, content });
+      }
+    }
+    exactSourceValues.adoptContextResults(results);
+    return presentationCalls.map(call => {
+      const content = contents.get(call.callId);
+      return { arguments: call.args, succeeded: content !== undefined && exactPresentationSucceeded(content) };
     });
   }
 
@@ -4571,8 +4640,18 @@ export class AgentThread {
     ) {
       this.exactPresentationAttempted = true;
       result.value.output.content = null;
-    } else if (this.exactPresentationAttempted && (result.value.output.tool_calls?.length ?? 0) === 0) {
-      result.value.output.content = 'I couldn’t verify those values. Ask me to look them up again.';
+    } else if ((result.value.output.tool_calls?.length ?? 0) === 0) {
+      // The reply is whatever the host rendered from the sections presented this request. A
+      // presentation may have happened in an earlier thread instance of this request (before
+      // an approval pause), so the persisted calls count as an attempt alongside this
+      // instance's own. A request whose presentations all failed has no sections and keeps
+      // the note below.
+      const presentations = this.syncExactSourceValuesFromContext(toolMapping);
+      if (this.exactPresentationAttempted || presentations.length > 0) {
+        result.value.output.content =
+          this.exactSourceValues?.composedAnswer(presentations) ??
+          'I couldn’t verify those values. Ask me to look them up again.';
+      }
     }
 
     // The person is told about leaked markup only when no write succeeded in the turn; an earlier
@@ -5418,6 +5497,7 @@ export class AgentThread {
       toolMapping.get(onlyCall.function.name)?.toolSet === this.exactSourceValues
         ? onlyCall.id
         : undefined;
+    this.syncExactSourceValuesFromContext(toolMapping);
     this.exactSourceValues?.beginBatch(exactCallId);
     const {
       toolCallResults: executedToolCallResults,
@@ -5621,8 +5701,6 @@ export class AgentThread {
       yield { type: InternalEventType.PASSTHROUGH, event };
     }
 
-    const exactAnswer = this.exactSourceValues?.takeAnswer();
-    const exactResult = exactCallId === undefined ? undefined : resultsById.get(exactCallId);
     const toolIdsBeforeProcessing = toolCallResults.map(t => t.message.tool_call_id);
     const toolResponseExecution: Readonly<AgentThreadExecutionContext> = {
       threadId: this.threadId,
@@ -6328,40 +6406,7 @@ export class AgentThread {
     if (createThreadEvents.length > 0) {
       return 'exit';
     }
-    if (exactAnswer !== undefined && exactResult?.disposition === 'executed_ok' && !exactResult.failure) {
-      yield* this.finishExactSourceAnswer(exactAnswer);
-      return 'exit';
-    }
-
     return 'continue';
-  }
-
-  private *finishExactSourceAnswer(answer: string): Generator<AgentThreadEvent, void, unknown> {
-    const content = this.heldSentences.length === 0 ? answer : `${answer}\n\n${heldActionsNote(this.heldSentences)}`;
-    const assistantMessage: InternalEnrichedAssistantMessage = { role: 'assistant', content };
-    const output = buildModelMessageEvent({
-      assistantMessage,
-      threadId: this.threadId,
-      finishReason: 'stop',
-      usage: undefined,
-      id: newEventId(),
-    });
-    yield* this.appendToContext({
-      context: [assistantMessage],
-      output: [output],
-      currentContextUsage: undefined,
-      usage: undefined,
-    });
-    yield output;
-    yield {
-      type: InternalEventType.AGENT_DONE,
-      status: 'done',
-      thread_id: this.threadId,
-      title: this.title,
-      output,
-      parent: undefined,
-      send_to_parent: undefined,
-    };
   }
 
   /** Ends a turn that only answered held actions: the tool result, or the denial note, is the answer. */
