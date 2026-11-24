@@ -63,9 +63,13 @@ export interface ExactContextPresentation {
   succeeded: boolean;
 }
 
+const EXACT_SOURCE_INSTRUCTIONS =
+  'For a reply reporting exact values from these rows, call present_exact_values by itself. Select row references and field paths. Call it again by itself to show more values. Finish with an empty message when every value is shown; the host writes the reply from the values shown.';
+
 const ReplacedContentSchema = z.object({
   connector_result: z.unknown(),
-  exact_source_rows: z.array(z.object({ ref: z.string(), path: z.string(), fields: z.array(z.string()) })),
+  exact_source_rows: z.array(z.object({ ref: RowReference, path: FieldPath, fields: z.array(FieldPath) })),
+  exact_source_instructions: z.literal(EXACT_SOURCE_INSTRUCTIONS),
 });
 type ReplacedContent = z.infer<typeof ReplacedContentSchema>;
 
@@ -179,6 +183,37 @@ function parseWithExactDecimals(text: string): unknown {
     index += 1;
   }
   return JSON.parse(rewritten);
+}
+
+const MAX_ADOPT_DEPTH = 12;
+
+/**
+ * Rebuild an adoptable copy of a persisted connector result. The persisted form holds the
+ * plain parse, so a number's source text is gone. A whole number in the safe range and a
+ * fractional value's shortest text still name the value the source wrote, apart from
+ * trailing zeros. An integer text from a float outside the safe range has already lost
+ * digits, so it is dropped (replaced with null, which no field collects) rather than
+ * quoted as exact. The same goes for exponent forms, which a plain parse cannot show
+ * digit for digit either.
+ */
+function adoptableValue(value: unknown, depth: number): unknown {
+  if (typeof value === 'number') {
+    if (Number.isSafeInteger(value)) {
+      return value;
+    }
+    const text = String(value);
+    return DECIMAL.test(text) && text.includes('.') ? text : null;
+  }
+  if (depth >= MAX_ADOPT_DEPTH) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return value.map(member => adoptableValue(member, depth + 1));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, adoptableValue(child, depth + 1)]));
+  }
+  return value;
 }
 
 /** Collect leaf fields within one row. Arrays are different rows, never siblings to merge. */
@@ -343,7 +378,9 @@ function checkedSum(
     scale = nextScale;
   }
   if (unit === undefined) {
-    return { refusal: 'The sum names no rows. Name at least one row to sum.' };
+    // The schema requires at least one ref, and every pass through the loop above either
+    // returns a refusal or sets the unit, so the loop cannot end without one.
+    throw new Error('unreachable');
   }
   const sign = coefficient < 0n ? '-' : '';
   const magnitude = String(coefficient < 0n ? -coefficient : coefficient).padStart(scale + 1, '0');
@@ -373,7 +410,7 @@ function renderSection(input: PresentExactValuesInput, rows: ReadonlyMap<string,
       };
     }
     const seen = new Set<string>();
-    const lines: string[] = [];
+    const entries: { label: string; value: ExactValue }[] = [];
     for (const path of selection.fields) {
       if (seen.has(path)) {
         return { refusal: `The field ${path} was named twice for one row. Name each field once.` };
@@ -385,8 +422,24 @@ function renderSection(input: PresentExactValuesInput, rows: ReadonlyMap<string,
           refusal: `The row at ${row.source.path || '/'} does not carry the field ${path}. Use only the fields listed for that row.`,
         };
       }
-      lines.push(`${labelOf(path)}: ${String(value)}`);
+      entries.push({ label: labelOf(path), value });
     }
+    // Two different fields can read as the same label (a flat merchant_name beside a nested
+    // merchant/name). When that happens in one row, number the repeated labels so the
+    // reader can tell the lines apart.
+    const labelCounts = new Map<string, number>();
+    for (const entry of entries) {
+      labelCounts.set(entry.label, (labelCounts.get(entry.label) ?? 0) + 1);
+    }
+    const labelSeen = new Map<string, number>();
+    const lines = entries.map(entry => {
+      if ((labelCounts.get(entry.label) ?? 0) < 2) {
+        return `${entry.label}: ${String(entry.value)}`;
+      }
+      const occurrence = (labelSeen.get(entry.label) ?? 0) + 1;
+      labelSeen.set(entry.label, occurrence);
+      return `${entry.label} (${String(occurrence)}): ${String(entry.value)}`;
+    });
     const group = groups.get(row.source.connector) ?? [];
     group.push(lines.join('\n'));
     groups.set(row.source.connector, group);
@@ -405,13 +458,26 @@ function renderSection(input: PresentExactValuesInput, rows: ReadonlyMap<string,
   return { text: blocks.join('\n\n') };
 }
 
+/** A canonical key for one presentation call, so the same selection is recognised in any row or field order. */
+function presentationKey(input: PresentExactValuesInput): string {
+  const rows = input.rows
+    .map(row => ({ ref: row.ref, fields: [...row.fields].sort() }))
+    .sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
+  const sum =
+    input.sum === null
+      ? null
+      : { refs: [...input.sum.refs].sort(), value_field: input.sum.value_field, unit_field: input.sum.unit_field };
+  return JSON.stringify({ rows, sum });
+}
+
 /** The rows and pending host reply live only in this request's thread. */
 export class ExactSourceValues extends LocalToolMCP {
   readonly name = 'exact-source-values';
   readonly displayName = 'Exact source values';
   private readonly rows = new Map<string, ExactRow>();
   private allowedCallId: string | undefined;
-  private sections: string[] = [];
+  private sections: { key: string; text: string }[] = [];
+  private readonly presentedKeys = new Set<string>();
 
   constructor(tracing: AgentTracing) {
     super({ tracing });
@@ -434,11 +500,21 @@ export class ExactSourceValues extends LocalToolMCP {
             }),
           );
         }
+        const key = presentationKey(input);
+        if (this.presentedKeys.has(key)) {
+          return Promise.resolve(
+            toolResultResponse({
+              text: 'Those values are already shown in this reply. Show other values, or finish with an empty message.',
+              isError: true,
+            }),
+          );
+        }
         const rendered = renderSection(input, this.rows);
         if ('refusal' in rendered) {
           return Promise.resolve(toolResultResponse({ text: rendered.refusal, isError: true }));
         }
-        this.sections.push(rendered.text);
+        this.presentedKeys.add(key);
+        this.sections.push({ key, text: rendered.text });
         return Promise.resolve(toolResultResponse({ text: PRESENTATION_ACCEPTED_TEXT }));
       },
     }),
@@ -459,6 +535,7 @@ export class ExactSourceValues extends LocalToolMCP {
   clear(): void {
     this.rows.clear();
     this.sections = [];
+    this.presentedKeys.clear();
     this.beginBatch(undefined);
   }
 
@@ -467,11 +544,34 @@ export class ExactSourceValues extends LocalToolMCP {
   }
 
   /**
+   * Record the presentations this request already made, read from its persisted context,
+   * so a repeated call is recognised even after an approval pause rebuilt this instance.
+   */
+  rememberPresentations(presentations: readonly ExactContextPresentation[]): void {
+    for (const presentation of presentations) {
+      if (!presentation.succeeded) {
+        continue;
+      }
+      try {
+        this.presentedKeys.add(presentationKey(PresentExactValuesSchema.parse(JSON.parse(presentation.arguments))));
+      } catch {
+        // A call that cannot be read back cannot be recognised here. It is still replayed,
+        // and held to the exactness checks, when the reply is composed.
+        continue;
+      }
+    }
+  }
+
+  /**
    * Adopt rows from connector results persisted in the current request's context. A request
    * that pauses for an approval resumes in a fresh instance of this class, so rows prepared
-   * before the pause are rebuilt here from the stored results: the field values are
-   * recomputed from each stored result, and only the fields the earlier instance advertised
-   * for each row are kept, under the same references the model was shown.
+   * before the pause are rebuilt here from the stored results. A stored result is held to
+   * the same gates prepare() applied when the result arrived: the schema above only accepts
+   * the complete envelope prepare() writes, the source size cap applies to the stored
+   * result, and the rows and fields are re-derived from the stored result itself through
+   * adoptableValue, which never treats a float-derived text as source text. The envelope's
+   * advertised rows only choose which of the re-derived rows and fields are kept, under
+   * the same references the model was shown.
    */
   adoptContextResults(results: readonly ExactContextResult[]): void {
     const knownCallIds = new Set([...this.rows.values()].map(row => row.source.call_id));
@@ -484,26 +584,27 @@ export class ExactSourceValues extends LocalToolMCP {
       if (replaced === undefined) {
         continue;
       }
-      let recomputed: ReturnType<typeof rowsOf>;
-      try {
-        recomputed = rowsOf(parseWithExactDecimals(JSON.stringify(replaced.connector_result)));
-      } catch {
+      if (JSON.stringify(replaced.connector_result).length > MAX_SOURCE_CHARS) {
         continue;
       }
+      const recomputed = rowsOf(adoptableValue(replaced.connector_result, 0));
       const byPath = new Map(recomputed.map(row => [row.path, row.fields]));
       for (const advertised of replaced.exact_source_rows) {
         if (this.rows.has(advertised.ref) || this.rows.size >= MAX_ROWS) {
           continue;
         }
-        const fields = byPath.get(advertised.path);
+        // prepare() writes the containing path of a direct record as '/', where the
+        // re-derived rows carry it as the empty path.
+        const path = advertised.path === '/' ? '' : advertised.path;
+        const fields = byPath.get(path);
         if (fields === undefined) {
           continue;
         }
         const kept = new Map<string, ExactValue>();
-        for (const path of advertised.fields) {
-          const value = fields.get(path);
+        for (const fieldPath of advertised.fields) {
+          const value = fields.get(fieldPath);
           if (value !== undefined) {
-            kept.set(path, value);
+            kept.set(fieldPath, value);
           }
         }
         if (kept.size === 0) {
@@ -511,7 +612,7 @@ export class ExactSourceValues extends LocalToolMCP {
         }
         this.rows.set(advertised.ref, {
           ref: advertised.ref,
-          source: { connector: entry.connector, tool: entry.tool, call_id: entry.call_id, path: advertised.path },
+          source: { connector: entry.connector, tool: entry.tool, call_id: entry.call_id, path },
           fields: kept,
         });
       }
@@ -522,25 +623,41 @@ export class ExactSourceValues extends LocalToolMCP {
    * The reply the host writes for this request, in presentation order. Sections rendered by
    * this instance are used as they stand. Sections presented by an earlier instance of this
    * request (before an approval pause rebuilt the thread) are rendered again from the
-   * persisted presentation calls and the adopted rows.
+   * persisted presentation calls and the adopted rows. A section that can no longer be
+   * rendered exactly makes the whole reply fall back to the caller's could-not-verify note
+   * (this returns undefined), rather than showing the remaining sections as if they were
+   * the complete statement. A repeated presentation is shown once.
    */
   composedAnswer(presentations: readonly ExactContextPresentation[]): string | undefined {
     const successful = presentations.filter(presentation => presentation.succeeded);
     const replayCount = Math.max(0, successful.length - this.sections.length);
     const sections: string[] = [];
+    const renderedKeys = new Set<string>();
     for (const presentation of successful.slice(0, replayCount)) {
       let input: PresentExactValuesInput;
       try {
         input = PresentExactValuesSchema.parse(JSON.parse(presentation.arguments));
       } catch {
+        return undefined;
+      }
+      const key = presentationKey(input);
+      if (renderedKeys.has(key)) {
         continue;
       }
       const rendered = renderSection(input, this.rows);
-      if ('text' in rendered) {
-        sections.push(rendered.text);
+      if (!('text' in rendered)) {
+        return undefined;
       }
+      renderedKeys.add(key);
+      sections.push(rendered.text);
     }
-    sections.push(...this.sections);
+    for (const section of this.sections) {
+      if (renderedKeys.has(section.key)) {
+        continue;
+      }
+      renderedKeys.add(section.key);
+      sections.push(section.text);
+    }
     return sections.length === 0 ? undefined : sections.join('\n\n');
   }
 
@@ -595,8 +712,7 @@ export class ExactSourceValues extends LocalToolMCP {
         path: row.source.path || '/',
         fields: [...row.fields.keys()],
       })),
-      exact_source_instructions:
-        'For a reply reporting exact values from these rows, call present_exact_values by itself. Select row references and field paths. Call it again by itself to show more values. Finish with an empty message when every value is shown; the host writes the reply from the values shown.',
+      exact_source_instructions: EXACT_SOURCE_INSTRUCTIONS,
     });
     result.outputTransform = 'replaced';
     return rows;

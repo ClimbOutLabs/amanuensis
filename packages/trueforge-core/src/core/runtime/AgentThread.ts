@@ -3803,10 +3803,12 @@ export class AgentThread {
       }
     }
     exactSourceValues.adoptContextResults(results);
-    return presentationCalls.map(call => {
+    const presentations = presentationCalls.map(call => {
       const content = contents.get(call.callId);
       return { arguments: call.args, succeeded: content !== undefined && exactPresentationSucceeded(content) };
     });
+    exactSourceValues.rememberPresentations(presentations);
+    return presentations;
   }
 
   /**

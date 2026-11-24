@@ -695,4 +695,251 @@ describe('exact source values through the live and saved chat', () => {
     );
     expect(liveText(result.events)).toBe(FAILED_NOTE);
   });
+
+  it('shows a repeated presentation once and tells the model it is already shown', async () => {
+    const harness = await fixture();
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 2) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const checking = selectedRow(sourceRows(request), '/balances/0');
+        const savings = selectedRow(sourceRows(request), '/balances/1');
+        const moneyFields = ['/account', '/amount', '/currency'];
+        if (index === 2) {
+          // The same selection with its rows and fields in another order. A byte-identical
+          // repeat never reaches the tool: the thread's own repeat guard stops it first.
+          return presentation({
+            rows: [
+              { ref: savings.ref, fields: [...moneyFields].reverse() },
+              { ref: checking.ref, fields: [...moneyFields].reverse() },
+            ],
+            sum: { refs: [savings.ref, checking.ref], value_field: '/amount', unit_field: '/currency' },
+          });
+        }
+        return presentation({
+          rows: [
+            { ref: checking.ref, fields: moneyFields },
+            { ref: savings.ref, fields: moneyFields },
+          ],
+          sum: { refs: [checking.ref, savings.ref], value_field: '/amount', unit_field: '/currency' },
+        });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(4);
+    expect(seenByModel.join('')).toContain(
+      'Those values are already shown in this reply. Show other values, or finish with an empty message.',
+    );
+    const visible = liveText(result.events);
+    expect(visible.split('Amount: 100.10')).toHaveLength(2);
+    expect(visible.split('Total: 100.090 USD')).toHaveLength(2);
+    expect(visible).not.toContain(WRONG_GUESS);
+  });
+
+  it('numbers repeated labels when two fields in one row read the same', async () => {
+    const colliding = {
+      records: [{ merchant_name: 'Alpha Stores', merchant: { name: 'Beta Shops' }, code: 42 }],
+    };
+    const harness = await fixture([colliding]);
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) return finalAnswerStream(WRONG_GUESS);
+        const row = selectedRow(sourceRows(request), '/records/0');
+        return presentation({ rows: [{ ref: row.ref, fields: ['/merchant_name', '/merchant/name'] }] });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    const visible = liveText(result.events);
+    expect(visible).toContain('Merchant name (1): Alpha Stores');
+    expect(visible).toContain('Merchant name (2): Beta Shops');
+    expect(visible).not.toContain(WRONG_GUESS);
+  });
+
+  it('names a sum that names the same row more than once', async () => {
+    const harness = await fixture();
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const checking = selectedRow(sourceRows(request), '/balances/0');
+        return presentation({
+          rows: [{ ref: checking.ref, fields: ['/amount', '/currency'] }],
+          sum: { refs: [checking.ref, checking.ref], value_field: '/amount', unit_field: '/currency' },
+        });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    expect(seenByModel.join('')).toContain('The sum names the same row more than once. Name each summed row once.');
+    expect(liveText(result.events)).toBe(FAILED_NOTE);
+  });
+
+  it('names a sum whose amount and unit fields do not sit side by side', async () => {
+    const nestedMoney = { accounts: [{ name: 'Everyday', balance: { current: 10.5 }, currency: 'USD' }] };
+    const harness = await fixture([nestedMoney]);
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const account = selectedRow(sourceRows(request), '/accounts/0');
+        return presentation({
+          rows: [{ ref: account.ref, fields: ['/balance/current', '/currency'] }],
+          sum: { refs: [account.ref], value_field: '/balance/current', unit_field: '/currency' },
+        });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    expect(seenByModel.join('')).toContain(
+      'The sum needs an amount field and a unit field that sit side by side on each row. Choose two fields from the same level.',
+    );
+    expect(liveText(result.events)).toBe(FAILED_NOTE);
+  });
+
+  it('names a summed row that is not shown with both of the summed fields', async () => {
+    const harness = await fixture();
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const rows = sourceRows(request);
+        const checking = selectedRow(rows, '/balances/0');
+        const savings = selectedRow(rows, '/balances/1');
+        return presentation({
+          rows: [
+            { ref: checking.ref, fields: ['/amount', '/currency'] },
+            { ref: savings.ref, fields: ['/amount'] },
+          ],
+          sum: { refs: [checking.ref, savings.ref], value_field: '/amount', unit_field: '/currency' },
+        });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    expect(seenByModel.join('')).toContain(
+      'Every summed row must also be shown with its /amount and /currency fields. Add the missing fields to the shown rows.',
+    );
+    expect(liveText(result.events)).toBe(FAILED_NOTE);
+  });
+
+  it('names a sum that mixes rows from more than one result', async () => {
+    const recentResult = { transactions: [{ merchant: 'Bakery', amount: 12.5, currency: 'USD' }] };
+    const olderResult = { transactions: [{ merchant: 'Bookshop', amount: 30, currency: 'USD' }] };
+    const harness = await fixture([recentResult, olderResult], undefined, false);
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) {
+          return unknownToolStream({ toolName: READ_TOOL, callId: 'read-recent', args: '{"window":"recent"}' });
+        }
+        if (index === 1) {
+          return unknownToolStream({ toolName: READ_TOOL, callId: 'read-older', args: '{"window":"older"}' });
+        }
+        if (index > 2) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const rows = ledgerRows(request);
+        expect(rows).toHaveLength(2);
+        const fields = ['/merchant', '/amount', '/currency'];
+        return presentation({
+          rows: rows.map(row => ({ ref: row.ref, fields })),
+          sum: { refs: rows.map(row => row.ref), value_field: '/amount', unit_field: '/currency' },
+        });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(4);
+    expect(seenByModel.join('')).toContain(
+      'The sum mixes rows from more than one result. Sum rows from a single result.',
+    );
+    expect(liveText(result.events)).toBe(FAILED_NOTE);
+  });
+
+  it('names a summed field that is not a plain number', async () => {
+    const harness = await fixture();
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const checking = selectedRow(sourceRows(request), '/balances/0');
+        return presentation({
+          rows: [{ ref: checking.ref, fields: ['/account', '/currency'] }],
+          sum: { refs: [checking.ref], value_field: '/account', unit_field: '/currency' },
+        });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    expect(seenByModel.join('')).toContain(
+      'The field /account on the row at /balances/0 is not a plain number, so it cannot be summed. Sum a field that holds plain numbers.',
+    );
+    expect(liveText(result.events)).toBe(FAILED_NOTE);
+  });
+
+  it('names a summed unit field that does not name a unit', async () => {
+    // A plain number literal is carried as its exact text, so it reads as a named unit.
+    // A unit field holding a true-or-false value names nothing, and the sum is refused.
+    const coded = { records: [{ item: 'Gadget', amount: 10, code: true }] };
+    const harness = await fixture([coded]);
+    const seenByModel: string[] = [];
+    const result = await harness.send({
+      withheld: false,
+      previousTurnId: 'none',
+      onRequest: (request, index) => {
+        if (index === 0) return read();
+        if (index > 1) {
+          seenByModel.push(JSON.stringify(request.messages));
+          return finalAnswerStream(WRONG_GUESS);
+        }
+        const row = selectedRow(sourceRows(request), '/records/0');
+        return presentation({
+          rows: [{ ref: row.ref, fields: ['/amount', '/code'] }],
+          sum: { refs: [row.ref], value_field: '/amount', unit_field: '/code' },
+        });
+      },
+    });
+
+    expect(result.create).toHaveBeenCalledTimes(3);
+    expect(seenByModel.join('')).toContain(
+      'The field /code on the row at /records/0 does not name a unit, so the sum cannot be checked. Sum rows whose unit field names a unit.',
+    );
+    expect(liveText(result.events)).toBe(FAILED_NOTE);
+  });
 });
