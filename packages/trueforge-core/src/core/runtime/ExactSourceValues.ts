@@ -69,6 +69,13 @@ const EXACT_SOURCE_INSTRUCTIONS =
 const ExactFieldValue = z.union([z.string(), z.number(), z.boolean()]);
 
 const ReplacedContentSchema = z.object({
+  // The admission stamp: the id of the tool call prepare() processed when it wrote this
+  // envelope. The id is minted by the host and the model provider for that call and is
+  // never sent to the connector, so an envelope a connector authored itself cannot carry
+  // the stamp of the call whose persisted message bears it. Adoption checks the stamp
+  // against that call's id and takes no rows from an envelope whose stamp names another
+  // call, or none.
+  call_id: z.string().min(1),
   connector_result: z.unknown(),
   exact_source_rows: z.array(
     z.object({
@@ -639,10 +646,15 @@ export class ExactSourceValues extends LocalToolMCP {
    * Adopt rows from connector results persisted in the current request's context. A request
    * that pauses for an approval resumes in a fresh instance of this class, so rows prepared
    * before the pause are rebuilt here from the stored results. The schema above accepts any
-   * complete envelope of the shape prepare() writes, whoever authored it. What makes an
-   * envelope trustworthy in the normal flow is that prepare() itself writes it into the
-   * persisted message when it processes a result. The values adopted are the ones the envelope's
-   * row records carry: the very values prepare() derived from the admitted result text when
+   * complete envelope of the shape prepare() writes, whoever authored it, so the shape alone
+   * settles nothing about who wrote an envelope. Adoption therefore also requires the
+   * envelope's admission stamp to name the very call whose persisted message carries it:
+   * prepare() writes that stamp, the call's own id, into the envelope at the moment it
+   * processes the call, and the id is never sent to the connector. An envelope a connector
+   * authored itself, however exactly it mimics the shape, cannot carry the stamp of a call
+   * it never saw, so a result prepare() declined contributes no rows. The values adopted
+   * are the ones the envelope's row records carry: the very values prepare() derived from
+   * the admitted result text when
    * the result arrived, so a replayed value and the row the model was shown come from that
    * one derivation, and no value is re-derived from a second stored copy of the result,
    * whose own size and digits the cap and the parse would judge differently. The plain
@@ -658,7 +670,7 @@ export class ExactSourceValues extends LocalToolMCP {
       }
       knownCallIds.add(entry.call_id);
       const replaced = replacedContentOf(entry.content);
-      if (replaced === undefined) {
+      if (replaced?.call_id !== entry.call_id) {
         continue;
       }
       for (const advertised of replaced.exact_source_rows) {
@@ -778,6 +790,9 @@ export class ExactSourceValues extends LocalToolMCP {
       return rows;
     }
     result.message.content = JSON.stringify({
+      // The admission stamp: the id of the call whose result this envelope replaces,
+      // recorded by prepare() itself as it processes the call.
+      call_id: result.message.tool_call_id,
       connector_result: original,
       // Each advertised row carries the exact values this derivation produced, so a
       // request that resumes after an approval pause replays those very values. No

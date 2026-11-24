@@ -138,6 +138,7 @@ describe('ExactSourceValues adoption after an approval pause', () => {
 
   it('does not adopt an envelope missing the instructions prepare() always writes', () => {
     const envelope = {
+      call_id: 'call-9',
       connector_result: { records: [{ amount: 10.5, currency: 'USD' }] },
       exact_source_rows: [
         {
@@ -156,6 +157,7 @@ describe('ExactSourceValues adoption after an approval pause', () => {
 
   it('adopts a complete envelope within the gates, keeping only the fields the result carries', () => {
     const envelope = {
+      call_id: 'call-9',
       connector_result: { records: [{ amount: 10.5, currency: 'USD' }] },
       exact_source_rows: [
         {
@@ -175,6 +177,31 @@ describe('ExactSourceValues adoption after an approval pause', () => {
     // The advertised field the plain result does not carry at its path is not adopted,
     // so a section naming it can no longer be rendered exactly.
     expect(second.composedAnswer([presentation('row_AAAAAAAAAAAA', ['/secret'])])).toBeUndefined();
+  });
+
+  it('does not adopt an envelope whose admission stamp names another call', () => {
+    // A complete envelope in every other respect, carried by the persisted message of
+    // call-9, but stamped for a different call. Only prepare() writes the stamp, at the
+    // moment it processes the call the envelope replaces, so a stamp naming another
+    // call means prepare() never processed this one: the envelope was authored by the
+    // connector itself, and it contributes no rows.
+    const envelope = {
+      call_id: 'call-1',
+      connector_result: { records: [{ amount: 10.5, currency: 'USD' }] },
+      exact_source_rows: [
+        {
+          ref: 'row_AAAAAAAAAAAA',
+          path: '/records/0',
+          fields: ['/amount', '/currency'],
+          values: { '/amount': '10.5', '/currency': 'USD' },
+        },
+      ],
+      exact_source_instructions: INSTRUCTIONS,
+    };
+    const second = new ExactSourceValues(NOOP_AGENT_TRACING);
+    second.adoptContextResults([forgedResult(envelope)]);
+    expect(second.hasRows).toBe(false);
+    expect(second.composedAnswer([presentation('row_AAAAAAAAAAAA', ['/amount'])])).toBeUndefined();
   });
 });
 
@@ -231,6 +258,7 @@ describe('ExactSourceValues approval pause keeps the source digits', () => {
     // envelope is not adopted at all, and a request that paused across the change
     // falls back to the could-not-verify note rather than present unprovable values.
     const envelope = {
+      call_id: 'call-9',
       connector_result: { records: [{ name: 'Ledger 7', amount: 10.5, ratio: 1 }] },
       exact_source_rows: [{ ref: 'row_AAAAAAAAAAAA', path: '/records/0', fields: ['/name', '/amount', '/ratio'] }],
       exact_source_instructions: INSTRUCTIONS,
