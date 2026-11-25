@@ -8,6 +8,7 @@ import {
   DEFAULT_AGENT_SPEC_SKILLS,
   DeliveriesProvider,
   getErrorMessage,
+  GoalsProvider,
   HelpProvider,
   ImplementationPlanGrantProvider,
   LocalAccountProvider,
@@ -60,6 +61,7 @@ import { createChatFolderStore } from './chatFolderStore';
 import { createDeliveriesApi } from './deliveriesApi';
 import { createFirstRunGuideApi } from './firstRunGuideApi';
 import { GetStartedScreen } from './GetStartedScreen';
+import { createGoalsApi } from './goalsApi';
 import { createHelpApi } from './helpApi';
 import { createImplementationPlanGrantApi } from './implementationPlanGrantApi';
 import { createLocalAccountApi } from './localAccountApi';
@@ -493,6 +495,7 @@ export function App() {
   const deliveriesApi = useMemo(() => createDeliveriesApi(authAwareFetch), []);
   const chatAnswerMarksApi = useMemo(() => createChatAnswerMarksApi(authAwareFetch), []);
   const remindersApi = useMemo(() => createRemindersApi(authAwareFetch), []);
+  const goalsApi = useMemo(() => createGoalsApi({ fetcher: authAwareFetch, client: bootClient }), []);
   const helpApi = useMemo(
     () => createHelpApi({ fetcher: authAwareFetch, listPersonas: () => personaApi.listPersonas() }),
     [personaApi],
@@ -584,56 +587,59 @@ export function App() {
             <LocalAccountProvider api={localAccountApi}>
               <ChatAnswerMarksProvider api={chatAnswerMarksApi}>
                 <ReminderListProvider api={remindersApi}>
-                  <PersonalizationProvider api={personalizationApi}>
-                    <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
-                      <RepositoryWorkProvider api={repositoryWorkApi}>
-                        <BugReportProvider api={bugReportApi}>
-                          <VoiceInputProvider api={voiceInputApi}>
-                            <SpokenReplyProvider serverVoice={serverVoiceApi}>
-                              <RunCodeStatusProvider api={runCodeStatusApi}>
-                                <SandboxWorkspacesProvider api={sandboxWorkspacesApi}>
-                                  <MemoryRecallProvider api={memoryRecallApi}>
-                                    <ModelUsageProvider api={modelUsageApi}>
-                                      <PersonaProvider api={personaApi}>
-                                        <HelpProvider api={helpApi}>
-                                          <AmanSetupProvider
-                                            value={{
-                                              modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                                              hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
-                                              firstRunGuide,
-                                              settingsHref: '/settings',
-                                            }}
-                                          >
-                                            <ComposerDraftScopeProvider scope={draftScope}>
-                                              <SignOutConfirmProvider>
-                                                <AmanShell
-                                                  defaultAgentSpec={boot.defaultAgentSpec}
-                                                  openSettings={boot.openSettings}
-                                                  displayName={session.displayName}
-                                                  overrides={overrides}
-                                                  railDeskApi={railDeskApi}
-                                                  modelName={
-                                                    setup?.modelName ??
-                                                    (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                                  }
-                                                  version={boot.build?.version}
-                                                  buildRef={boot.build?.ref}
-                                                />
-                                              </SignOutConfirmProvider>
-                                            </ComposerDraftScopeProvider>
-                                          </AmanSetupProvider>
-                                        </HelpProvider>
-                                      </PersonaProvider>
-                                    </ModelUsageProvider>
-                                  </MemoryRecallProvider>
-                                </SandboxWorkspacesProvider>
-                              </RunCodeStatusProvider>
-                            </SpokenReplyProvider>
-                          </VoiceInputProvider>
-                        </BugReportProvider>
-                      </RepositoryWorkProvider>
-                    </ImplementationPlanGrantProvider>
-                  </PersonalizationProvider>
+                  <GoalsProvider api={goalsApi}>
+                    <PersonalizationProvider api={personalizationApi}>
+                      <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
+                        <RepositoryWorkProvider api={repositoryWorkApi}>
+                          <BugReportProvider api={bugReportApi}>
+                            <VoiceInputProvider api={voiceInputApi}>
+                              <SpokenReplyProvider serverVoice={serverVoiceApi}>
+                                <RunCodeStatusProvider api={runCodeStatusApi}>
+                                  <SandboxWorkspacesProvider api={sandboxWorkspacesApi}>
+                                    <MemoryRecallProvider api={memoryRecallApi}>
+                                      <ModelUsageProvider api={modelUsageApi}>
+                                        <PersonaProvider api={personaApi}>
+                                          <HelpProvider api={helpApi}>
+                                            <AmanSetupProvider
+                                              value={{
+                                                modelName:
+                                                  setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                                                hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                                                firstRunGuide,
+                                                settingsHref: '/settings',
+                                              }}
+                                            >
+                                              <ComposerDraftScopeProvider scope={draftScope}>
+                                                <SignOutConfirmProvider>
+                                                  <AmanShell
+                                                    defaultAgentSpec={boot.defaultAgentSpec}
+                                                    openSettings={boot.openSettings}
+                                                    displayName={session.displayName}
+                                                    overrides={overrides}
+                                                    railDeskApi={railDeskApi}
+                                                    modelName={
+                                                      setup?.modelName ??
+                                                      (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                                    }
+                                                    version={boot.build?.version}
+                                                    buildRef={boot.build?.ref}
+                                                  />
+                                                </SignOutConfirmProvider>
+                                              </ComposerDraftScopeProvider>
+                                            </AmanSetupProvider>
+                                          </HelpProvider>
+                                        </PersonaProvider>
+                                      </ModelUsageProvider>
+                                    </MemoryRecallProvider>
+                                  </SandboxWorkspacesProvider>
+                                </RunCodeStatusProvider>
+                              </SpokenReplyProvider>
+                            </VoiceInputProvider>
+                          </BugReportProvider>
+                        </RepositoryWorkProvider>
+                      </ImplementationPlanGrantProvider>
+                    </PersonalizationProvider>
+                  </GoalsProvider>
                 </ReminderListProvider>
               </ChatAnswerMarksProvider>
             </LocalAccountProvider>

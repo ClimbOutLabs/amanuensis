@@ -4,6 +4,7 @@ import { useChatChromeActionsVisible } from '../hooks/useChatChromeActionsVisibl
 import { Icon } from '../icons/Icon.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
+import { MakeGoalMenuItem } from './goals/MakeGoalMenuItem.js';
 import { headerActionClassName } from './lib/buttonClasses.js';
 import { DropdownMenu } from './primitives/DropdownMenu.js';
 
@@ -26,6 +27,7 @@ export function ChatHeaderMenu() {
       }
     >
       <ClearChatButton />
+      <MakeGoalMenuItem />
     </DropdownMenu>
   );
 }

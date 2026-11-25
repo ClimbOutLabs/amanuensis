@@ -32,6 +32,8 @@ export type {
   ThemeTokensConfig,
 } from './theme/types.js';
 
+export { GoalsButton } from './atoms/GoalsButton.js';
+export type { GoalsButtonProps } from './atoms/GoalsButton.js';
 export { PermissionGuard } from './atoms/PermissionGuard.js';
 export type { PermissionGuardProps } from './atoms/PermissionGuard.js';
 export { BottomSheet } from './atoms/primitives/BottomSheet.js';
@@ -89,6 +91,32 @@ export { TestScheduleScreen } from './atoms/schedules/TestScheduleScreen.js';
 export type { ScheduleMcpMount, TestScheduleScreenProps } from './atoms/schedules/TestScheduleScreen.js';
 export { SchedulesButton } from './atoms/SchedulesButton.js';
 export type { SchedulesButtonProps } from './atoms/SchedulesButton.js';
+export { GoalsProvider, useGoals, useOptionalGoals } from './goals/GoalsContext.js';
+export { GoalSetupChangedError } from './goals/types.js';
+export type {
+  CreateGoalInput,
+  CreateGoalStepInput,
+  GoalActivationPreview,
+  GoalAgentOption,
+  GoalApproval,
+  GoalCheckResult,
+  GoalCycle,
+  GoalCycleOutcome,
+  GoalDetail,
+  GoalEvent,
+  GoalEvidence,
+  GoalExecutionPolicy,
+  GoalItem,
+  GoalLifecycle,
+  GoalNotificationPolicy,
+  GoalSetupSummary,
+  GoalSourceKind,
+  GoalSourceRef,
+  GoalStep,
+  GoalStepStatus,
+  GoalsApi,
+  UpdateGoalInput,
+} from './goals/types.js';
 export { useHighlightedCard, useRewardLedger } from './hooks/useRewardLedger.js';
 export type { HighlightCandidates, RewardContext, RewardRequest } from './hooks/useRewardLedger.js';
 export { Icon } from './icons/Icon.js';
