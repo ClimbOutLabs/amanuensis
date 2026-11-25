@@ -2,6 +2,7 @@
 // the way a person would see it. A saved memory: the fact the chat was told lands only in the vault it belongs to.
 // Everything a case made is removed afterwards, so the next model starts the same.
 import { isRunStopping, replyTextOf } from '../eval-tokens/run.mjs';
+import { runChecks } from './checks.mjs';
 import { vaultNamespace } from './personas.mjs';
 
 export const JOURNEYS = Object.freeze(['scheduled_run', 'memory_saved', 'skill_added', 'skill_removed', 'news_titles']);
@@ -134,7 +135,7 @@ async function waitForRunChat({ client, runId, pollIntervalMs, timeoutMs }) {
 /**
  * Runs the schedule the chat made and checks it like a person would: one new morning brief schedule at the
  * asked time, a run that finishes, a chat named for the schedule, and a brief in that chat.
- * @param {{ client: any, before: { scheduleIds: Set<string> }, expect: { cron: string, timezone: string }, pollIntervalMs: number, runTimeoutMs?: number }} options
+ * @param {{ client: any, before: { scheduleIds: Set<string> }, expect: { cron: string, timezone: string, brief_checks?: import('./parse.mjs').Check[] }, pollIntervalMs: number, runTimeoutMs?: number }} options
  * @returns {Promise<import('./checks.mjs').CheckResult[]>}
  */
 export async function checkScheduledRun({
@@ -195,6 +196,15 @@ export async function checkScheduledRun({
       detail: 'the reply has no brief with a digest and items',
     }),
   );
+  if (expect.brief_checks !== undefined && expect.brief_checks.length > 0) {
+    // Word checks on the brief itself, for cases that turn on what the brief says. Only reply
+    // checks are allowed here; the set parser enforces that.
+    results.push(
+      ...runChecks({ checks: expect.brief_checks, reply: replyTextOf(finished.state.output), toolCalls: [] }).map(
+        item => ({ ...item, check: `the brief: ${item.check}` }),
+      ),
+    );
+  }
   return results;
 }
 

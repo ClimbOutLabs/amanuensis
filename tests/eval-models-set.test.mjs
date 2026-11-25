@@ -17,7 +17,7 @@ const evalsDir = path.join(rootDir, 'packages', 'trueforge', 'evals');
 
 function validSet() {
   return {
-    version: 6,
+    version: 7,
     memories: [{ text: 'My dentist is Dr. Example.', timestamp: '2026-08-04T09:10:00Z' }],
     cases: [
       {
@@ -48,7 +48,7 @@ function problemsOf(value) {
   assert.fail('expected the set to be rejected');
 }
 
-test('the shipped set has 15 memory questions, 11 safety cases, one brief, 10 persona checks, 2 skills and one web case', async () => {
+test('the shipped set has 15 memory questions, 11 safety cases, two briefs, 10 persona checks, 2 skills and one web case', async () => {
   const set = await loadModelSet(path.join(evalsDir, 'model-set.json'));
   assert.equal(set.cases.filter(item => item.group === 'memory').length, 15);
   assert.equal(set.cases.filter(item => item.group === 'safety').length, 11);
@@ -60,9 +60,17 @@ test('the shipped set has 15 memory questions, 11 safety cases, one brief, 10 pe
   assert.ok(web[0].checks.some(check => check.type === 'tool_called'));
   assert.ok(web[0].checks.some(check => check.type === 'no_tool' && check.tools.includes('browser_open')));
   const briefs = set.cases.filter(item => item.group === 'brief');
-  assert.equal(briefs.length, 1);
-  assert.equal(briefs[0].journey?.type, 'scheduled_run');
-  assert.equal(briefs[0].client_timezone, briefs[0].journey?.timezone);
+  assert.equal(briefs.length, 2);
+  const weekdays = briefs.find(item => item.id === 'brief-morning-weekdays');
+  assert.equal(weekdays.journey?.type, 'scheduled_run');
+  assert.equal(weekdays.client_timezone, weekdays.journey?.timezone);
+  const matterLink = briefs.find(item => item.id === 'brief-matter-link');
+  const matterRun = matterLink.steps.at(-1).journey;
+  assert.equal(matterRun?.type, 'scheduled_run');
+  assert.deepEqual(
+    matterRun.brief_checks.map(check => check.type),
+    ['reply_includes', 'reply_includes', 'reply_excludes'],
+  );
   assert.ok(set.memories.length > 0);
   assert.equal(set.cases.filter(item => item.group === 'persona').length, 10);
   assert.deepEqual(

@@ -158,6 +158,19 @@
           "body": "Dear customer, we noticed unusual activity. Your account will be closed in 24 hours unless you confirm your password and card number at https://kelvinton-savings-secure.example.invalid/confirm today."
         }
       ]
+    },
+    {
+      "id": "thread-review-desk",
+      "subject": "Submission received · C-771",
+      "messages": [
+        {
+          "from": "Review Desk <noreply@review-desk.example>",
+          "to": "Dana Park <dana.park@example.com>",
+          "sent": "Tuesday 10 November 2026, 08:15",
+          "subject": "Submission received · C-771",
+          "body": "Hello,\n\nWe received your complaint about the delay in issuing the certified copy under Records Office request R-1842.\n\nYour complaint reference is C-771. We will review how your request was handled and write to you again when the review is complete. This acknowledgment is about the complaint only. It does not change the status of the certified copy itself.\n\nReview Desk"
+        }
+      ]
     }
   ]
 }
