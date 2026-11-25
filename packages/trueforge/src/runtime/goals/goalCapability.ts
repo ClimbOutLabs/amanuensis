@@ -89,12 +89,24 @@ export const CreateGoalToolSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
     outcome: z.string().trim().min(1).max(2000),
-    success_criteria: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
+    success_criteria: z
+      .array(z.string().trim().min(1).max(500))
+      .max(20)
+      .optional()
+      .describe(
+        'What must be true when the goal is met, one entry per fact. Every entry needs a step in the plan working toward it.',
+      ),
     target_at: z.string().nullable().optional(),
     timezone: z.string().trim().min(1).max(100).optional(),
     agent_name: z.string().trim().min(1).max(200).optional(),
     selected_sources: z.array(GoalSourceToolSchema).max(50).optional(),
-    steps: z.array(GoalStepToolSchema).max(50).optional(),
+    steps: z
+      .array(GoalStepToolSchema)
+      .max(50)
+      .optional()
+      .describe(
+        'The plan, as actionable steps toward the outcome. Cover every success criterion with at least one step: checks gather evidence against steps only, so a criterion with no step is never checked.',
+      ),
   })
   .strict();
 
@@ -343,6 +355,7 @@ const GOAL_INSTRUCTION_SECTION = 'goals';
 
 const GOAL_INSTRUCTION =
   'create_goal makes a goal draft when the person asks Aman to keep track of an outcome over time. ' +
+  'The plan must cover the outcome: give every success criterion an actionable step of its own, so nothing the person asked for sits outside the plan. ' +
   'A draft does nothing until the person reviews its activation card and activates it, so never say a goal is being watched before then. ' +
   'list_goals and get_goal answer where things stand. request_goal_check checks an active goal now and reports what changed and what is next.';
 

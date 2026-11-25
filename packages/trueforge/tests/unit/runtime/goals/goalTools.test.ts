@@ -97,14 +97,15 @@ describe('goal tools', () => {
     });
 
     // The chat check reads the goal's space sources through the space store. The
-    // fixture spaces are absent here, so the check reports them unread and still
-    // completes honestly rather than inventing findings.
+    // fixture spaces are absent here, so the check could read nothing at all:
+    // it finishes as failed with the reason, rather than claiming nothing
+    // changed when it never looked.
     const checked: unknown = JSON.parse(
       toolText(await tools.callTool({ name: 'request_goal_check', arguments: { goal: draft.goal.goal_id } })),
     );
-    expect(checked).toMatchObject({ outcome: 'nothing_changed', unread_sources: ['Venue letter', 'Catering quote'] });
+    expect(checked).toMatchObject({ outcome: 'failed', unread_sources: ['Venue letter', 'Catering quote'] });
     const cycles = [...store.cycles.values()];
     expect(cycles).toHaveLength(1);
-    expect(cycles[0]?.outcome).toBe('nothing_changed');
+    expect(cycles[0]?.outcome).toBe('failed');
   });
 });

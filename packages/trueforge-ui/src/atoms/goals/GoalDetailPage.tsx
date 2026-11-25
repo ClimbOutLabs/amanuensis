@@ -583,9 +583,11 @@ export function GoalDetailPage({ goalId }: { goalId: string }) {
           <p>
             {lastCheck === null
               ? 'No check has run yet, so there are no coverage gaps to report.'
-              : unreadLabels.length > 0
-                ? `Coverage gaps: the last check could not read ${unreadLabels.join(', ')}.`
-                : 'The last check read every selected source.'}
+              : goal.selectedSources.length === 0
+                ? 'This goal has no sources selected, so its checks have nothing to read.'
+                : unreadLabels.length > 0
+                  ? `Coverage gaps: the last check could not read ${unreadLabels.join(', ')}.`
+                  : 'The last check read every selected source.'}
           </p>
           <p className="text-text-secondary">
             This goal is checked{' '}

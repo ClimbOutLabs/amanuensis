@@ -133,6 +133,113 @@ export interface GoalServiceDeps {
   now?: () => Date;
 }
 
+/** Words that carry no fact of their own, so they never decide coverage. */
+const COVERAGE_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'in',
+  'on',
+  'of',
+  'for',
+  'to',
+  'and',
+  'or',
+  'with',
+  'by',
+  'at',
+  'from',
+  'as',
+  'it',
+  'its',
+  'has',
+  'have',
+  'had',
+  'can',
+  'could',
+  'will',
+  'would',
+  'shall',
+  'should',
+  'may',
+  'might',
+  'must',
+  'do',
+  'does',
+  'did',
+]);
+
+/** One word reduced to a plain stem, so "confirmed", "confirms" and "confirm" are the same word. */
+function coverageStem(word: string): string {
+  if (word.length > 4 && word.endsWith('ies')) {
+    return `${word.slice(0, -3)}y`;
+  }
+  if (word.length > 4 && word.endsWith('ing')) {
+    return word.slice(0, -3);
+  }
+  if (word.length > 3 && word.endsWith('ed')) {
+    return word.slice(0, -2);
+  }
+  if (word.length > 3 && word.endsWith('es')) {
+    return word.slice(0, -2);
+  }
+  if (word.length > 2 && word.endsWith('s')) {
+    return word.slice(0, -1);
+  }
+  if (word.length > 3 && word.endsWith('e')) {
+    return word.slice(0, -1);
+  }
+  return word;
+}
+
+/** The fact-carrying words of a text: lowercased, punctuation removed, stop words dropped, the rest stemmed. */
+function coverageWords(text: string): ReadonlySet<string> {
+  const words = new Set<string>();
+  for (const raw of text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')) {
+    if (raw === '' || COVERAGE_STOP_WORDS.has(raw)) {
+      continue;
+    }
+    words.add(coverageStem(raw));
+  }
+  return words;
+}
+
+/**
+ * Whether a step already carries a success criterion. A composed plan phrases
+ * a criterion in its own words ("Book the equipment" for "The equipment is
+ * booked"), so the match is on the criterion's fact-carrying words: a step
+ * carries the criterion when at least half of those words appear across the
+ * step's description and acceptance criteria. Doubt appends the criterion as
+ * its own step: a step too many is visible on the card, while a criterion
+ * with no step is invisible to every check.
+ */
+function stepCarriesCriterion(step: { description: string; acceptance_criteria: string }, criterion: string): boolean {
+  const wanted = coverageWords(criterion);
+  if (wanted.size === 0) {
+    return false;
+  }
+  const carried = new Set([...coverageWords(step.description), ...coverageWords(step.acceptance_criteria)]);
+  let hits = 0;
+  for (const word of wanted) {
+    if (carried.has(word)) {
+      hits += 1;
+    }
+  }
+  if (wanted.size === 1) {
+    return hits === 1;
+  }
+  return hits * 2 >= wanted.size;
+}
+
 export function createGoalService(deps: GoalServiceDeps) {
   const now = deps.now ?? (() => new Date());
   const store = deps.store;
@@ -237,6 +344,23 @@ export function createGoalService(deps: GoalServiceDeps) {
         acceptance_criteria: step.acceptance_criteria,
         source_refs: step.source_refs ?? [],
       }));
+      // The stored plan must cover the outcome. Checks record evidence against
+      // steps only, so a criterion no step carries could never gather evidence
+      // or be confirmed. Any criterion the given plan leaves out is appended
+      // as a step carrying that criterion. Both entry points (the chat tool
+      // and the API) share this create, so the guarantee holds for each.
+      for (const criterion of input.success_criteria) {
+        if (steps.some(step => stepCarriesCriterion(step, criterion))) {
+          continue;
+        }
+        steps.push({
+          description: criterion,
+          depends_on_indexes: [],
+          status: 'ready' as const,
+          acceptance_criteria: criterion,
+          source_refs: [],
+        });
+      }
       const goal = await store.createGoal({
         tenant_id: actor.tenant_id,
         created_by: actorSubject(actor),
