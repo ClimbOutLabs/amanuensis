@@ -67,6 +67,14 @@ docker exec "$NAME" node -e "require('node:fs').writeFileSync('/data/mail-policy
 printf 'ok: %s runs as uid 10001 with only /data and /tmp writable and became healthy\n' "$IMAGE"
 printf 'ok: a fresh send list volume is owned by uid 10001 and the app writes its send list into it\n'
 
+# The listening model is baked into the image, and the app user must be able to open the file, not
+# only see its name in the folder. A build once fetched the model into a folder the fetch itself
+# created with the file's permissions, so the server could list the file but never read it and voice
+# mode reported the model missing on installed instances.
+docker exec "$NAME" node -e "const fs=require('node:fs'); const model=fs.readFileSync('/opt/aman-voice/silero_vad.onnx'); if (model.length === 0) process.exit(1)" \
+  || fail "the app could not read the baked-in listening model"
+printf 'ok: the app reads the baked-in listening model as its own user\n'
+
 # The account agent runs as the sidecar's user with no capabilities, against the account file in the
 # sidecar's own volume: read, save and remove must all work there, while a file owned by another
 # user stays unreadable. Needs root (only root can make a file owned by another user), setpriv and
