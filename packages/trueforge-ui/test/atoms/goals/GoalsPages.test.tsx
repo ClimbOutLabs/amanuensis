@@ -189,12 +189,21 @@ describe('Goal page, draft and activation card', () => {
       pinnedSetup: { ...SETUP },
       nextCheckAt: '2026-06-16T16:00:00.000Z',
     });
+    // The refetch after activation answers a later revision whose next check
+    // falls a day later than the activation answer's. That June 17 date can
+    // only reach the screen if the refetched detail is applied.
+    const refetched = fundraiserGoal({
+      lifecycle: 'active',
+      revision: 3,
+      pinnedSetup: { ...SETUP },
+      nextCheckAt: '2026-06-17T16:00:00.000Z',
+    });
     const steps = [venueStep({}), equipmentStep({})];
     const draft = fundraiserGoal({});
     let current: GoalDetail = { goal: draft, steps, nextStepId: null };
     const activateGoal = vi.fn<GoalsApi['activateGoal']>(() => {
-      current = { goal: active, steps, nextStepId: 'step-venue' };
-      return Promise.resolve(current);
+      current = { goal: refetched, steps, nextStepId: 'step-venue' };
+      return Promise.resolve({ goal: active, steps, nextStepId: 'step-venue' });
     });
     const updateGoal = vi.fn<GoalsApi['updateGoal']>();
     const api = makeApi({
@@ -219,7 +228,11 @@ describe('Goal page, draft and activation card', () => {
     await waitFor(() => expect(activateGoal).toHaveBeenCalledTimes(1));
     expect(activateGoal).toHaveBeenCalledWith('goal-1', { expectedRevision: 1, setupDigest: 'digest-1' });
     expect(updateGoal).not.toHaveBeenCalled();
-    expect(await screen.findByRole('button', { name: 'Check now' })).toBeDefined();
+    // Wait for the refetched detail's June 17 next check to replace the
+    // activation answer's June 16 one, then assert on the settled screen.
+    expect(await screen.findByText(/Next check: June 17, 2026/)).toBeDefined();
+    expect(screen.queryByText(/Next check: June 16, 2026/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeDefined();
   });
 
   it('reads a comma-grouped daily allowance at its full value when activating', async () => {
