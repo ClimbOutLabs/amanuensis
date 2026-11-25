@@ -189,11 +189,20 @@ describe('Goal page, draft and activation card', () => {
       pinnedSetup: { ...SETUP },
       nextCheckAt: '2026-06-16T16:00:00.000Z',
     });
-    const activateGoal = vi.fn<GoalsApi['activateGoal']>(() =>
-      Promise.resolve({ goal: active, steps: [venueStep({}), equipmentStep({})], nextStepId: 'step-venue' }),
-    );
+    const steps = [venueStep({}), equipmentStep({})];
+    const draft = fundraiserGoal({});
+    let current: GoalDetail = { goal: draft, steps, nextStepId: null };
+    const activateGoal = vi.fn<GoalsApi['activateGoal']>(() => {
+      current = { goal: active, steps, nextStepId: 'step-venue' };
+      return Promise.resolve(current);
+    });
     const updateGoal = vi.fn<GoalsApi['updateGoal']>();
-    const api = draftApi({ activateGoal, updateGoal });
+    const api = makeApi({
+      getGoal: () => Promise.resolve(current),
+      getActivationPreview: () => Promise.resolve({ goal: draft, steps, setup: { ...SETUP } }),
+      activateGoal,
+      updateGoal,
+    });
     renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
 
     expect(await screen.findByText('Review and activate')).toBeDefined();
