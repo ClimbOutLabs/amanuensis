@@ -20,6 +20,7 @@ import (
 	"aman/slotagent/src/api"
 	"aman/slotagent/src/attest"
 	"aman/slotagent/src/guest"
+	"aman/slotagent/src/tree"
 )
 
 const (
@@ -27,10 +28,18 @@ const (
 	sessionID = "fedcba9876543210fedcba9876543210"
 )
 
-type fakeAttestor struct{ ok bool }
+type fakeAttestor struct {
+	ok bool
+	// freeBytes is the free space every collected report claims, however stale that claim is.
+	freeBytes int64
+}
 
 func (f fakeAttestor) Collect() attest.Report {
-	return attest.Report{OK: f.ok, Checks: []attest.Check{{Name: "apparmor", OK: f.ok, Detail: "wrong profile"}}}
+	return attest.Report{
+		OK:     f.ok,
+		Checks: []attest.Check{{Name: "apparmor", OK: f.ok, Detail: "wrong profile"}},
+		Facts:  attest.Facts{StoreFreeBytes: f.freeBytes},
+	}
 }
 
 // fakeRunner records the spec and optionally runs a hook that plays the guest.
@@ -136,11 +145,49 @@ func TestHealthReportsAttestation(t *testing.T) {
 func TestHealthCountsSessionTrees(t *testing.T) {
 	e := newEnv(t, true)
 	content := base64.StdEncoding.EncodeToString([]byte("x"))
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644})
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/a", "content_base64": content, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10})
 	rec := e.do("GET", "/v1/health", nil)
 	if !strings.Contains(rec.Body.String(), `"sessions":2`) {
 		t.Fatalf("%s", rec.Body.String())
+	}
+}
+
+func TestHealthWhileBusyReportsFreshFreeSpace(t *testing.T) {
+	e := newEnv(t, true)
+	// Every collected report claims a single free byte, so a busy answer still carrying that
+	// number is carrying the stale reading taken when the running command started.
+	e.srv.Attestor = fakeAttestor{ok: true, freeBytes: 1}
+	e.runner.hold = make(chan struct{})
+	done := make(chan struct{})
+	go func() { e.do("POST", "/v1/run_code", runReq(nil)); close(done) }()
+	for {
+		e.runner.mu.Lock()
+		started := e.runner.spec.ID != ""
+		e.runner.mu.Unlock()
+		if started {
+			break
+		}
+	}
+	rec := e.do("GET", "/v1/health", nil)
+	close(e.runner.hold)
+	<-done
+	var health struct {
+		Busy        bool `json:"busy"`
+		Attestation struct {
+			Facts struct {
+				StoreFreeBytes int64 `json:"store_free_bytes"`
+			} `json:"facts"`
+		} `json:"attestation"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &health); err != nil {
+		t.Fatalf("health body is not the expected shape: %s", rec.Body.String())
+	}
+	if !health.Busy {
+		t.Fatal("health must say busy while a lease runs")
+	}
+	if health.Attestation.Facts.StoreFreeBytes <= 1 {
+		t.Fatalf("busy health reported the stale free space %d, want a fresh reading of the volume", health.Attestation.Facts.StoreFreeBytes)
 	}
 }
 
@@ -435,7 +482,7 @@ func TestExecRefusesSkillsDirAtAnyOtherPath(t *testing.T) {
 func TestFilesRoundTripAndStayInsideTheTree(t *testing.T) {
 	e := newEnv(t, true)
 	content := base64.StdEncoding.EncodeToString([]byte("data"))
-	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a/b.txt", "content_base64": content, "mode": 0o644}); rec.Code != 204 {
+	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a/b.txt", "content_base64": content, "mode": 0o644, "disk_mb": 10}); rec.Code != 204 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	rec := e.do("POST", "/v1/fs_read", map[string]any{"session_id": sessionID, "path": "/workspace/a/b.txt"})
@@ -446,23 +493,315 @@ func TestFilesRoundTripAndStayInsideTheTree(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	for _, p := range []string{"/etc/passwd", "/workspace/../x", "relative"} {
-		if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": p, "content_base64": content, "mode": 0o644}); rec.Code != 400 {
+		if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": p, "content_base64": content, "mode": 0o644, "disk_mb": 10}); rec.Code != 400 {
 			t.Errorf("%s: %d", p, rec.Code)
 		}
 	}
-	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/x", "content_base64": content, "mode": 0o4755}); rec.Code != 400 {
+	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/x", "content_base64": content, "mode": 0o4755, "disk_mb": 10}); rec.Code != 400 {
 		t.Errorf("setuid modes must be refused: %d", rec.Code)
 	}
 }
 
 func TestDestroySessionRemovesTheTree(t *testing.T) {
 	e := newEnv(t, true)
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": "", "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": "", "mode": 0o644, "disk_mb": 10})
 	if rec := e.do("POST", "/v1/destroy_session", map[string]any{"session_id": sessionID}); rec.Code != 204 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	if _, err := os.Stat(filepath.Join(e.srv.TreeDir, sessionID)); !os.IsNotExist(err) {
 		t.Fatal("the tree must be gone")
+	}
+}
+
+func TestCreateSessionMakesTheEmptyTree(t *testing.T) {
+	e := newEnv(t, true)
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10}); rec.Code != 204 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if info, err := os.Stat(filepath.Join(e.srv.TreeDir, sessionID)); err != nil || !info.IsDir() {
+		t.Fatalf("the tree must exist: %v", err)
+	}
+	// Creating the same session again is a success: the caller may be retrying a lost answer.
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10}); rec.Code != 204 {
+		t.Fatalf("again: %d %s", rec.Code, rec.Body.String())
+	}
+	if body := sessionsOf(t, e.do("GET", "/v1/sessions", nil)); len(body.Sessions) != 1 || body.Sessions[0].SessionID != sessionID {
+		t.Fatalf("the new tree must be listed: %+v", body.Sessions)
+	}
+}
+
+func TestCreateSessionIsRefusedWhenTheVolumeCannotFitTheQuota(t *testing.T) {
+	e := newEnv(t, true)
+	e.srv.MinFreeBytes = 1 << 60
+	rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(e.srv.TreeDir, sessionID)); !os.IsNotExist(err) {
+		t.Fatal("a refused creation must leave no tree")
+	}
+}
+
+func TestCreateSessionForAnExistingTreeNeedsNoNewRoom(t *testing.T) {
+	e := newEnv(t, true)
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10}); rec.Code != 204 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	e.srv.MinFreeBytes = 1 << 60
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10}); rec.Code != 204 {
+		t.Fatalf("an existing tree must not be refused for room: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateSessionCountsTheQuotasAlreadyPromised(t *testing.T) {
+	e := newEnv(t, true)
+	// A volume of 1 GiB plus two 256 MiB quotas, with the default 1 GiB reserve, fits two
+	// creations exactly. A third would promise more than the volume holds, however much free
+	// space it has now, because both existing trees are still empty.
+	e.srv.VolumeBytes = 1536 << 20
+	second := strings.Repeat("b", 32)
+	third := strings.Repeat("c", 32)
+	for _, id := range []string{sessionID, second} {
+		if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": id, "disk_mb": 256}); rec.Code != 204 {
+			t.Fatalf("%s: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": third, "disk_mb": 256})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("a creation past the promised total must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(e.srv.TreeDir, third)); !os.IsNotExist(err) {
+		t.Fatal("a refused creation must leave no tree")
+	}
+	// Removing a tree frees its promise, so the same creation then fits.
+	if rec := e.do("POST", "/v1/destroy_session", map[string]any{"session_id": second}); rec.Code != 204 {
+		t.Fatalf("destroy: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": third, "disk_mb": 256}); rec.Code != 204 {
+		t.Fatalf("after a removal the creation must fit: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestASecondChatCanStillStartAfterTheFirstWritesWithinItsQuota(t *testing.T) {
+	e := newEnv(t, true)
+	// The volume fits both chats' quotas with the reserve to spare, and no third quota: the
+	// promises counted at creation can never crowd out the reserve a call needs to start.
+	e.srv.VolumeBytes = 1536 << 20
+	second := strings.Repeat("b", 32)
+	for _, id := range []string{sessionID, second} {
+		if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": id, "disk_mb": 256}); rec.Code != 204 {
+			t.Fatalf("%s: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	// The first chat writes within its quota.
+	content := base64.StdEncoding.EncodeToString([]byte("work"))
+	write := map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 256}
+	if rec := e.do("POST", "/v1/fs_write", write); rec.Code != 204 {
+		t.Fatalf("write: %d %s", rec.Code, rec.Body.String())
+	}
+	// The second chat can still start its call.
+	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+		m["session_id"] = second
+		m["disk_mb"] = 256
+	}))
+	if rec.Code != 200 {
+		t.Fatalf("the second chat must be able to start: %d %s", rec.Code, rec.Body.String())
+	}
+	// And a third chat is refused at creation, so this cannot change as more chats arrive.
+	third := strings.Repeat("c", 32)
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": third, "disk_mb": 256}); rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("a third quota must not fit: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestARaisedQuotaStillLeavesTheOtherChatAbleToStart(t *testing.T) {
+	e := newEnv(t, true)
+	// The volume fits one chat's quota raised to 4 GiB beside the other chat's 2 GiB, plus the
+	// default 1 GiB reserve: 4096 + 2048 + 1024. It could not promise both raises.
+	e.srv.VolumeBytes = 7168 << 20
+	second := strings.Repeat("b", 32)
+	for _, id := range []string{sessionID, second} {
+		if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": id, "disk_mb": 2048}); rec.Code != 204 {
+			t.Fatalf("%s: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	// The configured quota rises, and the first chat's next call records the larger promise.
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 4096}); rec.Code != 204 {
+		t.Fatalf("the first raise must be honored: %d %s", rec.Code, rec.Body.String())
+	}
+	if recorded, ok := tree.RecordedQuota(e.srv.TreeDir, sessionID); !ok || recorded != 4096<<20 {
+		t.Fatalf("the raised quota must stand recorded: %d, %v", recorded, ok)
+	}
+	// The second chat starts its call at the promise it already holds. The reserve its start
+	// check needs is intact, because the raise was counted before it was recorded.
+	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
+		m["session_id"] = second
+		m["disk_mb"] = 2048
+	}))
+	if rec.Code != 200 {
+		t.Fatalf("the second chat must be able to start: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAQuotaRaiseTheVolumeCannotPromiseIsRefused(t *testing.T) {
+	e := newEnv(t, true)
+	// The same volume as above: one raise to 4 GiB fits, the second does not.
+	e.srv.VolumeBytes = 7168 << 20
+	second := strings.Repeat("b", 32)
+	for _, id := range []string{sessionID, second} {
+		if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": id, "disk_mb": 2048}); rec.Code != 204 {
+			t.Fatalf("%s: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 4096}); rec.Code != 204 {
+		t.Fatalf("the first raise must be honored: %d %s", rec.Code, rec.Body.String())
+	}
+	// Raising the second chat too would promise 4096 + 4096 plus the reserve, more than the
+	// volume holds, so the raise is refused and the old record stands.
+	rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": second, "disk_mb": 4096})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("a raise past what the volume can promise must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if recorded, ok := tree.RecordedQuota(e.srv.TreeDir, second); !ok || recorded != 2048<<20 {
+		t.Fatalf("the refused raise must leave the old record standing: %d, %v", recorded, ok)
+	}
+	// The tree is not wedged: a call at the recorded quota still succeeds.
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": second, "disk_mb": 2048}); rec.Code != 204 {
+		t.Fatalf("the second chat must keep working at its recorded quota: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// The same refusal comes from free space: when the reserve alone passes what is free, a
+	// raise is refused even though the volume's total could promise it.
+	fresh := newEnv(t, true)
+	if rec := fresh.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 2048}); rec.Code != 204 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	fresh.srv.MinFreeBytes = 1 << 60
+	rec = fresh.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 4096})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("a raise the free space cannot fit must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if recorded, ok := tree.RecordedQuota(fresh.srv.TreeDir, sessionID); !ok || recorded != 2048<<20 {
+		t.Fatalf("the refused raise must leave the old record standing: %d, %v", recorded, ok)
+	}
+}
+
+func TestATreeWithoutAQuotaRecordIsCheckedWhenItsQuotaIsFirstRecorded(t *testing.T) {
+	e := newEnv(t, true)
+	// A tree made before quotas were recorded stands on the volume with no record, so it
+	// counts only at the space it takes, which is almost nothing.
+	legacy := strings.Repeat("d", 32)
+	if _, err := tree.Ensure(e.srv.TreeDir, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tree.RecordedQuota(e.srv.TreeDir, legacy); ok {
+		t.Fatal("the legacy tree must start with no quota record")
+	}
+	// The volume fits the other chat's 2 GiB promise, a 2 GiB promise for the legacy tree and
+	// the reserve, but not a 4 GiB one: 2048 + 2048 + 1024.
+	e.srv.VolumeBytes = 5120 << 20
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 2048}); rec.Code != 204 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": legacy, "disk_mb": 4096})
+	if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+		t.Fatalf("the first record must be checked like a creation: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, ok := tree.RecordedQuota(e.srv.TreeDir, legacy); ok {
+		t.Fatal("a refused first record must leave the tree unrecorded")
+	}
+	// A first record that fits is taken.
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": legacy, "disk_mb": 2048}); rec.Code != 204 {
+		t.Fatalf("a first record that fits must be taken: %d %s", rec.Code, rec.Body.String())
+	}
+	if recorded, ok := tree.RecordedQuota(e.srv.TreeDir, legacy); !ok || recorded != 2048<<20 {
+		t.Fatalf("the first record must stand: %d, %v", recorded, ok)
+	}
+}
+
+func TestEveryCallThatMakesATreeChecksForRoom(t *testing.T) {
+	e := newEnv(t, true)
+	e.srv.MinFreeBytes = 1 << 60
+	content := base64.StdEncoding.EncodeToString([]byte("x"))
+	for _, call := range []struct {
+		path string
+		body any
+	}{
+		{"/v1/exec", execBody(nil)},
+		{"/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10}},
+	} {
+		rec := e.do("POST", call.path, call.body)
+		if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+			t.Fatalf("%s: %d %s", call.path, rec.Code, rec.Body.String())
+		}
+		if _, err := os.Stat(filepath.Join(e.srv.TreeDir, sessionID)); !os.IsNotExist(err) {
+			t.Fatalf("%s: a refused call must leave no tree", call.path)
+		}
+	}
+}
+
+func TestFileWritesToAnExistingTreeNeedNoNewRoom(t *testing.T) {
+	e := newEnv(t, true)
+	content := base64.StdEncoding.EncodeToString([]byte("x"))
+	write := map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10}
+	if rec := e.do("POST", "/v1/fs_write", write); rec.Code != 204 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	e.srv.MinFreeBytes = 1 << 60
+	if rec := e.do("POST", "/v1/fs_write", write); rec.Code != 204 {
+		t.Fatalf("an existing tree must not be refused for room: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestFileWritesNeedTheSessionQuota(t *testing.T) {
+	e := newEnv(t, true)
+	content := base64.StdEncoding.EncodeToString([]byte("x"))
+	for _, diskMB := range []any{nil, 0, 8193} {
+		body := map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644}
+		if diskMB != nil {
+			body["disk_mb"] = diskMB
+		}
+		if rec := e.do("POST", "/v1/fs_write", body); rec.Code != 400 || errCode(t, rec) != "invalid_request" {
+			t.Errorf("disk_mb %v: %d %s", diskMB, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestCreateSessionDoesNotWaitForAnotherChatsCall(t *testing.T) {
+	e := newEnv(t, true)
+	e.runner.hold = make(chan struct{})
+	done := make(chan struct{})
+	go func() { e.do("POST", "/v1/exec", execBody(nil)); close(done) }()
+	for {
+		e.runner.mu.Lock()
+		started := e.runner.spec.ID != ""
+		e.runner.mu.Unlock()
+		if started {
+			break
+		}
+	}
+	other := strings.Repeat("b", 32)
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": other, "disk_mb": 10}); rec.Code != 204 {
+		t.Errorf("a new chat must not wait for another chat's call: %d %s", rec.Code, rec.Body.String())
+	}
+	close(e.runner.hold)
+	<-done
+}
+
+func TestCreateSessionValidatesItsRequest(t *testing.T) {
+	e := newEnv(t, true)
+	for _, body := range []map[string]any{
+		{"session_id": "not-a-session", "disk_mb": 10},
+		{"session_id": sessionID, "disk_mb": 0},
+		{"session_id": sessionID, "disk_mb": 8193},
+		{"session_id": sessionID},
+	} {
+		if rec := e.do("POST", "/v1/create_session", body); rec.Code != 400 || errCode(t, rec) != "invalid_request" {
+			t.Errorf("%v: %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(e.srv.TreeDir, sessionID)); !os.IsNotExist(err) {
+		t.Fatal("a refused request must leave no tree")
 	}
 }
 
@@ -562,7 +901,7 @@ func TestOversizedBodiesAreRefusedPerEndpoint(t *testing.T) {
 	}
 }
 
-func TestSessionInUseAnswersBusyForFilesAndDestroy(t *testing.T) {
+func TestSessionInUseAnswersBusyForFilesDestroyAndCreate(t *testing.T) {
 	e := newEnv(t, true)
 	e.runner.hold = make(chan struct{})
 	done := make(chan struct{})
@@ -578,7 +917,8 @@ func TestSessionInUseAnswersBusyForFilesAndDestroy(t *testing.T) {
 	content := base64.StdEncoding.EncodeToString([]byte("x"))
 	calls := map[string]map[string]any{
 		"/v1/fs_read":         {"session_id": sessionID, "path": "/workspace/a"},
-		"/v1/fs_write":        {"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644},
+		"/v1/fs_write":        {"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10},
+		"/v1/create_session":  {"session_id": sessionID, "disk_mb": 10},
 		"/v1/destroy_session": {"session_id": sessionID},
 	}
 	for path, body := range calls {
@@ -588,7 +928,7 @@ func TestSessionInUseAnswersBusyForFilesAndDestroy(t *testing.T) {
 	}
 	// A different session on the same slot can still move files while the lease runs.
 	other := strings.Repeat("b", 32)
-	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": other, "path": "/workspace/a", "content_base64": content, "mode": 0o644}); rec.Code != 204 {
+	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": other, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10}); rec.Code != 204 {
 		t.Errorf("other session: %d %s", rec.Code, rec.Body.String())
 	}
 	close(e.runner.hold)
@@ -600,7 +940,7 @@ func TestIdleSessionsAreSweptAndBusyOnesKept(t *testing.T) {
 	content := base64.StdEncoding.EncodeToString([]byte("x"))
 	old, fresh := strings.Repeat("c", 32), strings.Repeat("d", 32)
 	for _, id := range []string{old, fresh} {
-		e.do("POST", "/v1/fs_write", map[string]any{"session_id": id, "path": "/workspace/a", "content_base64": content, "mode": 0o644})
+		e.do("POST", "/v1/fs_write", map[string]any{"session_id": id, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10})
 	}
 	past := time.Now().Add(-48 * time.Hour)
 	if err := os.Chtimes(filepath.Join(e.srv.TreeDir, old), past, past); err != nil {
@@ -943,8 +1283,8 @@ func sessionsOf(t *testing.T, rec *httptest.ResponseRecorder) sessionsBody {
 func TestSessionsListsTreesWithTheirSizes(t *testing.T) {
 	e := newEnv(t, true)
 	content := base64.StdEncoding.EncodeToString([]byte("hello"))
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644})
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/b.txt", "content_base64": content, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644, "disk_mb": 10})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/b.txt", "content_base64": content, "mode": 0o644, "disk_mb": 10})
 	body := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
 	if len(body.Sessions) != 2 {
 		t.Fatalf("got %d sessions, want 2", len(body.Sessions))
@@ -963,14 +1303,14 @@ func TestSessionsServesTheCachedWalkUntilItAges(t *testing.T) {
 	e := newEnv(t, true)
 	e.srv.SessionsMaxAge = time.Hour
 	content := base64.StdEncoding.EncodeToString([]byte("hello"))
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644, "disk_mb": 10})
 	first := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
 	if len(first.Sessions) != 1 {
 		t.Fatalf("got %d sessions, want 1", len(first.Sessions))
 	}
 	// A larger write lands after the walk; the cached listing must not see it yet.
 	big := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 8192)))
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/big.bin", "content_base64": big, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/big.bin", "content_base64": big, "mode": 0o644, "disk_mb": 10})
 	second := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
 	if len(second.Sessions) != 1 || second.Sessions[0].Bytes != first.Sessions[0].Bytes {
 		t.Fatalf("cached listing changed: first %+v, second %+v", first.Sessions, second.Sessions)

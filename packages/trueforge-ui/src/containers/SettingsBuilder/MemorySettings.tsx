@@ -17,6 +17,7 @@ import { useToasterOptional } from '../ToasterContainer.js';
 import { MemoryHelpersCard } from './MemoryHelpersCard.js';
 import { useChatSearchSetting } from './chatSearchSetting.js';
 import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
+import { useMemoryItemTrackingSetting, type MemoryItemTrackingSettingState } from './memoryItemTrackingSetting.js';
 import { useMemoryRecallSetting } from './memoryRecallSetting.js';
 import { readMemoryScreenStatus, readToolOutputScreenStatus } from './memoryScreenCapability.js';
 import { useMemoryScreenSetting } from './memoryScreenSetting.js';
@@ -362,6 +363,87 @@ function MemorySummarizeCard() {
   );
 }
 
+function MemoryItemTrackingToggle({ setting }: { setting: MemoryItemTrackingSettingState }) {
+  const toaster = useToasterOptional();
+
+  const checked = setting.enabled ?? false;
+  const disabled = setting.saving || setting.enabled === null;
+  const showReset = setting.overridden === true;
+  const resetDisabled = setting.saving || setting.enabled === null;
+  const stateCopy =
+    setting.overridden === true
+      ? 'This switch overrides the usual setting.'
+      : 'Following the usual setting (on); flipping the switch stores your choice for this server.';
+
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <label htmlFor="memory-item-tracking-toggle" className="text-sm font-medium text-text-primary">
+          Track open items
+        </label>
+        <p className="mt-0.5 text-xs text-text-secondary">{stateCopy}</p>
+        {showReset ? (
+          <button
+            type="button"
+            className="mt-1.5 text-xs font-medium text-text-secondary underline underline-offset-2 hover:text-text-primary disabled:opacity-50"
+            disabled={resetDisabled}
+            onClick={() => {
+              void setting.clearOverride().then(
+                () => toaster?.showSuccess({ title: 'Open item tracking reset to the usual setting' }),
+                () => {},
+              );
+            }}
+          >
+            Reset to the usual setting
+          </button>
+        ) : null}
+        {setting.error === null ? null : (
+          <p className="mt-1.5 text-xs text-danger" role="alert">
+            {setting.error}
+          </p>
+        )}
+      </div>
+      <Switch
+        id="memory-item-tracking-toggle"
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={next => {
+          void setting.setEnabled(next).then(
+            () => toaster?.showSuccess({ title: next ? 'Open item tracking is on' : 'Open item tracking is off' }),
+            () => {},
+          );
+        }}
+        aria-label="Track open items"
+      />
+    </div>
+  );
+}
+
+/** Open item tracking switch: on keeps a short list of what the person still has to do. */
+function MemoryItemTrackingCard() {
+  const assistant = useAssistantDisplayName();
+  const setting = useMemoryItemTrackingSetting();
+  // The whole card hides when the server has no item-tracking port: no heading,
+  // no empty bordered box, nothing to confuse the eye.
+  if (!setting.supported) return null;
+  return (
+    <section aria-labelledby="memory-item-tracking-heading" className="rounded-xl border border-border bg-card-bg p-4">
+      <h4 id="memory-item-tracking-heading" className="text-sm font-medium text-text-primary">
+        Open items
+      </h4>
+      <p className="mt-1 text-sm text-text-secondary">
+        When this is on, {assistant} keeps a short list of what you still have to do: things you were asked for in mail
+        or in a chat, and things you said you would do. An item leaves the list only when finishing it is clear, so a
+        brief never reminds you about something already done. Turning this off stops the tracking. Your saved memories
+        are not changed, and the items already on the list stay as they are.
+      </p>
+      <div className="mt-4 border-t border-border pt-4">
+        <MemoryItemTrackingToggle setting={setting} />
+      </div>
+    </section>
+  );
+}
+
 const MEMORY_NOTES_MARKDOWN = [
   'The host recalls relevant memories before every model call and retains each finished turn on its own.',
   'Memories are local Markdown files on the server, namespaced per tenant, managed entirely by the host.',
@@ -561,6 +643,8 @@ const MemorySettings = () => {
       <MemoryStatusCard />
 
       <MemorySummarizeCard />
+
+      <MemoryItemTrackingCard />
 
       <MemoryHelpersCard />
 

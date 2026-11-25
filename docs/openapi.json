@@ -4008,6 +4008,17 @@
         ],
         "type": "object"
       },
+      "GetMemoryItemTrackingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryItemTracking"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetMemoryNightlyResponse": {
         "properties": {
           "data": {
@@ -6502,6 +6513,113 @@
         ],
         "type": "object"
       },
+      "ListSandboxWorkspacesResponse": {
+        "properties": {
+          "data": {
+            "properties": {
+              "slots": {
+                "items": {
+                  "properties": {
+                    "slot": {
+                      "exclusiveMinimum": 0,
+                      "type": "integer"
+                    },
+                    "store_free_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "total_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "workspace_count": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "workspace_count",
+                    "total_bytes",
+                    "store_free_bytes"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "workspaces": {
+                "items": {
+                  "properties": {
+                    "bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "chat_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "chat_private": {
+                      "type": "boolean"
+                    },
+                    "chat_title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "entries": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "holder": {
+                      "enum": [
+                        "you",
+                        "someone_else",
+                        "none"
+                      ],
+                      "type": "string"
+                    },
+                    "last_used": {
+                      "type": "string"
+                    },
+                    "sandbox_id": {
+                      "type": "string"
+                    },
+                    "slot": {
+                      "exclusiveMinimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "holder",
+                    "chat_id",
+                    "chat_title",
+                    "chat_private",
+                    "sandbox_id",
+                    "slot",
+                    "bytes",
+                    "entries",
+                    "last_used"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "slots",
+              "workspaces"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListScheduleRunsResponse": {
         "properties": {
           "data": {
@@ -7560,6 +7678,28 @@
           "state",
           "detail",
           "indexed_entries"
+        ],
+        "type": "object"
+      },
+      "MemoryItemTracking": {
+        "properties": {
+          "default_enabled": {
+            "description": "The default used when no override is stored: on.",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "The stored setting: the persisted override when set, else the default, on.",
+            "type": "boolean"
+          },
+          "overridden": {
+            "description": "Whether a persisted override is currently stored.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "overridden",
+          "default_enabled"
         ],
         "type": "object"
       },
@@ -13151,6 +13291,22 @@
         ],
         "type": "object"
       },
+      "SetSessionArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "archived"
+        ],
+        "type": "object"
+      },
+      "SetSessionArchiveResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "SetSessionFolderRequest": {
         "additionalProperties": false,
         "properties": {
@@ -17290,6 +17446,24 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateMemoryItemTrackingRequest": {
+        "example": {
+          "enabled": true
+        },
+        "properties": {
+          "enabled": {
+            "description": "Persisted override: `true`/`false`. `null` clears the override back to the default.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "type": "object"
       },
@@ -25442,6 +25616,85 @@
         "x-fern-sdk-method-name": "update"
       }
     },
+    "/api/v1/sessions/{session_id}/archive": {
+      "put": {
+        "description": "Hides a chat from the everyday list or restores it. Its messages remain searchable.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSessionArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSessionArchiveResponse"
+                }
+              }
+            },
+            "description": "Archive preference saved."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Caller is not the chat owner."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Chat not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Incognito chats cannot be archived."
+          }
+        },
+        "summary": "Archive or restore a chat",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "set_archive"
+      }
+    },
     "/api/v1/sessions/{session_id}/audit-log": {
       "get": {
         "description": "List the Sentinel permission audit log for a session (newest first): tiered tool-call decisions with outcomes. Only the session creator may list it.",
@@ -28288,6 +28541,116 @@
         "x-fern-sdk-method-name": "get"
       }
     },
+    "/api/v1/settings/memory-item-tracking": {
+      "get": {
+        "description": "The stored override for item tracking, or the default (on) when none is stored.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryItemTrackingResponse"
+                }
+              }
+            },
+            "description": "The stored item-tracking setting."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the item-tracking setting",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryItemTracking"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Persists the item-tracking override: `true`/`false` turns tracking of open items on/off; `null` clears the override back to the default. Turning it off leaves the diary and the items already recorded untouched.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryItemTrackingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryItemTrackingResponse"
+                }
+              }
+            },
+            "description": "The stored item-tracking setting after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Create, replace, or clear the item-tracking override",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryItemTracking"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
     "/api/v1/settings/memory-nightly": {
       "get": {
         "description": "Whether the nightly tidy-up runs and at which hour: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.",
@@ -29360,6 +29723,42 @@
           "sandboxProviders"
         ],
         "x-fern-sdk-method-name": "upgrade_image"
+      }
+    },
+    "/api/v1/settings/sandbox-workspaces": {
+      "get": {
+        "description": "Asks every sandbox slot which chat workspaces it holds and joins them to their chats, with the space each takes and the room left on each slot. Read-only: nothing is created, moved or removed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSandboxWorkspacesResponse"
+                }
+              }
+            },
+            "description": "The chat workspaces on every slot, with one summary per slot."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "A sandbox slot could not be asked, so no list was returned."
+          }
+        },
+        "summary": "List the chat workspaces on the sandbox slots",
+        "tags": [
+          "Sandboxes"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "sandboxWorkspaces"
+        ],
+        "x-fern-sdk-method-name": "list"
       }
     },
     "/api/v1/settings/skills": {

@@ -10,6 +10,7 @@ export type { ListSessionsRequest } from "./ListSessionsRequest.js";
 export type { ListTurnEventsSessionsRequest } from "./ListTurnEventsSessionsRequest.js";
 export type { ListTurnsSessionsRequest } from "./ListTurnsSessionsRequest.js";
 export type { SearchOwnChatsSessionsRequest } from "./SearchOwnChatsSessionsRequest.js";
+export type { SetSessionArchiveRequest } from "./SetSessionArchiveRequest.js";
 export type { SetSessionFolderRequest } from "./SetSessionFolderRequest.js";
 export type { SubscribeToTurnSessionsRequest } from "./SubscribeToTurnSessionsRequest.js";
 export type { UpdateSessionRequest } from "./UpdateSessionRequest.js";

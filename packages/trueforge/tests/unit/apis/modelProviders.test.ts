@@ -18,6 +18,7 @@ import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-s
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
+import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import type { CheckSavedModelProvider } from '../../../src/runtime/modelProviderCheck';
@@ -134,6 +135,7 @@ async function createRouters(
       toolGrantStore: new SqliteMcpToolGrantStore(db),
       resolveSkillStore: () => new SqliteSkillStore(db),
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
+      sessionStore: new SqliteSessionStore(db),
       globalSettingsStore,
       personalizationStore: new SqlitePersonalizationStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,

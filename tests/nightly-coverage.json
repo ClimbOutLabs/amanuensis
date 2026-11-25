@@ -323,6 +323,10 @@
       "set": "connectors",
       "tests": []
     },
+    "route:memoryItemTracking": {
+      "set": "memory",
+      "tests": []
+    },
     "route:memoryNightly": {
       "set": "memory",
       "tests": []
@@ -406,6 +410,10 @@
     "route:sandboxProvider": {
       "set": "code",
       "tests": []
+    },
+    "route:sandboxWorkspace": {
+      "set": "code",
+      "tests": ["packages/trueforge/tests/unit/apis/sandboxWorkspaces.test.ts"]
     },
     "route:schedule": {
       "set": "reminders",
@@ -843,6 +851,7 @@
     "route:help",
     "route:mcpOAuth",
     "route:mcpServer",
+    "route:memoryItemTracking",
     "route:memoryNightly",
     "route:memoryPageSorting",
     "route:memoryPages",

@@ -175,9 +175,8 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.sessions.unlock(req.SessionID)
-	root, err := tree.Ensure(s.TreeDir, req.SessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
+	root, ok := s.ensureTree(w, req.SessionID, int64(req.DiskMB)<<20)
+	if !ok {
 		return
 	}
 	env := append(guestEnv(req.PackageMirrorToken, execHome), "npm_config_cache="+execNpmCache)
@@ -282,6 +281,14 @@ type fsWriteRequest struct {
 	Path          string `json:"path"`
 	ContentBase64 string `json:"content_base64"`
 	Mode          int    `json:"mode"`
+	// DiskMB is the session's quota, checked for room when this write makes the tree or raises
+	// the promise recorded for it.
+	DiskMB int `json:"disk_mb"`
+}
+
+type createRequest struct {
+	SessionID string `json:"session_id"`
+	DiskMB    int    `json:"disk_mb"`
 }
 
 type destroyRequest struct {
@@ -325,6 +332,10 @@ func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "mode must be between 0400 and 0755")
 		return
 	}
+	if req.DiskMB < 1 || req.DiskMB > MaxDiskMB {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, fmt.Sprintf("disk_mb must be 1 to %d", MaxDiskMB))
+		return
+	}
 	content, err := lease.DecodeBase64(req.ContentBase64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "content_base64 is not canonical base64")
@@ -334,9 +345,8 @@ func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.sessions.unlock(req.SessionID)
-	root, err := tree.Ensure(s.TreeDir, req.SessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
+	root, ok := s.ensureTree(w, req.SessionID, int64(req.DiskMB)<<20)
+	if !ok {
 		return
 	}
 	if err := tree.Write(root, req.Path, content, os.FileMode(req.Mode)); err != nil {
@@ -344,6 +354,108 @@ func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// createSession answers POST /v1/create_session: it makes the session's empty tree, after checking
+// the volume has room for the tree's whole quota plus the free-space reserve. A tree that already
+// exists is a success without a new room check at the promise already recorded for it, so a caller
+// retrying a lost answer is never refused for room its tree already holds.
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
+	var req createRequest
+	if err := decodeStrict(r, w, &req, smallBodyBytes); err != nil {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, err.Error())
+		return
+	}
+	if !tree.ValidSessionID(req.SessionID) {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "session_id must be 32 lowercase hex characters")
+		return
+	}
+	if req.DiskMB < 1 || req.DiskMB > MaxDiskMB {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, fmt.Sprintf("disk_mb must be 1 to %d", MaxDiskMB))
+		return
+	}
+	// Making an empty tree touches no other session, so it does not wait for another chat's call.
+	if !s.lockSession(w, req.SessionID) {
+		return
+	}
+	defer s.sessions.unlock(req.SessionID)
+	if _, ok := s.ensureTree(w, req.SessionID, int64(req.DiskMB)<<20); !ok {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ensureTree returns the session's tree root, making the tree when it is missing. Whichever call
+// makes it, a new tree is made only when the volume has room for it under the creation check. An
+// existing tree needs no new room at the promise already counted for it, but recording a larger
+// promise takes the raise check, so a raised quota cannot promise away the room another chat
+// needs to start its call. The caller holds the session's lock.
+func (s *Server) ensureTree(w http.ResponseWriter, sessionID string, quotaBytes int64) (string, bool) {
+	if _, err := os.Lstat(tree.Root(s.TreeDir, sessionID)); errors.Is(err, os.ErrNotExist) {
+		// Making a tree is serialized across sessions: two chats must not both pass the room
+		// check against the promises counted before either tree existed. The lock is held
+		// through the recording below, which takes the same care when it raises a promise.
+		s.createMu.Lock()
+		defer s.createMu.Unlock()
+		if _, err := os.Lstat(tree.Root(s.TreeDir, sessionID)); errors.Is(err, os.ErrNotExist) {
+			if err := s.checkCreateRoom(quotaBytes); err != nil {
+				writeStorageError(w, err)
+				return "", false
+			}
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be checked")
+			return "", false
+		}
+		root, err := tree.Ensure(s.TreeDir, sessionID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
+			return "", false
+		}
+		if !s.recordQuota(w, sessionID, quotaBytes) {
+			return "", false
+		}
+		return root, true
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be checked")
+		return "", false
+	}
+	root, err := tree.Ensure(s.TreeDir, sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
+		return "", false
+	}
+	// The standing record usually already says what this call asks, and then nothing is
+	// recorded and no lock is taken. Any other recording is decided under createMu, so two
+	// recordings cannot pass the room check against the same promises.
+	if recorded, ok := tree.RecordedQuota(s.TreeDir, sessionID); ok && recorded == quotaBytes {
+		return root, true
+	}
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
+	if !s.recordQuota(w, sessionID, quotaBytes) {
+		return "", false
+	}
+	return root, true
+}
+
+// recordQuota records quotaBytes as the tree's promise when the standing record differs. The
+// caller holds createMu. The newest call's quota is the tree's promise: recording it whenever
+// it changes keeps the promise current when the configured quota changes, and gives trees made
+// before quotas were recorded a record of their own. A recording that raises the promise first
+// passes the raise check, and a refused raise leaves the standing record untouched.
+func (s *Server) recordQuota(w http.ResponseWriter, sessionID string, quotaBytes int64) bool {
+	if recorded, ok := tree.RecordedQuota(s.TreeDir, sessionID); ok && recorded == quotaBytes {
+		return true
+	}
+	if err := s.checkRaiseRoom(sessionID, quotaBytes); err != nil {
+		writeStorageError(w, err)
+		return false
+	}
+	if err := tree.RecordQuota(s.TreeDir, sessionID, quotaBytes); err != nil {
+		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree quota could not be recorded")
+		return false
+	}
+	return true
 }
 
 func (s *Server) destroySession(w http.ResponseWriter, r *http.Request) {

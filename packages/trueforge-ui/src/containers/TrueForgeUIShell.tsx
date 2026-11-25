@@ -230,18 +230,18 @@ function ChatProviderFromShell({
   initialSessionId: hostInitialSessionId,
   onRemoteIdChange,
   server,
+  sessionListCache,
   ...providerRest
 }: {
   children: ReactNode;
   /** When routing, reports the active thread's remote id up to `ShellRouteSync`. */
   onRemoteIdChange?: (id: string | undefined) => void;
+  /** The shell's one session list cache, shared with the server the shell hands out. */
+  sessionListCache: ReturnType<typeof createSessionListCache>;
 } & Omit<TrueFoundryChatProviderProps, 'agent' | 'agentName' | 'listSessionsAgentId' | 'children'>) {
   const { mode, runtimeKey, historyAgentFilter, listSessionsAgentId, pendingSessionId } = useShellMode();
 
   const isCreateAgent = mode.status === 'active' && mode.isMutable && mode.isCreateAgent;
-
-  // Keep one isolated cache per shell, preserved across chat runtime remounts.
-  const [sessionListCache] = useState(createSessionListCache);
 
   const connectorChoice = useChatConnectorChoiceStore();
   // A new chat starts with nothing chosen; a choice made on an abandoned draft must not carry over.
@@ -368,6 +368,15 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
   } = props;
 
   const resolved = useResolvedServer(serverConfig, onError);
+  // Keep one isolated cache per shell, preserved across chat runtime remounts. The
+  // server handed to the tree shares it with the chat runtime's server, so a chat
+  // deleted through either one clears the same cached pages.
+  const [sessionListCache] = useState(createSessionListCache);
+  const contextServer = useMemo(
+    () =>
+      resolved.server === null ? null : withSessionListCache({ server: resolved.server, cache: sessionListCache }),
+    [resolved.server, sessionListCache],
+  );
   const [connectorChoice] = useState(createChatConnectorChoiceStore);
   const [activeRemoteId, setActiveRemoteId] = useState<string | undefined>(undefined);
   // The internal route sync only consumes `activeRemoteId`; the host callback reports the
@@ -420,6 +429,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
       ) : null}
       <ChatProviderFromShell
         server={server}
+        sessionListCache={sessionListCache}
         onError={onError}
         onRemoteIdChange={handleRemoteIdChange}
         {...providerRest}
@@ -442,7 +452,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
     <SlotsProvider overrides={overrides} theme={theme}>
       <CurrentUserProvider currentUser={currentUser}>
         <CustomActionRenderersProvider renderers={customActionRenderers}>
-          <ServerProvider server={server}>
+          <ServerProvider server={contextServer ?? server}>
             <AgentDetailsPreferenceProvider>
               <ChatConnectorChoiceProvider store={connectorChoice}>
                 <ChatFolderProvider store={chatFolders}>

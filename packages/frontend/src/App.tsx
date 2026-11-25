@@ -19,6 +19,7 @@ import {
   ReminderListProvider,
   RepositoryWorkProvider,
   RunCodeStatusProvider,
+  SandboxWorkspacesProvider,
   SentinelApiProvider,
   SentinelAuditFeed,
   SpokenReplyProvider,
@@ -74,6 +75,7 @@ import { createRailDeskApi } from './railDeskApi';
 import { createRemindersApi } from './remindersApi';
 import { createRepositoryWorkApi } from './repositoryWorkApi';
 import { createRunCodeStatusApi } from './runCodeStatusApi';
+import { createSandboxWorkspacesApi } from './sandboxWorkspacesApi';
 import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
@@ -502,6 +504,7 @@ export function App() {
   const repositoryWorkApi = useMemo(() => createRepositoryWorkApi(authAwareFetch), []);
   const bugReportApi = useMemo(() => createBugReportApi(authAwareFetch), []);
   const runCodeStatusApi = useMemo(() => createRunCodeStatusApi(authAwareFetch), []);
+  const sandboxWorkspacesApi = useMemo(() => createSandboxWorkspacesApi(authAwareFetch), []);
   const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
   const serverVoiceApi = useMemo(() => createServerVoiceApi(authAwareFetch), []);
   const memoryRecallApi = useMemo(() => createMemoryRecallApi(bootClient), []);
@@ -592,6 +595,7 @@ export function App() {
                             <VoiceInputProvider api={voiceInputApi}>
                               <SpokenReplyProvider serverVoice={serverVoiceApi}>
                                 <RunCodeStatusProvider api={runCodeStatusApi}>
+                                  <SandboxWorkspacesProvider api={sandboxWorkspacesApi}>
                                   <MemoryRecallProvider api={memoryRecallApi}>
                                     <ModelUsageProvider api={modelUsageApi}>
                                       <PersonaProvider api={personaApi}>
@@ -626,6 +630,7 @@ export function App() {
                                       </PersonaProvider>
                                     </ModelUsageProvider>
                                   </MemoryRecallProvider>
+                                  </SandboxWorkspacesProvider>
                                 </RunCodeStatusProvider>
                               </SpokenReplyProvider>
                             </VoiceInputProvider>

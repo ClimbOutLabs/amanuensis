@@ -4171,6 +4171,79 @@ await client.sessions.update("session_id");
 </dl>
 </details>
 
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">setArchive</a>(session_id, { ...params }) -> TrueForge.SetSessionArchiveResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Hides a chat from the everyday list or restores it. Its messages remain searchable.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.setArchive("session_id", {
+    archived: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.SetSessionArchiveRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">getAuditLog</a>(session_id, { ...params }) -> TrueForge.ListSessionAuditLogResponse</code></summary>
 <dl>
 <dd>
@@ -11627,6 +11700,127 @@ await client.settings.mcpServers.delete("name");
 </dl>
 </details>
 
+## Settings MemoryItemTracking
+<details><summary><code>client.settings.memoryItemTracking.<a href="/src/api/resources/settings/resources/memoryItemTracking/client/Client.ts">get</a>() -> TrueForge.GetMemoryItemTrackingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The stored override for item tracking, or the default (on) when none is stored.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryItemTracking.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryItemTrackingClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryItemTracking.<a href="/src/api/resources/settings/resources/memoryItemTracking/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryItemTrackingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the item-tracking override: `true`/`false` turns tracking of open items on/off; `null` clears the override back to the default. Turning it off leaves the diary and the items already recorded untouched.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryItemTracking.createOrUpdate({
+    enabled: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryItemTrackingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryItemTrackingClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings MemoryNightly
 <details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">get</a>() -> TrueForge.GetMemoryNightlyResponse</code></summary>
 <dl>
@@ -12830,6 +13024,62 @@ await client.settings.sandboxProviders.upgradeImage("provider_id");
 <dd>
 
 **requestOptions:** `SandboxProvidersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings SandboxWorkspaces
+<details><summary><code>client.settings.sandboxWorkspaces.<a href="/src/api/resources/settings/resources/sandboxWorkspaces/client/Client.ts">list</a>() -> TrueForge.ListSandboxWorkspacesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Asks every sandbox slot which chat workspaces it holds and joins them to their chats, with the space each takes and the room left on each slot. Read-only: nothing is created, moved or removed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.sandboxWorkspaces.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `SandboxWorkspacesClient.RequestOptions`
 
 </dd>
 </dl>
