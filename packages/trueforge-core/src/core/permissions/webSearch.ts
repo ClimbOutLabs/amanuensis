@@ -11,6 +11,7 @@ import {
   LIST_PAGES_TOOL_NAME,
   READ_PAGE_TOOL_NAME,
   REMEMBER_FACT_TOOL_NAME,
+  SEARCH_MEMORY_NOTES_TOOL_NAME,
   UPDATE_FACT_TOOL_NAME,
 } from '../memory/pagesToolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
@@ -254,8 +255,8 @@ function baseToolName(toolName: string): string {
 const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
 
 /**
- * The memory page tools answer with a fixed sentence and the words the model sent, or with a page the host
- * has already marked. The read tool tells the turn itself when what it shows holds outside text, so a call does
+ * The memory page tools answer with a fixed sentence and the words the model sent, or with memory the host
+ * has already marked. A read tool tells the turn itself when what it shows holds outside text, so a call does
  * not count as outside by its name. They are matched by their full name: a connector's tool carries its
  * server's prefix, so it can never pass for one.
  */
@@ -265,6 +266,7 @@ const HOST_ONLY_FULL_TOOL_NAMES: ReadonlySet<string> = new Set([
   FORGET_FACT_TOOL_NAME,
   LIST_PAGES_TOOL_NAME,
   READ_PAGE_TOOL_NAME,
+  SEARCH_MEMORY_NOTES_TOOL_NAME,
 ]);
 
 /**

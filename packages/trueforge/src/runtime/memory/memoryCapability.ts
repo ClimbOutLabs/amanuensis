@@ -550,15 +550,22 @@ function noteLabelFor(source: MemoryNoteSource): string {
   return source === SENT_MAIL_SOURCE ? SENT_MAIL_LABEL : FINDING_LABEL;
 }
 
+/**
+ * The words that say whose words a recalled item is, exactly as the recall block prints them.
+ * Exported for the note search tool, which shows a found note with the same words.
+ */
+export function recalledItemSourceLabel(item: RecallItem): string {
+  const from = recalledItemSource(item);
+  // Only a fixed phrase is emitted for the origin, never the stored value.
+  return from.kind === 'note' ? noteLabelFor(from.source) : from.kind === 'person' ? PERSON_LABEL : READ_CONTENT_LABEL;
+}
+
 function formatItemLine({ item, today }: { item: RecallItem; today: string }): string {
   const day = item.occurred_start?.slice(0, 10);
   const date = day ? sanitizeMemoryLine(day) : 'undated';
   // The host states the age, so telling an old entry from a fresh one never rests on the reader's arithmetic.
   const age = day ? memoryAge({ day, today }) : undefined;
-  const from = recalledItemSource(item);
-  // Only a fixed phrase is emitted for the origin, never the stored value.
-  const source =
-    from.kind === 'note' ? noteLabelFor(from.source) : from.kind === 'person' ? PERSON_LABEL : READ_CONTENT_LABEL;
+  const source = recalledItemSourceLabel(item);
   const head = age === undefined ? `${date}, ${source}` : `${date}, ${age}, ${source}`;
   return `[${head}] ${shownFactText(item.text)}`;
 }

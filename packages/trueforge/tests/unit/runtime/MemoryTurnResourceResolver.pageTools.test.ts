@@ -154,6 +154,28 @@ describe('memory page tools are offered only where they can be used', () => {
   });
 });
 
+describe('the note search rides on the same offer as the page tools', () => {
+  it('is among the memory_pages tools on a Markdown backend, and only there', async () => {
+    const namesOf = async (input: ResolveInput): Promise<string[]> => {
+      const capabilities = await resolveWith(input);
+      const tools = capabilities
+        .flatMap(capability => capability.systemToolSets ?? [])
+        .find(set => set.name === 'memory_pages');
+      if (tools === undefined) {
+        return [];
+      }
+      const listed = await tools.listTools();
+      return 'result' in listed ? listed.result.tools.map(tool => tool.name) : [];
+    };
+
+    expect(await namesOf({ client: markdownClient() })).toContain('search_memory_notes');
+    expect(await namesOf({ client: markdownClient(), subAgent: true })).not.toContain('search_memory_notes');
+    expect(await namesOf({ client: markdownClient(), recallEnabled: false })).not.toContain('search_memory_notes');
+    expect(await namesOf({ client: markdownClient(), keepsNothing: true })).not.toContain('search_memory_notes');
+    expect(await namesOf({ client: otherBackend() })).not.toContain('search_memory_notes');
+  });
+});
+
 describe('knowing whether the chat wrote to the pages in this turn', () => {
   it('says no until a page tool has changed a page, and yes from then on', async () => {
     const { resolver, capabilities } = await resolverWith({ client: markdownClient() });

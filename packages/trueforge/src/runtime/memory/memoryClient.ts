@@ -85,6 +85,23 @@ export interface MemoryClient {
     gate?: MeaningGate | undefined;
   }): Promise<RecallOutcome>;
 
+  /**
+   * Optional: the daily-log notes inside the recent window that match a search, ranked and budgeted
+   * the way `recall` ranks and budgets them, so a term a turn only learns midway can still find a
+   * note. The window is the daily files of the last 14 days ending on `today`; the curated file is
+   * not a daily note and is never returned. Only the markdown client implements it, as the notes
+   * live in its daily files. Never throws: a read failure is a failed outcome, never an empty one.
+   */
+  searchNotes?(params: {
+    query: string;
+    /** The calendar day `YYYY-MM-DD` in the person's time zone; the window ends on it. */
+    today: string;
+    maxTokens: number;
+    timeoutMs: number;
+    /** The chat being answered: notes retained from it are never returned. */
+    currentSessionId?: string | undefined;
+  }): Promise<RecallOutcome>;
+
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;
 
   /**

@@ -132,6 +132,21 @@ const operationsFileQueues = new Map<string, Promise<void>>();
 /** Cap on tracked retain operation ids; oldest are dropped, newest kept. */
 const OPERATIONS_LOG_CAP = 2000;
 
+/**
+ * How far back a mid-turn note search looks, in days of daily log: the recent window the nightly
+ * missed-notes step also works in. Searching the whole archive is a separate choice, not this one.
+ */
+export const SEARCH_NOTES_WINDOW_DAYS = 14;
+
+const SEARCH_WINDOW_DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The first day of the search window ending on `today` (`YYYY-MM-DD`), the window's full span back. */
+function firstDayInSearchWindow(today: string): string {
+  return new Date(Date.parse(`${today}T00:00:00Z`) - SEARCH_NOTES_WINDOW_DAYS * SEARCH_WINDOW_DAY_MS)
+    .toISOString()
+    .slice(0, 10);
+}
+
 /** Lowercased query words worth matching; drops stopword-length fragments. */
 function queryWords(query: string): string[] {
   return query
@@ -330,6 +345,95 @@ export class MarkdownMemoryClient implements MemoryClient {
       return { ok: true, results };
     } catch (error) {
       return failure(failureReason('markdown recall failed', error));
+    }
+  }
+
+  /**
+   * The daily notes of the recent window that match a search, for a term a turn only learns midway.
+   * The scan, the ranking and the budget are recall's own; what differs is the window (the last
+   * `SEARCH_NOTES_WINDOW_DAYS` days, the recent window the nightly missed-notes step also works in),
+   * the curated file (not a daily note, never returned), and the meaning gate (a search is chosen by
+   * its own words, so every vault ranks by words and meaning, never by the gate's choice for a
+   * message). Age decides here because the window is the promise the search makes; outside it, a
+   * note is for recall and the pages, not for this search.
+   */
+  async searchNotes(params: {
+    query: string;
+    today: string;
+    maxTokens: number;
+    timeoutMs: number;
+    currentSessionId?: string | undefined;
+  }): Promise<RecallOutcome> {
+    try {
+      const budget = Math.max(params.maxTokens, 0);
+      const results: RecallItem[] = [];
+      let usedTokens = 0;
+
+      const take = (item: RecallItem): boolean => {
+        const cost = estimateTokens(item.text);
+        if (usedTokens + cost > budget) {
+          return false;
+        }
+        usedTokens += cost;
+        results.push(item);
+        return true;
+      };
+
+      const since = firstDayInSearchWindow(params.today);
+      const readable = await vaultReadNamespaces({
+        baseDir: this.baseDir,
+        tenantNamespace: this.namespace,
+        scope: this.vaultScope,
+      });
+      const vaults = await Promise.all(
+        readable.map(async namespace => {
+          const scan = await scanNamespaceEntries({
+            baseDir: this.baseDir,
+            namespace,
+            maxDailyFiles: SEARCH_NOTES_WINDOW_DAYS + 1,
+            resolveTombstones: true,
+          });
+          return {
+            namespace: sanitizeNamespace(namespace),
+            scan: { ...scan, entries: scan.entries.filter(entry => entry.file.slice(0, 10) >= since) },
+          };
+        }),
+      );
+      const rankedLists = await Promise.all(
+        vaults.map(({ namespace, scan }) =>
+          this.rankVault({
+            namespace,
+            scan,
+            query: params.query,
+            timeoutMs: params.timeoutMs,
+            currentSessionId: params.currentSessionId,
+            gate: { state: 'unavailable' },
+          }),
+        ),
+      );
+      // The same thing saved on several days is shown once, as its best-ranked copy, as in recall.
+      const shown = new Set<string>();
+      for (const item of interleaveRanked(rankedLists)) {
+        const body = normalizedEntryBody(item.text);
+        if (shown.has(body)) {
+          continue;
+        }
+        shown.add(body);
+        const occurredAt = entryOccurredAt(item);
+        const ok = take({
+          id: item.id,
+          text: entryRecallText(item.text),
+          ...(occurredAt !== undefined && { occurred_start: occurredAt }),
+          metadata: entryMetadata(item.text),
+        });
+        if (!ok) {
+          break;
+        }
+      }
+
+      return { ok: true, results };
+    } catch (error) {
+      return failure(failureReason('markdown note search failed', error));
     }
   }
 

@@ -216,11 +216,11 @@ describe('an address in an earlier reply of the assistant', () => {
 });
 
 describe('a call that read the stored memory pages', () => {
-  it.each(['read_page', 'list_pages'])('counts a direct %s call', name => {
+  it.each(['read_page', 'list_pages', 'search_memory_notes'])('counts a direct %s call', name => {
     expect(callReadsMemoryPages(storedCall({ name, stamp: OWN_TOOL }))).toBe(true);
   });
 
-  it.each(['read_page', 'list_pages'])('counts a %s call reached through the call_tool wrapper', tool_name => {
+  it.each(['read_page', 'list_pages', 'search_memory_notes'])('counts a %s call reached through the call_tool wrapper', tool_name => {
     const call = storedCall({
       name: 'call_tool',
       args: { mcp_server: 'memory_pages', tool_name, input: {} },
@@ -229,7 +229,7 @@ describe('a call that read the stored memory pages', () => {
     expect(callReadsMemoryPages(call)).toBe(true);
   });
 
-  it.each(['read_page', 'list_pages'])(
+  it.each(['read_page', 'list_pages', 'search_memory_notes'])(
     'does not count a %s call wrapped for a server that is not the memory pages',
     tool_name => {
       const call = storedCall({
