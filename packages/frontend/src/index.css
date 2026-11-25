@@ -39,9 +39,11 @@ body {
   min-width: 0;
   min-height: 0;
   height: 100%;
-  /* Paper colour by hour, lighter at the top, with the grain over it. */
+  /* One paper colour across the whole surface, with the grain over it. A two-colour
+   * gradient here can split the screen into two backgrounds whenever the top and
+   * bottom paper values differ, so the surface paints a single colour. */
   background-color: var(--paper);
-  background-image: var(--grain), linear-gradient(var(--paper-top), var(--paper) 55%);
+  background-image: var(--grain);
 }
 
 @media (max-width: 900px) {

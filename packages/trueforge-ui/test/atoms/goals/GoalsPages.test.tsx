@@ -235,6 +235,42 @@ describe('Goal page, draft and activation card', () => {
     expect(screen.getByRole('button', { name: 'Check now' })).toBeDefined();
   });
 
+  it('shows the whole card for a chat-created draft, and the target as a date with no time of day', async () => {
+    // A draft made in chat: one step, no chosen sources, and a target stored as
+    // the instant the model produced for the date the person named. That instant
+    // falls at 2:00 AM in the goal's own zone, a time of day no one picked.
+    const draft = fundraiserGoal({
+      title: 'Garage sale',
+      outcome: 'Hold a garage sale with the driveway cleared and the tables booked',
+      successCriteria: ['Driveway cleared', 'Tables booked', 'Signs printed'],
+      targetAt: '2027-03-15T09:00:00.000Z',
+      selectedSources: [],
+    });
+    const steps = [venueStep({ description: 'Book the tables', status: 'ready' })];
+    const api = makeApi({
+      getGoal: () => Promise.resolve({ goal: draft, steps, nextStepId: null }),
+      getActivationPreview: () => Promise.resolve({ goal: draft, steps, setup: { ...SETUP } }),
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    expect(await screen.findByText('Review and activate')).toBeDefined();
+    // The deadline is a date. The card and the page header both read it as one.
+    expect(screen.getByText('By March 15, 2027 (America/Los_Angeles)')).toBeDefined();
+    expect(screen.getByText(/Target: March 15, 2027 \(America\/Los_Angeles\)/)).toBeDefined();
+    expect(screen.queryByText(/By March 15, 2027 at/)).toBeNull();
+    expect(screen.queryByText(/Target: March 15, 2027 at/)).toBeNull();
+    // The card keeps the promise its own first lines make: the check schedule,
+    // the work budgets, and the activate control are all on it.
+    expect(screen.getByText('Who does the work')).toBeDefined();
+    expect(screen.getByText('Sources it may read')).toBeDefined();
+    expect(screen.getByText('What happens on its own, and what waits for you')).toBeDefined();
+    expect(screen.getByLabelText('Routine checks')).toBeDefined();
+    expect(screen.getByText(/A check may work for up to about 15 minutes at a time/)).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Advanced: work limits' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Activate goal' })).toBeDefined();
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
+  });
+
   it('reads a comma-grouped daily allowance at its full value when activating', async () => {
     const steps = [venueStep({}), equipmentStep({})];
     const draft = fundraiserGoal({ executionPolicy: { ...POLICY, dailyTokenAllowance: 500_000 } });
