@@ -19,9 +19,9 @@ export interface PlannedDecision {
   target: ShownStatement | undefined;
   /**
    * True when the line holds a word found only in what Aman read, such as a word from a read line the model was
-   * shown. The line is written as Aman's guess, never as the person's.
+   * shown. The line is written as one Aman worked out from the person's conversations, never as the person's.
    */
-  guessed: boolean;
+  inferred: boolean;
 }
 
 export type RuledReply = { ok: true; planned: PlannedDecision[] } | { ok: false; reason: string };
@@ -152,7 +152,7 @@ function ruleExisting({
   const { page, statement } = found;
   const kind = page.kind;
   if (decision.decision === 'same') {
-    return { ok: true, planned: { decision, kind, target: statement, guessed: false } };
+    return { ok: true, planned: { decision, kind, target: statement, inferred: false } };
   }
   const newText =
     decision.decision === 'changed'
@@ -163,14 +163,14 @@ function ruleExisting({
   }
   const mayTouch =
     origin.kind === 'own_words' || (origin.kind === 'sent_mail' && !OWN_STATEMENT_SOURCES.has(statement.src));
-  // A replacement that holds a word found only in what Aman read changes nothing; it waits as a guess.
-  const guessed = newText !== undefined && !wordedInOwnWords({ text: newText, context });
-  if (mayTouch && !guessed) {
+  // A replacement that holds a word found only in what Aman read changes nothing; it waits as an inferred line.
+  const inferred = newText !== undefined && !wordedInOwnWords({ text: newText, context });
+  if (mayTouch && !inferred) {
     if (decision.decision === 'changed' && newText !== undefined && sameText({ a: statement.text, b: newText })) {
       const same = sameDecision({ about: decision.about, target: statement, reason: decision.reason });
       return same === undefined
         ? refuse('a statement has no id')
-        : { ok: true, planned: { decision: same, kind, target: statement, guessed: false } };
+        : { ok: true, planned: { decision: same, kind, target: statement, inferred: false } };
     }
     return {
       ok: true,
@@ -179,7 +179,7 @@ function ruleExisting({
           decision.decision === 'changed' && newText !== undefined ? { ...decision, new_text: newText } : decision,
         kind,
         target: statement,
-        guessed: false,
+        inferred: false,
       },
     };
   }
@@ -207,7 +207,7 @@ function ruleExisting({
       },
       kind,
       target: undefined,
-      guessed,
+      inferred,
     },
   };
 }
@@ -249,12 +249,12 @@ function ruleNew({
   const same =
     said === undefined ? undefined : sameDecision({ about: decision.about, target: said, reason: decision.reason });
   if (said !== undefined && same !== undefined) {
-    return { ok: true, planned: { decision: same, kind, target: said, guessed: false } };
+    return { ok: true, planned: { decision: same, kind, target: said, inferred: false } };
   }
-  const guessed = !wordedInOwnWords({ text, context });
+  const inferred = !wordedInOwnWords({ text, context });
   const confirmed =
     decision.decision === 'new' &&
-    !guessed &&
+    !inferred &&
     (origin.kind === 'own_words' ||
       (origin.kind === 'sent_mail' && decision.section === WRITING_SECTION && kind === 'person'));
   if (decision.decision === 'new' && confirmed) {
@@ -265,7 +265,7 @@ function ruleNew({
         decision: { ...decision, page_kind: kind, text, title },
         kind,
         target: undefined,
-        guessed: false,
+        inferred: false,
       },
     };
   }
@@ -283,7 +283,7 @@ function ruleNew({
       },
       kind,
       target: undefined,
-      guessed,
+      inferred,
     },
   };
 }
@@ -293,7 +293,8 @@ function ruleNew({
  * cannot trust refuses the whole reply, so a half-understood answer writes nothing.
  *
  * - The person's own words: every decision stands, unless a new or changed line holds a word found only in what
- *   Aman read. Such a line changes nothing and waits as an unconfirmed line marked as Aman's guess.
+ *   Aman read. Such a line changes nothing and waits as an unconfirmed line marked as worked out from the
+ *   person's conversations.
  * - A message the person sent: a new fact stands only as a line about how they write to someone; any other new
  *   fact is unconfirmed. It cannot change or end a statement the person said or wrote.
  * - Anything else: a new, changed or ended fact is only ever an unconfirmed line, and nothing confirmed is touched.
@@ -307,7 +308,7 @@ export function ruleDecisions({
   for (const decision of decisions) {
     let step: Step;
     if (decision.decision === 'ignore') {
-      step = { ok: true, planned: { decision, kind: undefined, target: undefined, guessed: false } };
+      step = { ok: true, planned: { decision, kind: undefined, target: undefined, inferred: false } };
     } else if (decision.decision === 'new' || decision.decision === 'unconfirmed') {
       step = ruleNew({ decision, context });
     } else {

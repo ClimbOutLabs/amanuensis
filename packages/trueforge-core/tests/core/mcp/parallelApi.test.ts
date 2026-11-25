@@ -154,6 +154,53 @@ test('cursor-based streams skip heartbeat frames and return the resumable event 
   expect(result.content).toEqual([{type:'text',text:'id: 25\r\ndata: {"status":"done"}'}]);
 });
 
+test('a task run progress event reaches the caller while the feed stays open past the request timeout', async () => {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"type":"task_run.progress_stats","source_stats":{"progress_meter":40}}\r\n\r\n'));
+    },
+  });
+  const fetch = jest.fn((_url: string | URL, _init?: RequestInit) =>
+    Promise.resolve(new Response(stream, { headers: { 'content-type': 'text/event-stream' } })),
+  );
+  const connection = parallelProductConnection({
+    fetch,
+    signal: new AbortController().signal,
+    headers: { 'x-api-key': key },
+    requestTimeoutMs: 50,
+    maxBytes: 1024,
+  });
+  let settled = false;
+  const call = connection.callTool({ name: 'stream_task_run_events', arguments: { run_id: 'run_1' } }).then(result => {
+    settled = true;
+    return result;
+  });
+  // The feed never closes, so waiting past the 50ms request timeout proves the caller was
+  // handed the complete event as it arrived, not a buffered answer at close or at timeout.
+  await new Promise<void>(resolve => {
+    setTimeout(resolve, 300);
+  });
+  expect(settled).toBe(true);
+  const result = await call;
+  expect(result.content).toEqual([
+    { type: 'text', text: 'data: {"type":"task_run.progress_stats","source_stats":{"progress_meter":40}}' },
+  ]);
+});
+
+test('describes clearing research memory as one named scope or the personal default', async () => {
+  const { connection } = fixture(Response.json({}));
+  const { tools } = await connection.listTools();
+  const clear = tools.find(tool => tool.name === 'clear_research_memory');
+  expect(clear?.description).toContain('personal memory');
+  expect(clear?.description ?? '').not.toContain('in full');
+  const body = clear?.inputSchema.properties?.['body'];
+  expect(body).toMatchObject({
+    properties: { memory_scope_key: { description: expect.stringContaining('personal memory') } },
+  });
+  expect(JSON.stringify(body)).not.toContain('clear all saved research memory');
+});
+
 test('sends the beta header only when a beta operation is given a beta value', async () => {
   const created = fixture(Response.json({ run_id: 'trun_123', status: 'queued' }, { status: 202 }));
   const body = { processor: 'base', input: 'Summarize the town council minutes' };

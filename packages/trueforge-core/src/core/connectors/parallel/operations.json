@@ -3484,7 +3484,7 @@
     "name": "clear_research_memory",
     "method": "POST",
     "path": "/v1beta/memory/clear",
-    "description": "Clear saved research memory, for one scope when a scope key is given and otherwise in full. Use it when earlier research should no longer inform new work",
+    "description": "Clear saved research memory. Give a scope key to clear only that one scope. Leave the scope key out to clear personal memory instead, when personal memory is available. Leaving it out does not clear any named scope. Use it when earlier research should no longer inform new work",
     "query": [],
     "inputs": {},
     "required": [],
@@ -3500,7 +3500,7 @@
               "type": "null"
             }
           ],
-          "description": "The scope to clear. Leave out to clear all saved research memory."
+          "description": "The key of the one scope to clear. Leave out to clear personal memory instead, when personal memory is available. Leaving it out does not clear any named scope."
         }
       },
       "type": "object"

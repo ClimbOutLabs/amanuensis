@@ -174,11 +174,11 @@ describe('memory pages API', () => {
     await seed();
     await writeFile(
       pagePath({ vaultDir: vault(), kind: 'person', slug: 'nora' }),
-      `${NORA}\n## Open\n- Guessed. <!-- fact: id=f_20 src=inferred seen=2026-10-29 -->\n- On the calendar. <!-- fact: id=f_21 src=calendar since=2026-10-29 -->\n- Edited by you. <!-- fact: id=f_22 src=you_edited since=2026-10-29 -->\n`,
+      `${NORA}\n## Open\n- Probably vegetarian. <!-- fact: id=f_20 src=inferred seen=2026-10-29 -->\n- On the calendar. <!-- fact: id=f_21 src=calendar since=2026-10-29 -->\n- Edited by you. <!-- fact: id=f_22 src=you_edited since=2026-10-29 -->\n`,
     );
     const page = await readPage();
     const labels = new Map(page.sections.flatMap(section => section.lines.map(line => [line.text, line.source_label])));
-    expect(labels.get('Guessed.')).toBe('External source: Aman’s guess');
+    expect(labels.get('Probably vegetarian.')).toBe('Worked out from your conversations, not confirmed');
     expect(labels.get('On the calendar.')).toBe('External source: calendar');
     expect(labels.get('Edited by you.')).toBe('From you');
   });
