@@ -49,7 +49,6 @@
     --primary-bg: oklch(0.962 0.014 84.6);
     /* The page paper. Time of day overrides it below for the default preset. */
     --paper: var(--primary-bg);
-    --paper-top: var(--primary-bg);
     --secondary-bg: #ebe2d3;
     --secondary-bg: oklch(0.916 0.022 80.7);
     --border: #d9ccb6;
@@ -152,7 +151,6 @@
     --primary-bg: #28241c;
     --primary-bg: oklch(0.262 0.016 84.5);
     --paper: var(--primary-bg);
-    --paper-top: var(--primary-bg);
     --secondary-bg: #2f2a21;
     --secondary-bg: oklch(0.287 0.017 82.2);
     --border: #3e382b;
@@ -1734,43 +1732,31 @@ button.aman-runtime-rail__desk-row:hover .aman-runtime-rail__desk-row-title {
 .aui-theme-root[data-preset='paper'][data-day='morning']:not(.dark) {
   --paper: #faf2df;
   --paper: oklch(0.962 0.026 85.2);
-  --paper-top: #fef4df;
-  --paper-top: oklch(0.97 0.03 85.2);
 }
 
 .aui-theme-root[data-preset='paper'][data-day='midday']:not(.dark) {
   --paper: #f9f6f0;
   --paper: oklch(0.974 0.008 85.2);
-  --paper-top: #fdf9f0;
-  --paper-top: oklch(0.982 0.012 85.2);
 }
 
 .aui-theme-root[data-preset='paper'][data-day='evening']:not(.dark) {
   --paper: #f7edd8;
   --paper: oklch(0.948 0.03 85.2);
-  --paper-top: #fbefd7;
-  --paper-top: oklch(0.956 0.034 85.2);
 }
 
 .aui-theme-root.dark[data-preset='paper'][data-day='morning'] {
   --paper: #2a2416;
   --paper: oklch(0.262 0.026 85.2);
-  --paper-top: #2d2515;
-  --paper-top: oklch(0.27 0.03 85.2);
 }
 
 .aui-theme-root.dark[data-preset='paper'][data-day='midday'] {
   --paper: #292620;
   --paper: oklch(0.27 0.012 85.2);
-  --paper-top: #2c281f;
-  --paper-top: oklch(0.278 0.016 85.2);
 }
 
 .aui-theme-root.dark[data-preset='paper'][data-day='evening'] {
   --paper: #282112;
   --paper: oklch(0.252 0.028 85.2);
-  --paper-top: #2b2311;
-  --paper-top: oklch(0.26 0.032 85.2);
 }
 
 /* The morning brief's one card: the ticket face with hairlines inside, no punch, stub or texture. */
