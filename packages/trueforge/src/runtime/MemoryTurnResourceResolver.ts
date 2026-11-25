@@ -249,7 +249,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     }
     const watch = new TurnReadWatch();
     // The note search rides on the same offer as the page reads: it is bound only where the backend
-    // keeps searchable daily notes, with recall's own budget and deadline, and this chat left out.
+    // keeps searchable daily notes, with recall's own budget, item cap and deadline, and this chat left out.
     const search = this.#memory.client?.searchNotes?.bind(this.#memory.client);
     const searchNotes =
       search === undefined
@@ -259,6 +259,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
               query,
               today,
               maxTokens: this.#memory.config.recallMaxTokens,
+              maxItems: this.#memory.config.recallMaxItems,
               timeoutMs: this.#memory.config.recallTimeoutMs,
               currentSessionId: this.#memory.sessionId,
             });

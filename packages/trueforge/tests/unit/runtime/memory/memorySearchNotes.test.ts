@@ -1,12 +1,13 @@
 import { createSentinelHostContext, defaultSentinelServices, execFileRunner } from '@truefoundry/trueforge-core/core';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
 
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
+import { estimateTokens } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { RecallItem, RecallOutcome } from '../../../../src/runtime/memory/memoryClient';
 import { MemoryPagesToolSet } from '../../../../src/runtime/memory/memoryPagesTools';
 import { TurnReadWatch } from '../../../../src/runtime/memory/turnReadWatch';
@@ -54,12 +55,13 @@ async function retainNote(
 
 async function search(
   client: MarkdownMemoryClient,
-  params: { query: string; maxTokens?: number; currentSessionId?: string },
+  params: { query: string; maxTokens?: number; maxItems?: number; currentSessionId?: string },
 ): Promise<RecallOutcome> {
   const outcome = await client.searchNotes?.({
     query: params.query,
     today: TODAY,
     maxTokens: params.maxTokens ?? 2048,
+    maxItems: params.maxItems ?? 100,
     timeoutMs: 5000,
     currentSessionId: params.currentSessionId,
   });
@@ -131,7 +133,57 @@ describe('searching the daily notes through the markdown client', () => {
     }
 
     expect(resultsOf(await search(client, { query: 'Juniper-47', maxTokens: 2048 }))).toHaveLength(3);
-    expect(resultsOf(await search(client, { query: 'Juniper-47', maxTokens: 50 }))).toHaveLength(1);
+    // The budget buys the whole rendered answer: the opening line, and for each note its day
+    // line as well as its text. One of these notes rendered whole costs more than 50 tokens, so
+    // a budget of 50 buys no note rather than an answer that runs past the budget, a budget of
+    // 80 buys exactly one, and a budget of 130 exactly two.
+    expect(resultsOf(await search(client, { query: 'Juniper-47', maxTokens: 50 }))).toHaveLength(0);
+    expect(resultsOf(await search(client, { query: 'Juniper-47', maxTokens: 80 }))).toHaveLength(1);
+    expect(resultsOf(await search(client, { query: 'Juniper-47', maxTokens: 130 }))).toHaveLength(2);
+  });
+
+  it('answers with a failure, not an empty answer, when a daily file in the window cannot be read', async () => {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: 'tenant-1', vaultScope: undefined });
+    await retainNote(client, {
+      content: 'Shipment Juniper-47 needs the short mounting bracket.',
+      day: dayBefore(1),
+      sessionId: 'chat-a',
+    });
+    // A folder standing where a daily file should be: it is listed like a daily file, but it
+    // cannot be read as one, whoever runs the test. The note it stands for may be the match, so
+    // the search must say it could not read, never that nothing matched.
+    await mkdir(path.join(baseDir, 'tenant-1', 'memory', `${dayBefore(2)}.md`), { recursive: true });
+
+    const outcome = await search(client, { query: 'Juniper-47' });
+    expect(outcome.ok).toBe(false);
+  });
+
+  it('still answers when the file that cannot be read is older than the window', async () => {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: 'tenant-1', vaultScope: undefined });
+    await retainNote(client, {
+      content: 'Shipment Juniper-47 needs the short mounting bracket.',
+      day: dayBefore(1),
+      sessionId: 'chat-a',
+    });
+    await mkdir(path.join(baseDir, 'tenant-1', 'memory', `${dayBefore(20)}.md`), { recursive: true });
+
+    const outcome = await search(client, { query: 'Juniper-47' });
+    expect(outcome.ok).toBe(true);
+    expect(resultsOf(outcome)).toHaveLength(1);
+  });
+
+  it('never returns more notes than the item cap, however many match and however large the budget', async () => {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: 'tenant-1', vaultScope: undefined });
+    for (const part of ['first', 'second', 'third', 'fourth', 'fifth']) {
+      await retainNote(client, {
+        content: `The ${part} Juniper-47 note is short.`,
+        day: dayBefore(1),
+        sessionId: 'chat-a',
+      });
+    }
+
+    expect(resultsOf(await search(client, { query: 'Juniper-47', maxItems: 2 }))).toHaveLength(2);
+    expect(resultsOf(await search(client, { query: 'Juniper-47', maxItems: 5 }))).toHaveLength(5);
   });
 
   it('never shows one owner the notes of another', async () => {
@@ -229,6 +281,29 @@ describe('the search_memory_notes tool', () => {
     expect(seen).toEqual([{ query: 'Juniper-47', today: '2026-11-06' }]);
     expect(answer.text).toContain('2026-11-04, said by the person (md:default:2026-11-04.md#0)');
     expect(answer.text.split('\n')).toContain('Shipment Juniper-47 needs the short mounting bracket.');
+  });
+
+  it('keeps the rendered answer inside the budget when many short notes match', async () => {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: 'tenant-1', vaultScope: undefined });
+    for (let index = 0; index < 12; index += 1) {
+      await retainNote(client, {
+        content: `Juniper-47 note ${String(index)} is short.`,
+        day: dayBefore(1),
+        sessionId: 'chat-a',
+      });
+    }
+    // Bound the way the resolver binds it, with a budget of 100 tokens. The tool's own clock is
+    // fixed in this fixture, so the binding names the real today the notes were retained under.
+    const { tools } = buildTools({
+      searchNotes: ({ query }) =>
+        client.searchNotes({ query, today: TODAY, maxTokens: 100, maxItems: 12, timeoutMs: 5000 }),
+    });
+
+    const answer = await callSearch(tools, 'Juniper-47');
+    expect(answer.isError).toBe(false);
+    expect(estimateTokens(answer.text)).toBeLessThanOrEqual(100);
+    expect(answer.text).toContain('is short.');
+    expect(answer.text).not.toContain('note 11 is short.');
   });
 
   it('says plainly that nothing matched, and names the days it searched', async () => {

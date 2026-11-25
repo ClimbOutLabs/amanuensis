@@ -97,6 +97,8 @@ export interface MemoryClient {
     /** The calendar day `YYYY-MM-DD` in the person's time zone; the window ends on it. */
     today: string;
     maxTokens: number;
+    /** Recall's own item cap, applied beside the token budget. */
+    maxItems: number;
     timeoutMs: number;
     /** The chat being answered: notes retained from it are never returned. */
     currentSessionId?: string | undefined;
