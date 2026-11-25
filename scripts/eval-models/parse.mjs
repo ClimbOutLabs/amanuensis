@@ -34,7 +34,7 @@ export const CHECK_TYPES = Object.freeze([
  * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[], client_timezone?: string, journey?: Journey, persona?: string, incognito?: boolean, steps?: CaseStep[] }} ModelCase
  * @typedef {{ text: string, timestamp: string }} SeedMemory
  * @typedef {{ name: string, instructions: string, memories: SeedMemory[] }} SetPersona
- * @typedef {{ version: 6, memories: SeedMemory[], profile?: Record<string, string>, personas: SetPersona[], cases: ModelCase[] }} ModelSet
+ * @typedef {{ version: 7, memories: SeedMemory[], profile?: Record<string, string>, personas: SetPersona[], cases: ModelCase[] }} ModelSet
  */
 
 export class ModelSetError extends Error {
