@@ -74,8 +74,8 @@ export interface SortIdentity {
 
 /**
  * What the model was shown besides the note. `own` is the person's: their confirmed statements, and the name and
- * summary of a page whose name counts as theirs. `read` is everything else, which was read, or worked out from
- * the person's conversations.
+ * summary of a page whose name counts as theirs. `read` is everything else: what was read, and what was worked
+ * out from the person's conversations.
  */
 export interface ShownWords {
   own: string[];
@@ -166,8 +166,9 @@ function systemPrompt(): string {
     '- A fact a page already holds, in the same meaning: {"decision":"same","about":"nora","statement_id":"f_ab12cd34ef","reason":"..."}',
     '- A fact that replaces one a page holds: {"decision":"changed","about":"nora","statement_id":"f_ab12cd34ef","new_text":"...","until_old":"2026-03-04","since_new":"2026-03-04","reason":"..."}',
     '- A fact the note says is over: {"decision":"ended","about":"nora","statement_id":"f_ab12cd34ef","until":"2026-03-04","reason":"..."}',
-    '- A fact that was read, or worked out from the person’s conversations, not stated by the person: {"decision":"unconfirmed","about":"nora","page_kind":"person","text":"...","seen":"2026-03-04","reason":"..."}',
+    '- A fact that was read, or worked out from the person\'s own words, not stated by the person: {"decision":"unconfirmed","about":"nora","page_kind":"person","text":"...","seen":"2026-03-04","reason":"..."}',
     '- Nothing worth a page: {"decision":"ignore","reason":"..."}',
+    'A fact the note itself does not carry is ignored, never filed.',
     'Name a statement only by the id shown in square brackets. Never invent an id, never write a file name, and never name a statement marked ended.',
     'Keep a fact only if it is about someone other than the person, or about a matter in their life, and will still be true next month. Passing events, small talk, what the assistant said, and facts about the person themselves belong on no page: ignore them.',
     'Decide what a fact is about before you choose its page. The person who said it, the person it was said to, and the assistant only took part in the conversation. They are not what the fact is about, unless the fact is about them. A fact about a person’s part in a matter, such as who to contact for it, belongs to the matter, not to the person.',

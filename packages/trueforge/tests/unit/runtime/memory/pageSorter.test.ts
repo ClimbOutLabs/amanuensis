@@ -665,7 +665,7 @@ describe('words that were only read never reach a line marked as the person’s'
       ],
     });
 
-  it('leaves the person’s line alone and keeps a change that borrows a read word as an unconfirmed line', async () => {
+  it('leaves the person’s line alone and keeps a change that borrows a read word as an inferred line', async () => {
     const vaultDir = await carVault();
     const result = await sortWith({
       vaultDir,
@@ -711,7 +711,7 @@ describe('words that were only read never reach a line marked as the person’s'
     );
   });
 
-  it('writes a new line that borrows a read word as an unconfirmed line, also with a changed ending', async () => {
+  it('writes a new line that borrows a read word as an unconfirmed inferred line, also with a changed ending', async () => {
     const vaultDir = await carVault();
     const result = await sortWith({
       vaultDir,

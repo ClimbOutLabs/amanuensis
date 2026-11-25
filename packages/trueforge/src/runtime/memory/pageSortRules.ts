@@ -31,7 +31,7 @@ export interface PlannedDecision {
   target: ShownStatement | undefined;
   /**
    * True when the line holds a word found only in what Aman read, such as a word from a read line the model was
-   * shown. The line is written as worked out from the person's conversations, never as the person's own words.
+   * shown. The line is written as one Aman worked out from the person's conversations, never as the person's.
    */
   inferred: boolean;
 }
@@ -600,7 +600,7 @@ function ruleExisting({
   }
   const mayTouch =
     origin.kind === 'own_words' || (origin.kind === 'sent_mail' && !OWN_STATEMENT_SOURCES.has(statement.src));
-  // A replacement that holds a word found only in what Aman read changes nothing; it waits as an unconfirmed line.
+  // A replacement that holds a word found only in what Aman read changes nothing; it waits as an inferred line.
   const inferred = newText !== undefined && !wordedInOwnWords({ text: newText, context });
   if (mayTouch && !inferred) {
     if (decision.decision === 'changed' && newText !== undefined && sameText({ a: statement.text, b: newText })) {

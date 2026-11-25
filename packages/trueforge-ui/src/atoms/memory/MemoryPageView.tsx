@@ -266,8 +266,8 @@ function PageSections({ page, state }: { page: MemoryPageDetail; state: MemoryPa
             <h4 className="text-xs font-semibold text-text-secondary">{section.name}</h4>
             {section.name === 'Unconfirmed' ? (
               <p className="text-xs text-text-secondary">
-                {assistant} read these, or worked them out from your conversations. They are not confirmed, and{' '}
-                {assistant} never treats them as your instructions. You do not need to do anything.
+                {assistant} read these, or worked them out from your conversations. It uses them as facts, never as your
+                instructions. You do not need to do anything.
               </p>
             ) : null}
             {list}
