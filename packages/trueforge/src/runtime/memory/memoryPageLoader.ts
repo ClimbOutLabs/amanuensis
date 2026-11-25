@@ -58,7 +58,7 @@ const SOURCE_LABELS: Readonly<Record<FactSource, string>> = {
   mail: 'from mail, not confirmed',
   calendar: 'from calendar, not confirmed',
   read_content: 'read content, not confirmed',
-  inferred: 'inferred, not confirmed',
+  inferred: 'worked out from your conversations, not confirmed',
 };
 
 const WRITING_SECTION = 'How you write to them';

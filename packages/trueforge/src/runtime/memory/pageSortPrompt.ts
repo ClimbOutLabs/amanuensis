@@ -58,7 +58,8 @@ export interface SortPrompt {
 
 /**
  * What the model was shown besides the note. `own` is the person's: their confirmed statements, and the name and
- * summary of a page whose name counts as theirs. `read` is everything else, which was read or guessed.
+ * summary of a page whose name counts as theirs. `read` is everything else: what was read, and what was worked
+ * out from the person's conversations.
  */
 export interface ShownWords {
   own: string[];
@@ -81,7 +82,7 @@ const SOURCE_WORDS: Readonly<Record<ShownStatement['src'], string>> = {
   mail: 'mail, not confirmed',
   calendar: 'calendar, not confirmed',
   read_content: 'read, not confirmed',
-  inferred: 'a guess, not confirmed',
+  inferred: 'worked out from your conversations, not confirmed',
 };
 
 /** The id a statement is named by: its marker id, or a fingerprint of its text for a line typed by hand. */
@@ -149,8 +150,9 @@ function systemPrompt(): string {
     '- A fact a page already holds, in the same meaning: {"decision":"same","about":"nora","statement_id":"f_ab12cd34ef","reason":"..."}',
     '- A fact that replaces one a page holds: {"decision":"changed","about":"nora","statement_id":"f_ab12cd34ef","new_text":"...","until_old":"2026-03-04","since_new":"2026-03-04","reason":"..."}',
     '- A fact the note says is over: {"decision":"ended","about":"nora","statement_id":"f_ab12cd34ef","until":"2026-03-04","reason":"..."}',
-    '- A fact that was read or guessed, not stated by the person: {"decision":"unconfirmed","about":"nora","page_kind":"person","text":"...","seen":"2026-03-04","reason":"..."}',
+    '- A fact that was read, or worked out from the person\'s own words, not stated by the person: {"decision":"unconfirmed","about":"nora","page_kind":"person","text":"...","seen":"2026-03-04","reason":"..."}',
     '- Nothing worth a page: {"decision":"ignore","reason":"..."}',
+    'A fact the note itself does not carry is ignored, never filed.',
     'Name a statement only by the id shown in square brackets. Never invent an id, never write a file name, and never name a statement marked ended.',
     'Keep a fact only if it is about someone other than the person, or about a matter in their life, and will still be true next month. Passing events, small talk, what the assistant said, and facts about the person themselves belong on no page: ignore them.',
     'A message the person sent shows how they write to someone: its greeting, sign-off, tone and language belong under "How you write to them" on the page of the person it went to.',
