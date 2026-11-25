@@ -428,7 +428,7 @@ describe('sorting after a save', () => {
                 page_kind: 'person',
                 title: 'Nora',
                 section: 'How you write to them',
-                text: 'Opens with "W," and signs off "x".',
+                text: 'Opens messages to Nora with "W," and signs off "x".',
                 reason: 'A sent message.',
               },
             ],

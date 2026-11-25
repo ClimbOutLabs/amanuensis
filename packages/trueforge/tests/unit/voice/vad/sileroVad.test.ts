@@ -57,6 +57,23 @@ describe('the image build', () => {
     expect(text).toContain(`--checksum=sha256:${SILERO_VAD_MODEL.sha256} ${SILERO_VAD_URL}`);
     expect(text).toMatch(/VOICE_VAD_MODEL_DIR=\/opt\/aman-voice/);
   });
+
+  it.each(['Dockerfile', 'Dockerfile.dev'])(
+    '%s creates the listening model folder before fetching the model into it',
+    async name => {
+      const text = await readFile(path.join(__dirname, '../../../../../..', name), 'utf8');
+      const fetch = text.indexOf(`${SILERO_VAD_URL} /opt/aman-voice/`);
+      expect(fetch).toBeGreaterThan(-1);
+      // Only the stage that fetches the model can create its folder first. When the fetch creates
+      // the folder itself, the folder takes the file's permissions (0644), which let the server list
+      // the model file but never open it, so voice mode reports the model missing on every install.
+      const stageStart = text.lastIndexOf('\nFROM ', fetch);
+      expect(stageStart).toBeGreaterThan(-1);
+      const before = text.slice(stageStart, fetch);
+      expect(before).toMatch(/RUN mkdir -p \/opt\/aman-voice\b/);
+      expect(before).toMatch(/chown( -R)? 10001:10001 \/opt\/aman-voice\b/);
+    },
+  );
 });
 
 /**

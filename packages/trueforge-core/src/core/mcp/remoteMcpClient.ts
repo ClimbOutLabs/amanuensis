@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { ErrorCode, McpError, type CallToolRequest, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
+import { PARALLEL_PRODUCT_URL, parallelProductConnection } from '../connectors/parallel/parallelApi';
 import { McpConnectionError, McpRedirectRefusedError } from '../errors';
 import { currentMcpOutboundFetchOptions, mcpOutboundBaseFetch, withOutboundHttpRetries } from '../util/outboundFetch';
 import { withTimeout } from '../util/promiseUtils';
@@ -419,6 +420,15 @@ export async function connectRemoteMcp(params: {
   onError?: ((error: Error) => void) | undefined;
 }): Promise<RemoteMcpConnection> {
   const url = new URL(params.url);
+  if (url.href === PARALLEL_PRODUCT_URL) {
+    return parallelProductConnection({
+      headers: params.headers,
+      fetch: mcpOutboundBaseFetch,
+      signal: params.signal,
+      requestTimeoutMs: params.requestTimeoutMs,
+      maxBytes: params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES,
+    });
+  }
   const requestOptions = { signal: params.signal };
   const redirectRefusal = createRedirectGuardFetch({ sameOriginOnly: params.refuseRedirects !== true });
   // Retries sit outside the guard and the size cap: a retry replays the whole request, and

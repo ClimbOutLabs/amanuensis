@@ -333,7 +333,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
       fresh({
         page: 'minsu',
         section: 'How you write to them',
-        text: 'Write to him formally.',
+        text: 'Writes to 김민수 formally.',
         why: 'The person said how they write to him.',
       }),
     ],
@@ -369,7 +369,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   sent({
     at: [8, 2],
     text: 'To nora@example.com, subject "Lisbon": W, your train to the airport is the 7:40 on Monday. I put the tickets in your blue folder. x',
-    then: [style({ page: 'nora', text: 'Opens with "W," and signs off "x".' })],
+    then: [style({ page: 'nora', text: 'Opens messages to Nora with "W," and signs off "x".' })],
   }),
   mail({
     at: [8, 3],
@@ -1132,7 +1132,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
       changed({
         page: 'marcus',
         from: "Marcus Bell's fee for the yearly return is 450.",
-        to: 'His fee for the yearly return is 520.',
+        to: "Marcus Bell's fee for the yearly return is 520.",
         on: 44,
       }),
     ],

@@ -12,11 +12,11 @@ export default defineConfig({
   bundle: true,
   esbuildPlugins: [
     // file-path-extensions treats .json as extensionless and would emit
-    // `./sandboxImage.json.mjs` (broken); resolve to an absolute path first so esbuild inlines it.
+    // `./data.json.mjs` (broken); resolve relative JSON imports to an absolute path first so esbuild inlines them.
     {
-      name: 'bundle-sandbox-image-json',
+      name: 'bundle-relative-json',
       setup(build) {
-        build.onResolve({ filter: /^\.\/sandboxImage\.json$/ }, args => ({
+        build.onResolve({ filter: /^\.\.?\/.+\.json$/ }, args => ({
           path: join(args.resolveDir, args.path),
         }));
       },

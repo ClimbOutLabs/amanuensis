@@ -48,6 +48,14 @@ mcp_servers:
       - session_id
       - model_name
   - type: remote
+    name: parallel-api
+    url: https://api.parallel.ai/
+    description: Search flights, hotels, shops, places and images. Research questions, find entities, and track web changes. Uses your Parallel account and may incur charges.
+    auth:
+      type: header
+      headers:
+        x-api-key: YOUR_PARALLEL_API_KEY
+  - type: remote
     name: github
     url: https://api.githubcopilot.com/mcp/
     description: >-

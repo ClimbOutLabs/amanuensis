@@ -339,4 +339,313 @@ describe('routing a note to the page of its subject', () => {
       'The harbour festival entry opens next month.',
     );
   });
+
+  it('refuses a fact about Riley filed on the page of the person who reported it', async () => {
+    const vaultDir = await makeVault();
+    const result = await sortWith({
+      vaultDir,
+      text: 'Sam told Aman that Riley prefers written agendas.',
+      model: modelReplying({
+        decisions: [newDecision('sam-ortiz', 'person', 'Sam told Aman that Riley prefers written agendas.')],
+      }),
+    });
+
+    expect(result.status).toBe('refused');
+    expect(await read(vaultDir, 'person', 'sam-ortiz')).toBe(SAM);
+    expect(await readHandledNotes(vaultDir)).toEqual(new Map());
+  });
+
+  it('refuses a fact filed as a line about writing that does not name its page’s person', async () => {
+    const vaultDir = await makeVault();
+    const result = await sortWith({
+      vaultDir,
+      text: 'Sam told Aman the community garden permit was approved for this season.',
+      model: modelReplying({
+        decisions: [
+          {
+            decision: 'new',
+            about: 'sam-ortiz',
+            page_kind: 'person',
+            section: 'How you write to them',
+            text: 'The community garden permit was approved for this season.',
+            since: DAY,
+            reason,
+          },
+        ],
+      }),
+    });
+
+    expect(result.status).toBe('refused');
+    expect(await read(vaultDir, 'person', 'sam-ortiz')).toBe(SAM);
+    expect(await readHandledNotes(vaultDir)).toEqual(new Map());
+  });
+
+  it('files a line about how the person writes when the line names the person it is about', async () => {
+    const vaultDir = await makeVault();
+    const result = await sortWith({
+      vaultDir,
+      text: 'I write to Sam in short, plain messages.',
+      model: modelReplying({
+        decisions: [
+          {
+            decision: 'new',
+            about: 'sam-ortiz',
+            page_kind: 'person',
+            section: 'How you write to them',
+            text: 'Writes to Sam in short, plain messages.',
+            since: DAY,
+            reason,
+          },
+        ],
+      }),
+    });
+
+    expect(result).toMatchObject({ status: 'sorted', written: true, outcome: 'page' });
+    const sam = await read(vaultDir, 'person', 'sam-ortiz');
+    expect(sam).toContain('Writes to Sam in short, plain messages.');
+    expect(sam).toContain('src=you_said');
+    expect(sam.indexOf('## How you write to them')).toBeLessThan(sam.indexOf('Writes to Sam in short'));
+  });
+
+  it('refuses a change whose new words are not about the page’s person', async () => {
+    const vaultDir = await makeVault();
+    const result = await sortWith({
+      vaultDir,
+      text: 'The community garden permit was approved for this season.',
+      model: modelReplying({
+        decisions: [
+          {
+            decision: 'changed',
+            about: 'sam-ortiz',
+            statement_id: 'f_s01',
+            new_text: 'The community garden permit was approved for this season.',
+            until_old: DAY,
+            since_new: DAY,
+            reason,
+          },
+        ],
+      }),
+    });
+
+    expect(result.status).toBe('refused');
+    expect(await read(vaultDir, 'person', 'sam-ortiz')).toBe(SAM);
+    expect(await readHandledNotes(vaultDir)).toEqual(new Map());
+  });
+
+  it('refuses a change that copies a statement its page already holds, in the same words or nearly the same', async () => {
+    const vaultDir = await makeVault();
+    const change = (new_text: string) => ({
+      decision: 'changed',
+      about: 'community-garden-permit',
+      statement_id: 'f_g02',
+      new_text,
+      until_old: DAY,
+      since_new: DAY,
+      reason,
+    });
+    const exact = await sortWith({
+      vaultDir,
+      text: 'The garden plot fee is 40 a year.',
+      model: modelReplying({ decisions: [change('The garden plot fee is 40 a year.')] }),
+    });
+    const near = await sortWith({
+      vaultDir,
+      text: 'The garden plot fee is 40 a year.',
+      model: modelReplying({ decisions: [change('The garden plot fee is 40 per year.')] }),
+    });
+
+    expect(exact.status).toBe('refused');
+    expect(near.status).toBe('refused');
+    expect(await read(vaultDir, 'matter', 'community-garden-permit')).toBe(GARDEN);
+    expect(await readHandledNotes(vaultDir)).toEqual(new Map());
+  });
+
+  it('lets a change that differs only in a number stand as a change, not a copy', async () => {
+    const vaultDir = await makeVault();
+    const result = await sortWith({
+      vaultDir,
+      text: 'The garden plot fee is now 45 a year.',
+      model: modelReplying({
+        decisions: [
+          {
+            decision: 'changed',
+            about: 'community-garden-permit',
+            statement_id: 'f_g01',
+            new_text: 'The garden plot fee is 45 a year.',
+            until_old: DAY,
+            since_new: DAY,
+            reason,
+          },
+        ],
+      }),
+    });
+
+    expect(result).toMatchObject({ status: 'sorted', written: true, outcome: 'page' });
+    const garden = await read(vaultDir, 'matter', 'community-garden-permit');
+    expect(garden).toContain('The garden plot fee is 45 a year.');
+    expect(garden).toContain('The garden plot fee is 40 a year.');
+    expect(garden.indexOf('The garden plot fee is 40 a year.')).toBeGreaterThan(garden.indexOf('## Earlier'));
+  });
+
+  it('refuses one reply that files a fact and changes another statement into the same fact on a second page', async () => {
+    const vaultDir = await makeVault();
+    const result = await sortWith({
+      vaultDir,
+      text: 'Riley now leads the garden rota.',
+      model: modelReplying({
+        decisions: [
+          newDecision('community-garden-permit', 'matter', 'Riley now leads the garden rota.'),
+          {
+            decision: 'changed',
+            about: 'riley-chen',
+            statement_id: 'f_t01',
+            new_text: 'Riley now leads the garden rota.',
+            until_old: DAY,
+            since_new: DAY,
+            reason,
+          },
+        ],
+      }),
+    });
+
+    expect(result.status).toBe('refused');
+    expect(await read(vaultDir, 'matter', 'community-garden-permit')).toBe(GARDEN);
+    expect(await read(vaultDir, 'person', 'riley-chen')).toBe(RILEY);
+    expect(await readHandledNotes(vaultDir)).toEqual(new Map());
+  });
+
+  it('reads a new line that nearly repeats a statement as the same statement', async () => {
+    const vaultDir = await makeVault();
+    const result = await sortWith({
+      vaultDir,
+      text: 'Riley runs the quiz night at the hall.',
+      model: modelReplying({
+        decisions: [newDecision('riley-chen', 'person', 'Riley runs the quiz night at the hall.')],
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: 'sorted',
+      decisions: [{ decision: 'same', about: 'riley-chen', statement_id: 'f_t01' }],
+    });
+    const riley = await read(vaultDir, 'person', 'riley-chen');
+    expect(riley.split('quiz night')).toHaveLength(2);
+  });
+
+  it('refuses a new page named with the person’s given name alone', async () => {
+    const vaultDir = await mkdtemp(path.join(tmpdir(), 'sorter-routing-given-name-'));
+    const titled = await sortWith({
+      vaultDir,
+      text: 'Alex keeps the household accounts in order.',
+      model: modelReplying({
+        decisions: [{ ...newDecision('alex', 'person', 'Alex keeps the household accounts in order.'), title: 'Alex' }],
+      }),
+    });
+    const slugOnly = await sortWith({
+      vaultDir,
+      text: 'Alex keeps the household accounts in order.',
+      model: modelReplying({
+        decisions: [newDecision('alex', 'person', 'Alex keeps the household accounts in order.')],
+      }),
+    });
+
+    expect(titled.status).toBe('refused');
+    expect(slugOnly.status).toBe('refused');
+    expect(await readHandledNotes(vaultDir)).toEqual(new Map());
+  });
+});
+
+const ROBIN = `---
+kind: person
+title: Robin Hale
+aliases: [Robin, Robin Hale]
+household: true
+---
+# Robin Hale
+
+The person who owns this vault.
+
+## Now
+- Robin keeps the household accounts. <!-- fact: id=f_r01 src=you_said since=2026-09-02 -->
+`;
+
+const ALEX_FERRIS = `---
+kind: person
+title: Alex Ferris
+aliases: [Alex, Alex Ferris]
+household: false
+---
+# Alex Ferris
+
+A friend who fires pottery in a shared studio.
+
+## Now
+- Alex fires pottery at the Ferry Street studio. <!-- fact: id=f_x01 src=you_said since=2026-09-10 -->
+`;
+
+const KILN = `---
+kind: matter
+title: Kiln repair
+aliases: [the kiln]
+status: active
+---
+# Kiln repair
+
+The repair of the studio kiln.
+
+## Now
+- The kiln needs a new element before winter. <!-- fact: id=f_k01 src=you_said since=2026-10-01 -->
+`;
+
+async function makeAlexVault(): Promise<string> {
+  const vaultDir = await mkdtemp(path.join(tmpdir(), 'sorter-routing-alex-'));
+  await writePageFile({ vaultDir, kind: 'person', slug: 'robin-hale', content: ROBIN });
+  await writePageFile({ vaultDir, kind: 'person', slug: 'alex-ferris', content: ALEX_FERRIS });
+  await writePageFile({ vaultDir, kind: 'person', slug: 'aman', content: AMAN });
+  await writePageFile({ vaultDir, kind: 'matter', slug: 'kiln-repair', content: KILN });
+  return vaultDir;
+}
+
+describe('a fact a person only passed on', () => {
+  it('does not file a document Alex passed on onto Alex’s page, and files a genuine fact about Alex', async () => {
+    const vaultDir = await makeAlexVault();
+    const identity = { personName: 'Robin Hale', assistantName: 'Aman' };
+
+    const passedOn = await sortWith({
+      vaultDir,
+      identity,
+      text: 'Alex forwarded the kiln repair estimate.',
+      model: modelReplying({
+        decisions: [newDecision('alex-ferris', 'person', 'Alex forwarded the kiln repair estimate.')],
+      }),
+    });
+    expect(passedOn.status).toBe('refused');
+    expect(await read(vaultDir, 'person', 'alex-ferris')).toBe(ALEX_FERRIS);
+    expect(await readHandledNotes(vaultDir)).toEqual(new Map());
+
+    const genuine = await sortWith({
+      vaultDir,
+      identity,
+      text: 'Alex is training for a spring marathon.',
+      model: modelReplying({
+        decisions: [newDecision('alex-ferris', 'person', 'Alex is training for a spring marathon.')],
+      }),
+    });
+    expect(genuine).toMatchObject({ status: 'sorted', written: true, outcome: 'page' });
+    const alex = await read(vaultDir, 'person', 'alex-ferris');
+    expect(alex).toContain('Alex is training for a spring marathon.');
+    expect(alex).toContain('src=you_said');
+
+    const withTheMatter = await sortWith({
+      vaultDir,
+      identity,
+      text: 'Alex forwarded the kiln repair estimate.',
+      model: modelReplying({
+        decisions: [newDecision('kiln-repair', 'matter', 'Alex forwarded the kiln repair estimate.')],
+      }),
+    });
+    expect(withTheMatter).toMatchObject({ status: 'sorted', written: true, outcome: 'page' });
+    expect(await read(vaultDir, 'matter', 'kiln-repair')).toContain('Alex forwarded the kiln repair estimate.');
+    expect(await read(vaultDir, 'person', 'alex-ferris')).not.toContain('Alex forwarded the kiln repair estimate.');
+  });
 });
