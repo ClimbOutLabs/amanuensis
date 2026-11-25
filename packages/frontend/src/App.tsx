@@ -596,40 +596,41 @@ export function App() {
                               <SpokenReplyProvider serverVoice={serverVoiceApi}>
                                 <RunCodeStatusProvider api={runCodeStatusApi}>
                                   <SandboxWorkspacesProvider api={sandboxWorkspacesApi}>
-                                  <MemoryRecallProvider api={memoryRecallApi}>
-                                    <ModelUsageProvider api={modelUsageApi}>
-                                      <PersonaProvider api={personaApi}>
-                                        <HelpProvider api={helpApi}>
-                                          <AmanSetupProvider
-                                            value={{
-                                              modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                                              hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
-                                              firstRunGuide,
-                                              settingsHref: '/settings',
-                                            }}
-                                          >
-                                            <ComposerDraftScopeProvider scope={draftScope}>
-                                              <SignOutConfirmProvider>
-                                                <AmanShell
-                                                  defaultAgentSpec={boot.defaultAgentSpec}
-                                                  openSettings={boot.openSettings}
-                                                  displayName={session.displayName}
-                                                  overrides={overrides}
-                                                  railDeskApi={railDeskApi}
-                                                  modelName={
-                                                    setup?.modelName ??
-                                                    (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                                  }
-                                                  version={boot.build?.version}
-                                                  buildRef={boot.build?.ref}
-                                                />
-                                              </SignOutConfirmProvider>
-                                            </ComposerDraftScopeProvider>
-                                          </AmanSetupProvider>
-                                        </HelpProvider>
-                                      </PersonaProvider>
-                                    </ModelUsageProvider>
-                                  </MemoryRecallProvider>
+                                    <MemoryRecallProvider api={memoryRecallApi}>
+                                      <ModelUsageProvider api={modelUsageApi}>
+                                        <PersonaProvider api={personaApi}>
+                                          <HelpProvider api={helpApi}>
+                                            <AmanSetupProvider
+                                              value={{
+                                                modelName:
+                                                  setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                                                hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                                                firstRunGuide,
+                                                settingsHref: '/settings',
+                                              }}
+                                            >
+                                              <ComposerDraftScopeProvider scope={draftScope}>
+                                                <SignOutConfirmProvider>
+                                                  <AmanShell
+                                                    defaultAgentSpec={boot.defaultAgentSpec}
+                                                    openSettings={boot.openSettings}
+                                                    displayName={session.displayName}
+                                                    overrides={overrides}
+                                                    railDeskApi={railDeskApi}
+                                                    modelName={
+                                                      setup?.modelName ??
+                                                      (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                                    }
+                                                    version={boot.build?.version}
+                                                    buildRef={boot.build?.ref}
+                                                  />
+                                                </SignOutConfirmProvider>
+                                              </ComposerDraftScopeProvider>
+                                            </AmanSetupProvider>
+                                          </HelpProvider>
+                                        </PersonaProvider>
+                                      </ModelUsageProvider>
+                                    </MemoryRecallProvider>
                                   </SandboxWorkspacesProvider>
                                 </RunCodeStatusProvider>
                               </SpokenReplyProvider>
