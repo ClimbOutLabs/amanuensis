@@ -114,3 +114,69 @@ describe('draft plan coverage', () => {
     expect(steps.map(step => step.description)).toEqual(['Book the venue', 'Pay the deposit']);
   });
 });
+
+describe('coverage matching', () => {
+  async function draftSteps(
+    criteria: readonly string[],
+    given: readonly { description: string; acceptance_criteria: string }[],
+  ): Promise<readonly { description: string; acceptance_criteria: string }[]> {
+    const service = setup();
+    const { steps } = await service.createDraft(ownerActor(), {
+      agent_id: AGENT_ID,
+      title: 'Coverage check',
+      outcome: 'The thing is done.',
+      success_criteria: criteria,
+      target_at: null,
+      timezone: 'UTC',
+      selected_sources: [],
+      steps: given.map(step => ({ ...step, source_refs: [] })),
+    });
+    return steps;
+  }
+
+  // Each pair below was covered by the old half-of-the-words rule, so the
+  // criterion got no step of its own and stayed invisible to every check.
+  // The step shares a verb, a neighbouring object, or part of the wording,
+  // but it does not carry the criterion, so the criterion must be appended.
+  const SWALLOWED: readonly { criterion: string; step: string }[] = [
+    { criterion: 'The passport is renewed', step: 'Renew the library card' },
+    { criterion: 'The license is renewed', step: 'Renew the passport' },
+    { criterion: 'The venue is booked', step: 'Pay the venue deposit' },
+    { criterion: 'Copies are filed with the office', step: 'File the tax forms at the office' },
+    { criterion: 'The hall deposit is refunded in full', step: 'Pay the hall deposit' },
+    { criterion: 'No fee is charged', step: 'Charge the fee' },
+    { criterion: 'Ana signs the lease', step: 'Ben signs the lease' },
+  ];
+  for (const { criterion, step } of SWALLOWED) {
+    it(`appends "${criterion}" when the only step is "${step}"`, async () => {
+      const steps = await draftSteps([criterion], [{ description: step, acceptance_criteria: '' }]);
+      expect(steps.map(candidate => candidate.description)).toEqual([step, criterion]);
+    });
+  }
+
+  it('appends the letters and photos criteria when one step prints only the form', async () => {
+    const criteria = ['The form is printed', 'The letters are printed', 'The photos are printed'];
+    const steps = await draftSteps(criteria, [{ description: 'Print the form', acceptance_criteria: '' }]);
+    // The form criterion is genuinely carried by the step: same object, same
+    // action. The letters and photos are different objects the step never
+    // names, so each is appended.
+    expect(steps.map(step => step.description)).toEqual([
+      'Print the form',
+      'The letters are printed',
+      'The photos are printed',
+    ]);
+  });
+
+  it('treats fees and fee as the same word, and paid and pay as the same word', async () => {
+    const steps = await draftSteps(['The fees are paid'], [{ description: 'Pay the fee', acceptance_criteria: '' }]);
+    expect(steps.map(step => step.description)).toEqual(['Pay the fee']);
+  });
+
+  it('treats charged and charge as the same word', async () => {
+    const steps = await draftSteps(
+      ['The fee is charged'],
+      [{ description: 'Charge the fee', acceptance_criteria: '' }],
+    );
+    expect(steps.map(step => step.description)).toEqual(['Charge the fee']);
+  });
+});

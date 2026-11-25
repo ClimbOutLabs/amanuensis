@@ -177,8 +177,17 @@ const COVERAGE_STOP_WORDS = new Set([
 
 /** One word reduced to a plain stem, so "confirmed", "confirms" and "confirm" are the same word. */
 function coverageStem(word: string): string {
+  // Two forms the suffix rules below split apart, repaired directly: "paid"
+  // never stemmed to "pay", and "fees" lost its last letters to the "es"
+  // rule while "fee" kept them, so neither pair ever matched.
+  if (word === 'paid') {
+    return 'pay';
+  }
   if (word.length > 4 && word.endsWith('ies')) {
     return `${word.slice(0, -3)}y`;
+  }
+  if (word.length > 3 && word.endsWith('ees')) {
+    return word.slice(0, -1);
   }
   if (word.length > 4 && word.endsWith('ing')) {
     return word.slice(0, -3);
@@ -216,11 +225,15 @@ function coverageWords(text: string): ReadonlySet<string> {
 /**
  * Whether a step already carries a success criterion. A composed plan phrases
  * a criterion in its own words ("Book the equipment" for "The equipment is
- * booked"), so the match is on the criterion's fact-carrying words: a step
- * carries the criterion when at least half of those words appear across the
- * step's description and acceptance criteria. Doubt appends the criterion as
- * its own step: a step too many is visible on the card, while a criterion
- * with no step is invisible to every check.
+ * booked"), so the match is on the criterion's fact-carrying words, across
+ * the step's description and acceptance criteria. The step carries the
+ * criterion only when every one of those words appears. Anything less lets a
+ * step swallow a criterion it does not cover: one that shares only the verb
+ * ("Renew the library card" for a passport renewal), a neighbouring object
+ * ("Renew the passport" for a license renewal), or one printed thing for
+ * three. A swallowed criterion is invisible to every check, while a wrongly
+ * appended step sits on the card where the person can see it. So the rule is
+ * full containment, and every doubt appends.
  */
 function stepCarriesCriterion(step: { description: string; acceptance_criteria: string }, criterion: string): boolean {
   const wanted = coverageWords(criterion);
@@ -228,16 +241,12 @@ function stepCarriesCriterion(step: { description: string; acceptance_criteria: 
     return false;
   }
   const carried = new Set([...coverageWords(step.description), ...coverageWords(step.acceptance_criteria)]);
-  let hits = 0;
   for (const word of wanted) {
-    if (carried.has(word)) {
-      hits += 1;
+    if (!carried.has(word)) {
+      return false;
     }
   }
-  if (wanted.size === 1) {
-    return hits === 1;
-  }
-  return hits * 2 >= wanted.size;
+  return true;
 }
 
 export function createGoalService(deps: GoalServiceDeps) {

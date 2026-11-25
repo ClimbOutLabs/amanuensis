@@ -55,12 +55,16 @@ describe('the fundraiser journey over the real SQLite goal store', () => {
     expect(draft.goal.agent_id).toBe(AGENT_ID);
     expect(draft.goal.persona_id).toBeNull();
     expect(draft.goal.selected_sources.map(source => source.source_ref)).toEqual(['venue-letter', 'catering-quote']);
+    // The fourth step is appended by the coverage rule: no composed step
+    // carries the "in writing" part of the first criterion, so that
+    // criterion becomes a step of its own rather than staying invisible.
     expect(draft.steps.map(step => step.description)).toEqual([
       'Confirm the venue',
       'Book the equipment',
       'Confirm the volunteers',
+      'The venue is confirmed in writing',
     ]);
-    expect(draft.steps.map(step => step.status)).toEqual(['ready', 'planned', 'ready']);
+    expect(draft.steps.map(step => step.status)).toEqual(['ready', 'planned', 'ready', 'ready']);
 
     // The plan's dependencies were plan positions at create time; the stored
     // steps name the venue step's assigned id, and its source refs survived.
