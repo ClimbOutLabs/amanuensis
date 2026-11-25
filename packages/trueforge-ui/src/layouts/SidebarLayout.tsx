@@ -51,6 +51,7 @@ const RemindersPage = lazy(() =>
   import('../atoms/reminders/RemindersPage.js').then(m => ({ default: m.RemindersPage })),
 );
 const SpacesView = lazy(() => import('../containers/SpacesView.js'));
+const GoalsView = lazy(() => import('../containers/GoalsView.js'));
 
 const brandLogoClassName = 'h-5 w-5 max-w-40 shrink-0 object-contain';
 const railWidthClassName = 'w-20';
@@ -81,6 +82,7 @@ function SidebarNavItems({
 }): ReactNode {
   const SchedulesButton = useSlot('SchedulesButton');
   const RemindersButton = useSlot('RemindersButton');
+  const GoalsButton = useSlot('GoalsButton');
   const SpacesButton = useSlot('SpacesButton');
   const chatsSelected = selected === 'chats';
 
@@ -109,6 +111,7 @@ function SidebarNavItems({
       <SpacesButton compact selected={selected === 'spaces'} />
       <SchedulesButton compact selected={selected === 'schedules'} />
       <RemindersButton compact selected={selected === 'reminders'} />
+      <GoalsButton compact selected={selected === 'goals'} />
     </>
   );
 }
@@ -248,7 +251,9 @@ export function SidebarLayout({ className }: { className?: string }) {
   const schedulesOpen = shell?.schedulesOpen === true;
   const remindersOpen = shell?.remindersOpen === true;
   const spacesOpen = shell?.spacesOpen === true;
-  const overlayOpen = settingsOpen || libraryOpen || sessionsOpen || schedulesOpen || remindersOpen || spacesOpen;
+  const goalsOpen = shell?.goalsOpen === true;
+  const overlayOpen =
+    settingsOpen || libraryOpen || sessionsOpen || schedulesOpen || remindersOpen || spacesOpen || goalsOpen;
   const showAgentConfig =
     shell != null && shellIsCreateAgent(shell.mode) && !overlayOpen && (!isMobile || shell.agentConfigOpen);
   const recentHistoryAvailable = isRecentHistoryVisible({ overlayOpen, mode: shell?.mode });
@@ -284,6 +289,7 @@ export function SidebarLayout({ className }: { className?: string }) {
     shell.setSchedulesOpen(false);
     shell.setRemindersOpen(false);
     shell.closeSpaces();
+    shell.closeGoals();
     shell.setHistoryCollapsed(false);
     setChatListFromRail(true);
     if (!alreadyOnChats) openMostRecentChat();
@@ -499,6 +505,22 @@ export function SidebarLayout({ className }: { className?: string }) {
                 }
               >
                 <SpacesView />
+              </Suspense>
+            ) : goalsOpen ? (
+              <Suspense
+                fallback={
+                  <div
+                    className="flex h-full items-center justify-center"
+                    role="status"
+                    aria-live="polite"
+                    aria-busy="true"
+                  >
+                    <Spinner size={28} className="text-text-primary" />
+                    <span className="sr-only">Loading</span>
+                  </div>
+                }
+              >
+                <GoalsView />
               </Suspense>
             ) : isIdle ? (
               <SelectAgentEmptyState />
