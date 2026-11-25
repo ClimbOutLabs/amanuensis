@@ -165,6 +165,7 @@ export async function runNightlyForVault({
           similarPages: deps.similarPagesFor(vault),
           // A run the person asked for can be repeated at once, so it is not a night a note failed on.
           countFailedNight: !onRequest,
+          identity: { personName: summarize?.personName, assistantName: summarize?.assistantName },
         }),
     });
     counts.notesAsked = missed?.asked ?? 0;

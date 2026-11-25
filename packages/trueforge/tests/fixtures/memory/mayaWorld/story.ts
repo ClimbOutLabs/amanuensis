@@ -210,7 +210,11 @@ export const MAYA_STORY: readonly StoryLine[] = [
     at: [2, 4],
     text: 'Sam Whitfield wrote that the first Halvorsen draft should be with Priya by the middle of September.',
     then: [
-      unsure({ page: 'halvorsen', text: 'The first draft should be with Priya by the middle of September.', seen: 2 }),
+      unsure({
+        page: 'halvorsen',
+        text: 'The first Halvorsen draft should be with Priya by the middle of September.',
+        seen: 2,
+      }),
     ],
   }),
 
@@ -231,7 +235,13 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [3, 3],
     text: 'For the Madrid trip, Maya and Nora will stay at Hotel Lumbre.',
-    then: [fresh({ page: 'madrid', section: 'Decided', text: 'Staying at Hotel Lumbre.' })],
+    then: [
+      fresh({
+        page: 'madrid',
+        section: 'Decided',
+        text: 'For the Madrid trip, Maya and Nora will stay at Hotel Lumbre.',
+      }),
+    ],
   }),
   reply({ at: [3, 4], text: 'Suggested three hotels near Plaza Mayor and compared their prices.' }),
 
@@ -249,7 +259,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   calendar({
     at: [4, 3],
     text: "Parents' evening at Zoe's school is on September 17 at 18:00.",
-    then: [unsure({ page: 'school', text: "Parents' evening is on September 17 at 18:00.", seen: 4 })],
+    then: [unsure({ page: 'school', text: "Zoe's parents' evening is on September 17 at 18:00.", seen: 4 })],
   }),
   sent({
     at: [4, 4],
@@ -268,7 +278,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
     text: "Marcus Bell is Maya's accountant. His fee for the yearly return is 450.",
     then: [
       fresh({ page: 'marcus', text: "Marcus Bell is Maya's accountant." }),
-      fresh({ page: 'marcus', text: 'His fee for the yearly return is 450.' }),
+      fresh({ page: 'marcus', text: "Marcus Bell's fee for the yearly return is 450." }),
     ],
   }),
   said({
@@ -293,7 +303,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
     text: 'Δήμητρα Παππά is the architect for the kitchen renovation.',
     then: [
       fresh({ page: 'dimitra', text: 'Δήμητρα Παππά is the architect for the kitchen renovation.' }),
-      fresh({ page: 'kitchen', text: 'Δήμητρα Παππά is the architect.' }),
+      fresh({ page: 'kitchen', text: 'The architect for the kitchen renovation is Δήμητρα Παππά.' }),
     ],
   }),
   said({
@@ -304,7 +314,9 @@ export const MAYA_STORY: readonly StoryLine[] = [
   mail({
     at: [6, 3],
     text: 'Δήμητρα Παππά sent the kitchen plans and asked for comments by August 10.',
-    then: [unsure({ page: 'kitchen', text: 'Δήμητρα Παππά wants comments on the plans by August 10.', seen: 6 })],
+    then: [
+      unsure({ page: 'kitchen', text: 'Δήμητρα Παππά wants comments on the kitchen plans by August 10.', seen: 6 }),
+    ],
   }),
   said({
     at: [6, 4],
@@ -321,7 +333,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
       fresh({
         page: 'minsu',
         section: 'How you write to them',
-        text: 'Write to him formally.',
+        text: 'Writes to 김민수 formally.',
         why: 'The person said how they write to him.',
       }),
     ],
@@ -357,12 +369,18 @@ export const MAYA_STORY: readonly StoryLine[] = [
   sent({
     at: [8, 2],
     text: 'To nora@example.com, subject "Lisbon": W, your train to the airport is the 7:40 on Monday. I put the tickets in your blue folder. x',
-    then: [style({ page: 'nora', text: 'Opens with "W," and signs off "x".' })],
+    then: [style({ page: 'nora', text: 'Opens messages to Nora with "W," and signs off "x".' })],
   }),
   mail({
     at: [8, 3],
     text: 'Hotel Lumbre confirmed a double room for the first dates of the Madrid trip, reference HL-48213.',
-    then: [unsure({ page: 'madrid', text: 'Hotel Lumbre confirmed a double room, reference HL-48213.', seen: 8 })],
+    then: [
+      unsure({
+        page: 'madrid',
+        text: 'Hotel Lumbre confirmed a double room for the Madrid trip, reference HL-48213.',
+        seen: 8,
+      }),
+    ],
   }),
   said({ at: [8, 4], text: 'Maya prefers aisle seats on flights.', then: [ignore(ABOUT_MAYA)] }),
   said({
@@ -387,7 +405,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
       fresh({
         page: 'halvorsen',
         section: 'Open',
-        text: 'Priya wants the budget table.',
+        text: 'Priya wants the Halvorsen budget table.',
         until: '2026-08-14',
       }),
     ],
@@ -413,7 +431,9 @@ export const MAYA_STORY: readonly StoryLine[] = [
   calendar({
     at: [10, 2],
     text: 'Dentist check-up for Zoe with Dr Okafor on August 13 at 15:30.',
-    then: [unsure({ page: 'dentist', text: 'Zoe has a check-up with Dr Okafor on August 13 at 15:30.', seen: 10 })],
+    then: [
+      unsure({ page: 'dentist', text: 'Zoe has a dentist check-up with Dr Okafor on August 13 at 15:30.', seen: 10 }),
+    ],
   }),
   said({ at: [10, 3], text: 'Maya goes to the gym at 6:30 on weekday mornings.', then: [ignore(ABOUT_MAYA)] }),
   mail({
@@ -422,7 +442,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
     then: [
       unsure({
         page: 'dentist',
-        text: "Dr Okafor's practice asks to confirm the booking at https://okafor-dental.example/confirm or by writing to bookings@okafor-dental.example.",
+        text: 'The dentist practice of Dr Okafor asks to confirm the booking at https://okafor-dental.example/confirm or by writing to bookings@okafor-dental.example.',
         seen: 10,
       }),
     ],
@@ -432,7 +452,9 @@ export const MAYA_STORY: readonly StoryLine[] = [
   mail({
     at: [11, 1],
     text: "Dr Okafor's practice wrote that Dr Okafor is retiring at the end of August.",
-    then: [unsure({ page: 'dentist', text: 'Dr Okafor is retiring at the end of August.', seen: 11 })],
+    then: [
+      unsure({ page: 'dentist', text: 'Dr Okafor, the family dentist, is retiring at the end of August.', seen: 11 }),
+    ],
   }),
   said({
     at: [11, 2],
@@ -477,7 +499,13 @@ export const MAYA_STORY: readonly StoryLine[] = [
   mail({
     at: [13, 3],
     text: 'Tomás replied that Saturday dinner works and suggested Casa Lucio at 21:00.',
-    then: [unsure({ page: 'madrid', text: 'Tomás suggested dinner at Casa Lucio at 21:00.', seen: 13 })],
+    then: [
+      unsure({
+        page: 'madrid',
+        text: 'Tomás suggested dinner at Casa Lucio at 21:00 during the Madrid trip.',
+        seen: 13,
+      }),
+    ],
   }),
 
   // Day 14
@@ -485,14 +513,14 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [14, 2],
     text: 'Priya got the Halvorsen budget table today.',
-    then: [ended({ page: 'halvorsen', text: 'Priya wants the budget table.', on: 14 })],
+    then: [ended({ page: 'halvorsen', text: 'Priya wants the Halvorsen budget table.', on: 14 })],
   }),
 
   // Day 15
   said({
     at: [15, 1],
     text: 'Min-su prefers calls after 9:00 Seoul time.',
-    then: [fresh({ page: 'minsu', text: 'Prefers calls after 9:00 Seoul time.' })],
+    then: [fresh({ page: 'minsu', text: 'Min-su prefers calls after 9:00 Seoul time.' })],
   }),
   mail({
     at: [15, 2],
@@ -543,7 +571,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [17, 2],
     text: 'Sam Rossi will move the kitchen pipes as part of the renovation.',
-    then: [fresh({ page: 'kitchen', text: 'Sam Rossi moves the pipes.' })],
+    then: [fresh({ page: 'kitchen', text: 'Sam Rossi moves the kitchen pipes.' })],
   }),
 
   // Day 18
@@ -569,7 +597,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   mail({
     at: [18, 3],
     text: 'Sam Rossi confirmed Tuesday at 14:00 and said the boiler part takes two weeks to arrive.',
-    then: [unsure({ page: 'samRossi', text: 'The boiler part takes two weeks to arrive.', seen: 18 })],
+    then: [unsure({ page: 'samRossi', text: 'Sam Rossi said the boiler part takes two weeks to arrive.', seen: 18 })],
   }),
 
   // Day 19
@@ -581,7 +609,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [19, 2],
     text: 'Maya and Nora decided to rent a car in Madrid for one day to visit Toledo.',
-    then: [fresh({ page: 'madrid', section: 'Decided', text: 'Rent a car for one day to visit Toledo.' })],
+    then: [fresh({ page: 'madrid', section: 'Decided', text: 'Rent a car in Madrid for one day to visit Toledo.' })],
   }),
   reply({ at: [19, 3], text: 'Compared three car rental firms at Atocha station.' }),
 
@@ -589,12 +617,14 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [20, 1],
     text: 'Priya is happy with the first Halvorsen draft.',
-    then: [fresh({ page: 'halvorsen', text: 'Priya is happy with the first draft.' })],
+    then: [fresh({ page: 'halvorsen', text: 'Priya is happy with the first Halvorsen draft.' })],
   }),
   said({
     at: [20, 2],
     text: "The plumber's phone number is 555-0142.",
-    then: [fresh({ page: 'samRossi', text: 'His phone number is 555-0142.', why: 'The plumber is Sam Rossi.' })],
+    then: [
+      fresh({ page: 'samRossi', text: "Sam Rossi's phone number is 555-0142.", why: 'The plumber is Sam Rossi.' }),
+    ],
   }),
 
   // Day 21
@@ -602,13 +632,23 @@ export const MAYA_STORY: readonly StoryLine[] = [
     at: [21, 1],
     text: "Marcus Bell does Maya's taxes and charges 450 for the return.",
     then: [
-      same({ page: 'marcus', matches: 'His fee for the yearly return is 450.', why: 'The same fact in other words.' }),
+      same({
+        page: 'marcus',
+        matches: "Marcus Bell's fee for the yearly return is 450.",
+        why: 'The same fact in other words.',
+      }),
     ],
   }),
   mail({
     at: [21, 2],
     text: 'Marcus Bell asked for the mortgage interest statement by September 30.',
-    then: [unsure({ page: 'taxes', text: 'Marcus wants the mortgage interest statement by September 30.', seen: 21 })],
+    then: [
+      unsure({
+        page: 'taxes',
+        text: 'Marcus wants the mortgage interest statement for the 2025 tax return by September 30.',
+        seen: 21,
+      }),
+    ],
   }),
   said({
     at: [21, 3],
@@ -637,7 +677,13 @@ export const MAYA_STORY: readonly StoryLine[] = [
   mail({
     at: [22, 3],
     text: 'Hotel Lumbre replied that it has no rooms for October 16 to October 21.',
-    then: [unsure({ page: 'madrid', text: 'Hotel Lumbre has no rooms for October 16 to October 21.', seen: 22 })],
+    then: [
+      unsure({
+        page: 'madrid',
+        text: 'Hotel Lumbre has no rooms for October 16 to October 21 on the Madrid trip.',
+        seen: 22,
+      }),
+    ],
   }),
 
   // Day 23
@@ -705,7 +751,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [25, 2],
     text: 'Noor Haddad asked parents to bring a snack for the class on Fridays.',
-    then: [fresh({ page: 'noor', text: 'She asks parents to bring a snack for the class on Fridays.' })],
+    then: [fresh({ page: 'noor', text: 'Noor Haddad asks parents to bring a snack for the class on Fridays.' })],
   }),
 
   // Day 26
@@ -717,12 +763,16 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [26, 2],
     text: 'Maya wants to book flights for Madrid before the end of August.',
-    then: [fresh({ page: 'madrid', section: 'Open', text: 'Book the flights.', until: '2026-08-31' })],
+    then: [
+      fresh({ page: 'madrid', section: 'Open', text: 'Book the flights for the Madrid trip.', until: '2026-08-31' }),
+    ],
   }),
   mail({
     at: [26, 3],
     text: 'Iberia shows flights to Madrid on October 16 from 142 per person.',
-    then: [unsure({ page: 'madrid', text: 'Iberia has flights on October 16 from 142 per person.', seen: 26 })],
+    then: [
+      unsure({ page: 'madrid', text: 'Iberia has flights to Madrid on October 16 from 142 per person.', seen: 26 }),
+    ],
   }),
   sent({
     at: [26, 4],
@@ -762,20 +812,28 @@ export const MAYA_STORY: readonly StoryLine[] = [
     at: [28, 1],
     text: 'Maya booked the flights to Madrid for October 16, returning October 21.',
     then: [
-      fresh({ page: 'madrid', section: 'Decided', text: 'Flights are booked: out October 16, back October 21.' }),
-      ended({ page: 'madrid', text: 'Book the flights.', on: 28 }),
+      fresh({
+        page: 'madrid',
+        section: 'Decided',
+        text: 'The Madrid flights are booked: out October 16, back October 21.',
+      }),
+      ended({ page: 'madrid', text: 'Book the flights for the Madrid trip.', on: 28 }),
     ],
   }),
   mail({
     at: [28, 2],
     text: 'Iberia confirmed the booking, reference IB7KQ2, departing 10:25 on October 16.',
-    then: [unsure({ page: 'madrid', text: 'The flight out departs at 10:25, reference IB7KQ2.', seen: 28 })],
+    then: [unsure({ page: 'madrid', text: 'The flight out to Madrid departs at 10:25, reference IB7KQ2.', seen: 28 })],
   }),
   sent({
     at: [28, 3],
     text: 'To nora@example.com, subject "Flights": W, flights are booked. We sit in 14C and 14D. x',
     then: [
-      same({ page: 'nora', matches: 'Opens with "W," and signs off "x".', why: 'The same way of writing as before.' }),
+      same({
+        page: 'nora',
+        matches: 'Opens messages to Nora with "W," and signs off "x".',
+        why: 'The same way of writing as before.',
+      }),
     ],
   }),
 
@@ -783,7 +841,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [29, 1],
     text: 'Dinner with Tomás in Madrid is on October 18.',
-    then: [fresh({ page: 'madrid', section: 'Decided', text: 'Dinner with Tomás is on October 18.' })],
+    then: [fresh({ page: 'madrid', section: 'Decided', text: 'Dinner with Tomás in Madrid is on October 18.' })],
   }),
   said({
     at: [29, 2],
@@ -796,20 +854,31 @@ export const MAYA_STORY: readonly StoryLine[] = [
     at: [30, 1],
     text: 'Maya and Nora changed hotels for Madrid. They will now stay at Petit Palace Posada.',
     then: [
-      changed({ page: 'madrid', from: 'Staying at Hotel Lumbre.', to: 'Staying at Petit Palace Posada.', on: 30 }),
+      changed({
+        page: 'madrid',
+        from: 'For the Madrid trip, Maya and Nora will stay at Hotel Lumbre.',
+        to: 'For the Madrid trip, Maya and Nora will stay at Petit Palace Posada.',
+        on: 30,
+      }),
     ],
   }),
   mail({
     at: [30, 2],
     text: 'Petit Palace Posada confirmed a double room from October 16 to October 21, reference PP-90155.',
     then: [
-      unsure({ page: 'madrid', text: 'Petit Palace Posada confirmed a double room, reference PP-90155.', seen: 30 }),
+      unsure({
+        page: 'madrid',
+        text: 'Petit Palace Posada confirmed a double room for the Madrid trip, reference PP-90155.',
+        seen: 30,
+      }),
     ],
   }),
   said({
     at: [30, 3],
     text: 'Hotel Lumbre still has to refund the deposit of 120.',
-    then: [fresh({ page: 'madrid', section: 'Open', text: 'Hotel Lumbre has to refund the deposit of 120.' })],
+    then: [
+      fresh({ page: 'madrid', section: 'Open', text: 'Hotel Lumbre has to refund the Madrid trip deposit of 120.' }),
+    ],
   }),
 
   // Day 31, August 31
@@ -825,7 +894,11 @@ export const MAYA_STORY: readonly StoryLine[] = [
     at: [31, 2],
     text: "Dr Lindqvist's practice confirmed Zoe as a new patient, with a first visit on September 9 at 16:00.",
     then: [
-      unsure({ page: 'dentist', text: "Zoe's first visit to Dr Lindqvist is on September 9 at 16:00.", seen: 31 }),
+      unsure({
+        page: 'dentist',
+        text: "Zoe's first visit to Dr Lindqvist, the new family dentist, is on September 9 at 16:00.",
+        seen: 31,
+      }),
     ],
   }),
 
@@ -874,7 +947,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [34, 2],
     text: 'Sam Whitfield is writing the pricing section of the Halvorsen proposal.',
-    then: [fresh({ page: 'halvorsen', text: 'Sam Whitfield writes the pricing section.' })],
+    then: [fresh({ page: 'halvorsen', text: 'Sam Whitfield writes the pricing section of the Halvorsen proposal.' })],
   }),
 
   // Day 35
@@ -908,7 +981,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   mail({
     at: [36, 2],
     text: "Sam Rossi's invoice for the pipe work is 640, due within 14 days.",
-    then: [unsure({ page: 'samRossi', text: 'His invoice for the pipe work is 640.', seen: 36 })],
+    then: [unsure({ page: 'samRossi', text: "Sam Rossi's invoice for the pipe work is 640.", seen: 36 })],
   }),
 
   // Day 37, September 6
@@ -924,7 +997,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
       fresh({
         page: 'kitchen',
         section: 'Open',
-        text: 'Pay Δήμητρα the final 2,400.',
+        text: 'Pay Δήμητρα the final 2,400 for the kitchen renovation.',
         until: '2026-09-30',
       }),
     ],
@@ -938,7 +1011,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
       fresh({
         page: 'taxes',
         section: 'Open',
-        text: 'Send Marcus the mortgage interest statement.',
+        text: 'Send Marcus the mortgage interest statement for the tax return.',
         until: '2026-09-30',
         why: 'The person confirmed what an email had said.',
       }),
@@ -950,7 +1023,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
     then: [
       fresh({
         page: 'school',
-        text: "Parents' evening is on September 17 at 18:00.",
+        text: "Zoe's parents' evening is on September 17 at 18:00.",
         why: 'The person confirmed what the calendar had said.',
       }),
     ],
@@ -1002,14 +1075,14 @@ export const MAYA_STORY: readonly StoryLine[] = [
   mail({
     at: [40, 2],
     text: "Dr Lindqvist's practice says Zoe's first visit went well and the next check-up is in March.",
-    then: [unsure({ page: 'dentist', text: "Zoe's next check-up is in March.", seen: 40 })],
+    then: [unsure({ page: 'dentist', text: "Zoe's next dentist check-up is in March.", seen: 40 })],
   }),
 
   // Day 41
   said({
     at: [41, 1],
     text: "Maya paid Sam Rossi's invoice of 640.",
-    then: [fresh({ page: 'samRossi', text: 'His invoice of 640 is paid.' })],
+    then: [fresh({ page: 'samRossi', text: "Sam Rossi's invoice of 640 is paid." })],
   }),
   sent({
     at: [41, 2],
@@ -1062,8 +1135,8 @@ export const MAYA_STORY: readonly StoryLine[] = [
     then: [
       changed({
         page: 'marcus',
-        from: 'His fee for the yearly return is 450.',
-        to: 'His fee for the yearly return is 520.',
+        from: "Marcus Bell's fee for the yearly return is 450.",
+        to: "Marcus Bell's fee for the yearly return is 520.",
         on: 44,
       }),
     ],
@@ -1074,7 +1147,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
     then: [
       same({
         page: 'marcus',
-        matches: 'His fee for the yearly return is 520.',
+        matches: "Marcus Bell's fee for the yearly return is 520.",
         why: 'The letter agrees with what the person said.',
       }),
     ],
@@ -1104,7 +1177,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
     then: [
       same({
         page: 'school',
-        matches: "Parents' evening is on September 17 at 18:00.",
+        matches: "Zoe's parents' evening is on September 17 at 18:00.",
         why: 'The calendar agrees with what the person said.',
       }),
     ],
@@ -1114,7 +1187,9 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [47, 1],
     text: 'Maya needs to finish the Halvorsen budget appendix before Friday.',
-    then: [fresh({ page: 'halvorsen', section: 'Open', text: 'Finish the budget appendix.', until: '2026-09-18' })],
+    then: [
+      fresh({ page: 'halvorsen', section: 'Open', text: 'Finish the Halvorsen budget appendix.', until: '2026-09-18' }),
+    ],
   }),
   said({
     at: [47, 2],
@@ -1148,7 +1223,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
     then: [
       fresh({ page: 'halvorsen', text: 'The proposal was sent on September 18.' }),
       ended({ page: 'halvorsen', text: 'The proposal is due on September 19.', on: 49 }),
-      ended({ page: 'halvorsen', text: 'Finish the budget appendix.', on: 49 }),
+      ended({ page: 'halvorsen', text: 'Finish the Halvorsen budget appendix.', on: 49 }),
     ],
   }),
   sent({
@@ -1168,7 +1243,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [50, 2],
     text: 'Hotel Lumbre refunded the deposit.',
-    then: [ended({ page: 'madrid', text: 'Hotel Lumbre has to refund the deposit of 120.', on: 50 })],
+    then: [ended({ page: 'madrid', text: 'Hotel Lumbre has to refund the Madrid trip deposit of 120.', on: 50 })],
   }),
 
   // Day 51
@@ -1210,14 +1285,20 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [53, 2],
     text: 'Priya approved two extra days of leave for the Madrid trip.',
-    then: [fresh({ page: 'madrid', section: 'Decided', text: 'Priya approved two extra days of leave.' })],
+    then: [
+      fresh({
+        page: 'madrid',
+        section: 'Decided',
+        text: 'Priya approved two extra days of leave for the Madrid trip.',
+      }),
+    ],
   }),
 
   // Day 54
   said({
     at: [54, 1],
     text: 'Maya sent the mortgage interest statement to Marcus.',
-    then: [ended({ page: 'taxes', text: 'Send Marcus the mortgage interest statement.', on: 54 })],
+    then: [ended({ page: 'taxes', text: 'Send Marcus the mortgage interest statement for the tax return.', on: 54 })],
   }),
   sent({
     at: [54, 2],
@@ -1234,19 +1315,19 @@ export const MAYA_STORY: readonly StoryLine[] = [
   said({
     at: [55, 2],
     text: 'Aiko will water the plants during the Madrid trip.',
-    then: [fresh({ page: 'madrid', section: 'Decided', text: 'Aiko waters the plants during the trip.' })],
+    then: [fresh({ page: 'madrid', section: 'Decided', text: 'Aiko waters the plants during the Madrid trip.' })],
   }),
 
   // Day 56
   said({
     at: [56, 1],
     text: "Maya paid Δήμητρα's final invoice of 2,400.",
-    then: [ended({ page: 'kitchen', text: 'Pay Δήμητρα the final 2,400.', on: 56 })],
+    then: [ended({ page: 'kitchen', text: 'Pay Δήμητρα the final 2,400 for the kitchen renovation.', on: 56 })],
   }),
   mail({
     at: [56, 2],
     text: 'Δήμητρα Παππά wrote that the renovation is signed off and the warranty runs for two years.',
-    then: [unsure({ page: 'kitchen', text: 'The warranty runs for two years.', seen: 56 })],
+    then: [unsure({ page: 'kitchen', text: 'The kitchen renovation warranty runs for two years.', seen: 56 })],
   }),
 
   // Day 57, September 26
@@ -1262,7 +1343,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
       fresh({
         page: 'madrid',
         section: 'Decided',
-        text: 'Dinner with Tomás and Inés is at Casa Lucio at 21:00.',
+        text: 'Dinner with Tomás and Inés in Madrid is at Casa Lucio at 21:00.',
         why: 'The person confirmed what an email had said.',
       }),
     ],

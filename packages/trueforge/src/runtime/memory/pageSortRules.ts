@@ -2,13 +2,25 @@
  * What the host lets the model do with a note. The model's decisions are checked against the vault and then held
  * to the note's origin, so a note cannot talk its way into more. The note's text is read for one thing only, and
  * only to take away: a line the model worded with a word found only in what Aman read is not marked as theirs.
+ * The host also holds each decision to the page of its subject: the person's own page and the assistant's page
+ * are never destinations, a new or changed line must be about the person or matter its page is about and name
+ * them, and one statement gets one home, so a fact cannot be copied onto a second page.
  */
+import { normalizeAliasText } from './aliasIndex';
 import { kindHasSection, type PageKind, type PageListing } from './memoryPages';
 import { holdsWordOnlyRead } from './memorySummarize';
 import type { SortDecision } from './pageSortDecisions';
 import type { SortableOrigin } from './pageSortOrigin';
-import { OWN_STATEMENT_SOURCES, type ShownPage, type ShownStatement, type ShownWords } from './pageSortPrompt';
-import { cleanLine, MAX_FACT_CHARS, MAX_NAME_CHARS, sameText } from './pageStatements';
+import {
+  OWN_STATEMENT_SOURCES,
+  pageKey,
+  type ShownPage,
+  type ShownStatement,
+  type ShownWords,
+  type SortIdentity,
+} from './pageSortPrompt';
+import { cleanLine, MAX_FACT_CHARS, MAX_NAME_CHARS, nearlySameText, sameText } from './pageStatements';
+import { QUERY_STOPWORDS } from './stopWords';
 
 /** One decision after the checks and the origin rules, with the page and statement it resolved to. */
 export interface PlannedDecision {
@@ -37,6 +49,10 @@ interface RuleContext {
   known: readonly PageListing[];
   /** What the prompt showed besides the note, split by whose words it is. */
   words: ShownWords;
+  /** The vault owner's and the assistant's names and pages, resolved by the prompt. */
+  identity: SortIdentity;
+  /** Every readable page's title and other names, by page key. */
+  pageNames: ReadonlyMap<string, { title: string; aliases: readonly string[] }>;
 }
 
 type Step = { ok: true; planned: PlannedDecision } | { ok: false; reason: string };
@@ -117,7 +133,9 @@ function alreadySaying({
   const page = shown.find(candidate => candidate.kind === kind && candidate.slug === about);
   return page?.statements.find(
     statement =>
-      statement.id !== undefined && statement.section !== 'Unconfirmed' && sameText({ a: statement.text, b: text }),
+      statement.id !== undefined &&
+      statement.section !== 'Unconfirmed' &&
+      nearlySameText({ a: statement.text, b: text }),
   );
 }
 
@@ -131,6 +149,388 @@ function sameDecision({
   reason: string;
 }): SortDecision | undefined {
   return target.id === undefined ? undefined : { decision: 'same', about, statement_id: target.id, reason };
+}
+
+/** A text as the words a name check reads, folded the way names are matched everywhere. */
+function nameTokens(text: string): string[] {
+  return (
+    normalizeAliasText(text)
+      .split(' ')
+      .filter(token => token !== '')
+      // A possessive still names its page, as the alias matching already holds: "Tomás's" names Tomás.
+      .map(token => (token.endsWith("'s") ? token.slice(0, -2) : token.endsWith("'") ? token.slice(0, -1) : token))
+  );
+}
+
+/** Whether a run of words appears in a text, word for word and in order. */
+function holdsRun({ tokens, run }: { tokens: readonly string[]; run: readonly string[] }): boolean {
+  if (run.length === 0 || run.length > tokens.length) {
+    return false;
+  }
+  for (let start = 0; start + run.length <= tokens.length; start += 1) {
+    if (run.every((word, offset) => tokens[start + offset] === word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether a statement names the subject of the page it is filed on. A person page is named by its title, by one
+ * of its other names, or by the person's given name. A matter page is named by a word of its title or other
+ * names that carries the topic. A statement that names neither is about something else, however often the page
+ * is shown and however often its name comes up in conversation.
+ */
+export function statementNamesItsPage({
+  text,
+  kind,
+  title,
+  aliases,
+}: {
+  text: string;
+  kind: PageKind;
+  title: string;
+  aliases: readonly string[];
+}): boolean {
+  const tokens = nameTokens(text);
+  if (kind === 'matter') {
+    const topics = new Set(
+      [title, ...aliases]
+        .flatMap(name => nameTokens(name))
+        .filter(token => token.length >= 3 && !QUERY_STOPWORDS.has(token)),
+    );
+    return tokens.some(token => topics.has(token));
+  }
+  const named = [title, ...aliases].some(name => holdsRun({ tokens, run: nameTokens(name) }));
+  const given = nameTokens(title)[0];
+  return named || (given !== undefined && given.length >= 2 && tokens.includes(given));
+}
+
+/**
+ * Verbs that make the name before them a participant rather than the subject of what follows: the person is
+ * the one who said it, or the one who passed a thing on. A name after one of the addressed verbs is the one
+ * spoken or written to, a participant the same way.
+ */
+const SPEAKING_VERBS: ReadonlySet<string> = new Set([
+  'told',
+  'said',
+  'says',
+  'asked',
+  'asks',
+  'mentioned',
+  'mentions',
+  'noted',
+  'notes',
+  'wrote',
+  'writes',
+  'emailed',
+  'emails',
+  'texted',
+  'texts',
+  'messaged',
+  'called',
+  'calls',
+  'reported',
+  'reports',
+  'explained',
+  'explains',
+  'replied',
+  'replies',
+  'answered',
+  'answers',
+  'claimed',
+  'claims',
+  'suggested',
+  'suggests',
+  'added',
+  'adds',
+  'announced',
+  'announces',
+  'reminded',
+  'reminds',
+  'thinks',
+  'thought',
+  'believes',
+  'believed',
+  'reckons',
+]);
+const PASSING_VERBS: ReadonlySet<string> = new Set([
+  'forwarded',
+  'forwards',
+  'sent',
+  'sends',
+  'handed',
+  'hands',
+  'gave',
+  'gives',
+  'passed',
+  'passes',
+  'delivered',
+  'delivers',
+  'mailed',
+  'mails',
+  'posted',
+  'posts',
+  'shared',
+  'shares',
+]);
+const ADDRESSED_VERBS: ReadonlySet<string> = new Set([
+  'told',
+  'asked',
+  'emailed',
+  'texted',
+  'messaged',
+  'called',
+  'wrote',
+  'reminded',
+]);
+
+/** Words for a document a person may pass on; a statement about one is about the document's matter. */
+const DOCUMENT_WORDS: ReadonlySet<string> = new Set([
+  'estimate',
+  'estimates',
+  'invoice',
+  'invoices',
+  'quote',
+  'quotes',
+  'quotation',
+  'form',
+  'forms',
+  'document',
+  'documents',
+  'report',
+  'reports',
+  'letter',
+  'letters',
+  'bill',
+  'bills',
+  'receipt',
+  'receipts',
+  'contract',
+  'contracts',
+  'application',
+  'applications',
+  'paperwork',
+  'agreement',
+  'agreements',
+  'certificate',
+  'certificates',
+  'permit',
+  'permits',
+  'licence',
+  'licences',
+  'license',
+  'licenses',
+  'file',
+  'files',
+]);
+
+/** One place a person's page is named in a statement, as the token span it covers. */
+interface NameMention {
+  page: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Every mention of a person's page in a statement's words: full names and other names as runs of words, and a
+ * given name as a single word where a fuller name does not already cover it.
+ */
+function personMentions({
+  tokens,
+  pageNames,
+}: {
+  tokens: readonly string[];
+  pageNames: RuleContext['pageNames'];
+}): NameMention[] {
+  const mentions: NameMention[] = [];
+  for (const [key, names] of pageNames) {
+    if (!key.startsWith('person/')) {
+      continue;
+    }
+    const covered = new Set<number>();
+    for (const name of [names.title, ...names.aliases]) {
+      const run = nameTokens(name);
+      if (run.length === 0) {
+        continue;
+      }
+      for (let start = 0; start + run.length <= tokens.length; start += 1) {
+        if (run.every((word, offset) => tokens[start + offset] === word)) {
+          mentions.push({ page: key, start, end: start + run.length });
+          for (let at = start; at < start + run.length; at += 1) {
+            covered.add(at);
+          }
+        }
+      }
+    }
+    const given = nameTokens(names.title)[0];
+    if (given !== undefined && given.length >= 2) {
+      tokens.forEach((token, at) => {
+        if (token === given && !covered.has(at)) {
+          mentions.push({ page: key, start: at, end: at + 1 });
+        }
+      });
+    }
+  }
+  return mentions;
+}
+
+/** Whether a mention names its person only as a participant: speaking, passing a thing on, or spoken to. */
+function mentionIsParticipant({ tokens, mention }: { tokens: readonly string[]; mention: NameMention }): boolean {
+  const after = tokens[mention.end];
+  const before = tokens[mention.start - 1];
+  return (
+    (after !== undefined && (SPEAKING_VERBS.has(after) || PASSING_VERBS.has(after))) ||
+    (before !== undefined && ADDRESSED_VERBS.has(before))
+  );
+}
+
+/**
+ * Whether a statement filed on a person's page is about another subject, though it names that person. It is,
+ * when every mention of the page's person names them only as a participant, the one who said it or passed it
+ * on or was spoken to, and the statement itself names what it is about instead: another person outside that
+ * frame, a matter by a topic word of its page, or a document. When the person's part cannot be told apart
+ * this way, the statement is not judged here and the naming check alone decides, so an unclear case keeps
+ * the page it was given rather than losing it on a guess.
+ */
+function statementAboutAnotherSubject({
+  text,
+  kind,
+  slug,
+  context,
+}: {
+  text: string;
+  kind: PageKind;
+  slug: string;
+  context: RuleContext;
+}): boolean {
+  if (kind !== 'person') {
+    return false;
+  }
+  const tokens = nameTokens(text);
+  const self = pageKey({ kind, slug });
+  const mentions = personMentions({ tokens, pageNames: context.pageNames });
+  const own = mentions.filter(mention => mention.page === self);
+  if (own.length === 0 || !own.every(mention => mentionIsParticipant({ tokens, mention }))) {
+    return false;
+  }
+  const overlapsOwn = (mention: NameMention): boolean =>
+    own.some(other => mention.start < other.end && other.start < mention.end);
+  const anotherPerson = mentions.some(
+    mention => mention.page !== self && !overlapsOwn(mention) && !mentionIsParticipant({ tokens, mention }),
+  );
+  if (anotherPerson) {
+    return true;
+  }
+  const topics = new Set<string>();
+  for (const [key, names] of context.pageNames) {
+    if (!key.startsWith('matter/')) {
+      continue;
+    }
+    for (const name of [names.title, ...names.aliases]) {
+      for (const token of nameTokens(name)) {
+        if (token.length >= 3 && !QUERY_STOPWORDS.has(token)) {
+          topics.add(token);
+        }
+      }
+    }
+  }
+  return tokens.some(token => topics.has(token) || DOCUMENT_WORDS.has(token));
+}
+
+/** Whether the page a decision names is one resolved identity page, when one was resolved. */
+function isIdentityPage(
+  page: { kind: PageKind; slug: string } | undefined,
+  target: { kind: PageKind; about: string },
+): boolean {
+  return page?.kind === target.kind && page.slug === target.about;
+}
+
+/**
+ * Why a decision may not go to this existing page at all, when it may not. The person's own page belongs to
+ * their profile, and the assistant only took part in the conversation: sorting never writes to either page.
+ */
+function blockedDestination({
+  about,
+  kind,
+  context,
+}: {
+  about: string;
+  kind: PageKind;
+  context: RuleContext;
+}): string | undefined {
+  const { identity } = context;
+  if (isIdentityPage(identity.personPage, { kind, about })) {
+    return "a decision files a fact on the person's own page, which sorting never writes";
+  }
+  if (isIdentityPage(identity.assistantPage, { kind, about })) {
+    return "a decision files a fact on the assistant's page, which sorting never writes";
+  }
+  return undefined;
+}
+
+/**
+ * Whether a folded page name is this person's name: their full name, or their given name alone. A new page is
+ * as often titled with the given name as with the whole name, and either title starts the same page.
+ */
+function nameStartsTheirPage({ folded, name }: { folded: string; name: string }): boolean {
+  const foldedName = normalizeAliasText(name);
+  if (folded === foldedName) {
+    return true;
+  }
+  const given = foldedName.split(' ')[0];
+  return given !== undefined && given !== '' && folded === given;
+}
+
+/** Why a decision may not start this page, when it may not: a new page for the person or for the assistant. */
+function blockedNewPage({
+  decision,
+  kind,
+  context,
+}: {
+  decision: Extract<SortDecision, { decision: 'new' | 'unconfirmed' }>;
+  kind: PageKind;
+  context: RuleContext;
+}): string | undefined {
+  if (kind !== 'person') {
+    return undefined;
+  }
+  const { identity } = context;
+  const folded = normalizeAliasText(decision.title ?? decision.about.replaceAll('-', ' '));
+  if (
+    identity.personName !== undefined &&
+    folded !== '' &&
+    nameStartsTheirPage({ folded, name: identity.personName })
+  ) {
+    return 'a decision starts a page for the person themselves';
+  }
+  if (
+    identity.assistantName !== undefined &&
+    folded !== '' &&
+    nameStartsTheirPage({ folded, name: identity.assistantName })
+  ) {
+    return 'a decision starts a page for the assistant';
+  }
+  return undefined;
+}
+
+/** A current statement on another shown page that already says this, if any. */
+function saidOnAnotherPage({
+  shown,
+  kind,
+  about,
+  text,
+}: {
+  shown: readonly ShownPage[];
+  kind: PageKind;
+  about: string;
+  text: string;
+}): boolean {
+  return shown.some(
+    page =>
+      !(page.kind === kind && page.slug === about) &&
+      page.statements.some(statement => statement.id !== undefined && nearlySameText({ a: statement.text, b: text })),
+  );
 }
 
 /** `same`, `changed` and `ended`: they name a statement the prompt showed. */
@@ -151,6 +551,10 @@ function ruleExisting({
   }
   const { page, statement } = found;
   const kind = page.kind;
+  const blocked = blockedDestination({ about: decision.about, kind, context });
+  if (blocked !== undefined) {
+    return refuse(blocked);
+  }
   if (decision.decision === 'same') {
     return { ok: true, planned: { decision, kind, target: statement, inferred: false } };
   }
@@ -160,6 +564,39 @@ function ruleExisting({
       : undefined;
   if (decision.decision === 'changed' && newText === undefined) {
     return refuse('a new statement is not a plain single line');
+  }
+  // A change is held to the checks a new line is held to: its words must be about the page's subject, and
+  // they may not copy a statement this page or another page already holds.
+  if (decision.decision === 'changed' && newText !== undefined) {
+    const names = context.pageNames.get(pageKey({ kind, slug: decision.about }));
+    if (
+      !statementNamesItsPage({
+        text: newText,
+        kind,
+        title: names?.title ?? page.title,
+        aliases: names?.aliases ?? [],
+      })
+    ) {
+      return refuse('a changed fact does not name the person or matter its page is about');
+    }
+    if (statementAboutAnotherSubject({ text: newText, kind, slug: decision.about, context })) {
+      return refuse(
+        'a changed fact names the person of its page only as the one who said it or passed it on, and is about another subject',
+      );
+    }
+    const copied = page.statements.find(
+      candidate =>
+        candidate.id !== undefined &&
+        candidate.id !== statement.id &&
+        candidate.section !== 'Unconfirmed' &&
+        nearlySameText({ a: candidate.text, b: newText }),
+    );
+    if (copied !== undefined) {
+      return refuse('a changed fact copies a statement its page already holds');
+    }
+    if (saidOnAnotherPage({ shown, kind, about: decision.about, text: newText })) {
+      return refuse('a fact is filed on a second page when a page already says it');
+    }
   }
   const mayTouch =
     origin.kind === 'own_words' || (origin.kind === 'sent_mail' && !OWN_STATEMENT_SOURCES.has(statement.src));
@@ -245,11 +682,40 @@ function ruleNew({
   ) {
     return refuse(`a ${kind} page has no section called ${decision.section}`);
   }
+  const blocked =
+    existing.length === 0
+      ? blockedNewPage({ decision, kind, context })
+      : blockedDestination({ about: decision.about, kind, context });
+  if (blocked !== undefined) {
+    return refuse(blocked);
+  }
   const said = alreadySaying({ shown, kind, about: decision.about, text });
   const same =
     said === undefined ? undefined : sameDecision({ about: decision.about, target: said, reason: decision.reason });
   if (said !== undefined && same !== undefined) {
     return { ok: true, planned: { decision: same, kind, target: said, inferred: false } };
+  }
+  if (saidOnAnotherPage({ shown, kind, about: decision.about, text })) {
+    return refuse('a fact is filed on a second page when a page already says it');
+  }
+  // Every new line must name the person or matter its page is about, a line about how the person writes to
+  // someone included: the section a line is filed under never exempts it from the check. Naming the person
+  // is not enough on its own when the line is about another subject and names them only as a participant.
+  const names = context.pageNames.get(pageKey({ kind, slug: decision.about }));
+  const namesSubject = statementNamesItsPage({
+    text,
+    kind,
+    // The name the page carries or will carry: its own title, or the title the host kept, or its slug.
+    title: names?.title ?? title ?? decision.about.replaceAll('-', ' '),
+    aliases: names?.aliases ?? [],
+  });
+  if (!namesSubject) {
+    return refuse('a new fact does not name the person or matter its page is about');
+  }
+  if (statementAboutAnotherSubject({ text, kind, slug: decision.about, context })) {
+    return refuse(
+      'a new fact names the person of its page only as the one who said it or passed it on, and is about another subject',
+    );
   }
   const inferred = !wordedInOwnWords({ text, context });
   const confirmed =
@@ -298,13 +764,15 @@ function ruleNew({
  * - A message the person sent: a new fact stands only as a line about how they write to someone; any other new
  *   fact is unconfirmed. It cannot change or end a statement the person said or wrote.
  * - Anything else: a new, changed or ended fact is only ever an unconfirmed line, and nothing confirmed is touched.
- * A fact a page already says is `same`.
+ * A fact a page already says is `same`. Whatever the origin, no decision goes to the person's own page or the
+ * assistant's page, a new line names the subject of its page, and the same line is never filed on two pages.
  */
 export function ruleDecisions({
   decisions,
   ...context
 }: { decisions: readonly SortDecision[] } & RuleContext): RuledReply {
   const planned: PlannedDecision[] = [];
+  const filed: { text: string; about: string }[] = [];
   for (const decision of decisions) {
     let step: Step;
     if (decision.decision === 'ignore') {
@@ -316,6 +784,23 @@ export function ruleDecisions({
     }
     if (!step.ok) {
       return step;
+    }
+    // One statement gets one home within a reply as well: a fact filed, waited or changed into being by one
+    // decision may not be filed on another page by a second one, in the same words or nearly the same.
+    const plannedDecision = step.planned.decision;
+    const filedText =
+      plannedDecision.decision === 'new' || plannedDecision.decision === 'unconfirmed'
+        ? { text: plannedDecision.text, about: plannedDecision.about }
+        : plannedDecision.decision === 'changed'
+          ? { text: plannedDecision.new_text, about: plannedDecision.about }
+          : undefined;
+    if (filedText !== undefined) {
+      if (
+        filed.some(entry => entry.about !== filedText.about && nearlySameText({ a: entry.text, b: filedText.text }))
+      ) {
+        return { ok: false, reason: 'the same fact is filed on two pages' };
+      }
+      filed.push(filedText);
     }
     planned.push(step.planned);
   }

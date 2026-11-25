@@ -208,6 +208,7 @@ describe('MemoryPagesPanel', () => {
     const unconfirmed = screen.getByRole('region', { name: 'Unconfirmed' });
     expect(within(unconfirmed).getByText(/You do not need to do anything/)).toBeInTheDocument();
     expect(within(unconfirmed).getByText(/worked them out from your conversations/)).toBeInTheDocument();
+    expect(within(unconfirmed).queryByText(/guess/i)).not.toBeInTheDocument();
     expect(within(unconfirmed).getByText('External source: read content')).toBeInTheDocument();
     expect(within(unconfirmed).queryByRole('button', { name: /^Confirm:/ })).not.toBeInTheDocument();
     expect(within(unconfirmed).queryByRole('button', { name: /^Dismiss:/ })).not.toBeInTheDocument();
