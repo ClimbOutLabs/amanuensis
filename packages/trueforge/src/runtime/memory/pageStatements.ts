@@ -119,8 +119,10 @@ function sameMembers({ a, b }: { a: ReadonlySet<string>; b: ReadonlySet<string> 
  * Whether two lines say the same fact in nearly the same words, not only in identical ones. The content words
  * of the two lines, the words that are left once the grammar words are dropped, must largely be the same set:
  * at least three shared, nearly all of the smaller line's words in the other, and at least half of the words
- * of the two together shared. A line that states a number the other does not, as a digit or as a word, is a
- * different fact however close the rest is, so a changed fee or a moved date is never read as a copy.
+ * of the two together shared. The shared words must also come in the same order in both lines: one fact
+ * phrased for two pages, with its subject and its setting swapped around, is two lines about one fact, not
+ * one line copied. A line that states a number the other does not, as a digit or as a word, is a different
+ * fact however close the rest is, so a changed fee or a moved date is never read as a copy.
  */
 export function nearlySameText({ a, b }: { a: string; b: string }): boolean {
   if (sameText({ a, b })) {
@@ -145,7 +147,12 @@ export function nearlySameText({ a, b }: { a: string; b: string }): boolean {
     }
   }
   const together = contentA.size + contentB.size - shared;
-  return shared >= 3 && shared / Math.min(contentA.size, contentB.size) >= 0.85 && shared / together >= 0.5;
+  if (shared < 3 || shared / Math.min(contentA.size, contentB.size) < 0.85 || shared / together < 0.5) {
+    return false;
+  }
+  const inOrderA = wordsA.filter(word => !FACT_STOPWORDS.has(word) && contentB.has(word));
+  const inOrderB = wordsB.filter(word => !FACT_STOPWORDS.has(word) && contentA.has(word));
+  return inOrderA.length === inOrderB.length && inOrderA.every((word, index) => word === inOrderB[index]);
 }
 
 /** The current facts on a page (anything not already under Earlier) whose text is this text. */

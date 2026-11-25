@@ -829,7 +829,11 @@ export const MAYA_STORY: readonly StoryLine[] = [
     at: [28, 3],
     text: 'To nora@example.com, subject "Flights": W, flights are booked. We sit in 14C and 14D. x',
     then: [
-      same({ page: 'nora', matches: 'Opens with "W," and signs off "x".', why: 'The same way of writing as before.' }),
+      same({
+        page: 'nora',
+        matches: 'Opens messages to Nora with "W," and signs off "x".',
+        why: 'The same way of writing as before.',
+      }),
     ],
   }),
 
@@ -1143,7 +1147,7 @@ export const MAYA_STORY: readonly StoryLine[] = [
     then: [
       same({
         page: 'marcus',
-        matches: 'His fee for the yearly return is 520.',
+        matches: "Marcus Bell's fee for the yearly return is 520.",
         why: 'The letter agrees with what the person said.',
       }),
     ],

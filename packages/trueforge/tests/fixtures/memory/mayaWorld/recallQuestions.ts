@@ -253,7 +253,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Write Nora an email about dinner on Friday.',
     category: 'how_you_write_to_them',
     expected_text: 'W, your train to the airport',
-    page_wording: ['Opens with "W,"'],
+    page_wording: ['Opens messages to Nora with "W,"'],
     source_entry_ids: ['d08_e02'],
   },
 
