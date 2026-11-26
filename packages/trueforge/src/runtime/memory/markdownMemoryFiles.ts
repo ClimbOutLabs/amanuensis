@@ -678,13 +678,20 @@ function keepParsedDailyLog({ filePath, parsed }: { filePath: string; parsed: Pa
 }
 
 /** True when a filesystem error says the path simply is not there, as apart from being unreadable. */
+function pathErrorCode(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined;
+}
+
 function isMissingPathError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
-  );
+  const code = pathErrorCode(error);
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+/** True only when the path does not exist at all, as apart from a path that exists in the wrong shape. */
+function isNonexistentPathError(error: unknown): boolean {
+  return pathErrorCode(error) === 'ENOENT';
 }
 
 /** One daily log's read: its entries, and whether the file was there but could not be read. */
@@ -760,6 +767,12 @@ export async function scanNamespaceEntries(options: {
   baseDir: string;
   namespace: string;
   maxDailyFiles: number;
+  /**
+   * The last daily file day (`YYYY-MM-DD`) the scan may read. Files dated after it are left
+   * out before the `maxDailyFiles` bound is applied, so a future-dated file can neither enter
+   * a window that ends earlier nor push a file inside the window out of the scan.
+   */
+  latestDailyFile?: string | undefined;
   resolveTombstones?: boolean;
   /**
    * Told the name of each daily file that was listed but could not be read. Left out, such a
@@ -789,14 +802,20 @@ export async function scanNamespaceEntries(options: {
   let files: string[] = [];
   try {
     files = (await readdir(path.join(dir, 'memory')))
-      .filter(name => DAILY_LOG_FILE_PATTERN.test(name))
+      .filter(
+        name =>
+          DAILY_LOG_FILE_PATTERN.test(name) &&
+          (options.latestDailyFile === undefined || name.slice(0, 10) <= options.latestDailyFile),
+      )
       .sort()
       .reverse()
       .slice(0, options.maxDailyFiles);
   } catch (error) {
-    // Missing daily directory is normal for a fresh namespace. Any other failure to list it
-    // leaves the scan empty for a reason a caller may need to know about.
-    if (!isMissingPathError(error)) {
+    // A daily directory that was never made is normal for a fresh namespace. Any other failure
+    // to list it leaves the scan empty for a reason a caller may need to know about: a path
+    // that is there but is a file rather than a folder (ENOTDIR) is a store in the wrong
+    // shape, not an empty one, so it is reported like any other listing failure.
+    if (!isNonexistentPathError(error)) {
       options.onDailyListingUnreadable?.();
     }
   }

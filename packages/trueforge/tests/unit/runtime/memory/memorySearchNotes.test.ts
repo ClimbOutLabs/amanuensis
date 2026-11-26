@@ -1,14 +1,14 @@
 import { createSentinelHostContext, defaultSentinelServices, execFileRunner } from '@truefoundry/trueforge-core/core';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
 
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { estimateTokens } from '../../../../src/runtime/memory/markdownMemoryFiles';
-import type { RecallItem, RecallOutcome } from '../../../../src/runtime/memory/memoryClient';
+import type { RecallItem, SearchNotesOutcome } from '../../../../src/runtime/memory/memoryClient';
 import { MemoryPagesToolSet } from '../../../../src/runtime/memory/memoryPagesTools';
 import { TurnReadWatch } from '../../../../src/runtime/memory/turnReadWatch';
 
@@ -56,7 +56,7 @@ async function retainNote(
 async function search(
   client: MarkdownMemoryClient,
   params: { query: string; maxTokens?: number; maxItems?: number; currentSessionId?: string },
-): Promise<RecallOutcome> {
+): Promise<SearchNotesOutcome> {
   const outcome = await client.searchNotes?.({
     query: params.query,
     today: TODAY,
@@ -71,11 +71,18 @@ async function search(
   return outcome;
 }
 
-function resultsOf(outcome: RecallOutcome): RecallItem[] {
+function resultsOf(outcome: SearchNotesOutcome): RecallItem[] {
   if (!outcome.ok) {
     throw new Error(`the search failed: ${outcome.reason}`);
   }
   return outcome.results;
+}
+
+function unshownOf(outcome: SearchNotesOutcome): number {
+  if (!outcome.ok) {
+    throw new Error(`the search failed: ${outcome.reason}`);
+  }
+  return outcome.unshownMatches;
 }
 
 describe('searching the daily notes through the markdown client', () => {
@@ -112,8 +119,16 @@ describe('searching the daily notes through the markdown client', () => {
 
   it('searches the last 14 days: a note from 14 days ago is found, one from 15 days ago is not', async () => {
     const client = new MarkdownMemoryClient({ baseDir, namespace: 'tenant-1', vaultScope: undefined });
-    await retainNote(client, { content: 'The Kestrel-9 form is still at the office.', day: dayBefore(14), sessionId: 'chat-a' });
-    await retainNote(client, { content: 'The Kestrel-9 form was first mentioned here.', day: dayBefore(15), sessionId: 'chat-a' });
+    await retainNote(client, {
+      content: 'The Kestrel-9 form is still at the office.',
+      day: dayBefore(14),
+      sessionId: 'chat-a',
+    });
+    await retainNote(client, {
+      content: 'The Kestrel-9 form was first mentioned here.',
+      day: dayBefore(15),
+      sessionId: 'chat-a',
+    });
 
     const results = resultsOf(await search(client, { query: 'Kestrel-9' }));
     expect(results).toHaveLength(1);
@@ -136,10 +151,68 @@ describe('searching the daily notes through the markdown client', () => {
     // The budget buys the whole rendered answer: the opening line, and for each note its day
     // line as well as its text. One of these notes rendered whole costs more than 50 tokens, so
     // a budget of 50 buys no note rather than an answer that runs past the budget, a budget of
-    // 80 buys exactly one, and a budget of 130 exactly two.
-    expect(resultsOf(await search(client, { query: 'Juniper-47', maxTokens: 50 }))).toHaveLength(0);
-    expect(resultsOf(await search(client, { query: 'Juniper-47', maxTokens: 80 }))).toHaveLength(1);
+    // 80 buys exactly one, and a budget of 130 exactly two. Notes the budget left out are
+    // counted as matches left unshown, never mistaken for no match.
+    const tightest = await search(client, { query: 'Juniper-47', maxTokens: 50 });
+    expect(resultsOf(tightest)).toHaveLength(0);
+    expect(unshownOf(tightest)).toBe(3);
+    const oneShown = await search(client, { query: 'Juniper-47', maxTokens: 80 });
+    expect(resultsOf(oneShown)).toHaveLength(1);
+    expect(unshownOf(oneShown)).toBe(2);
     expect(resultsOf(await search(client, { query: 'Juniper-47', maxTokens: 130 }))).toHaveLength(2);
+  });
+
+  it('walks past a match too long to show and shows a shorter match behind it', async () => {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: 'tenant-1', vaultScope: undefined });
+    const filler =
+      'The crate sits on the third shelf of the north store room beside the paint tins, the rope and the folded tarpaulins, and nobody has moved it since the spring clean.';
+    await retainNote(client, {
+      content: `Juniper-47 needs the long bracket. ${filler} ${filler} ${filler}`,
+      day: dayBefore(1),
+      sessionId: 'chat-a',
+    });
+    await retainNote(client, {
+      content: 'Juniper-47 needs the short bracket.',
+      day: dayBefore(1),
+      sessionId: 'chat-a',
+    });
+
+    // Both notes match with the same standing, so the long one is offered first. A budget that
+    // cannot hold it can still hold the short one, and the long one is counted as unshown.
+    const outcome = await search(client, { query: 'Juniper-47', maxTokens: 100 });
+    const results = resultsOf(outcome);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.text).toContain('short bracket');
+    expect(unshownOf(outcome)).toBe(1);
+  });
+
+  it('never returns a note dated after today, though its file sits inside the scanned days', async () => {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: 'tenant-1', vaultScope: undefined });
+    await retainNote(client, {
+      content: 'The Kestrel-9 form is still at the office.',
+      day: dayBefore(1),
+      sessionId: 'chat-a',
+    });
+    await retainNote(client, {
+      content: 'The Kestrel-9 form will be collected tomorrow.',
+      day: dayBefore(-1),
+      sessionId: 'chat-a',
+    });
+
+    const results = resultsOf(await search(client, { query: 'Kestrel-9' }));
+    expect(results).toHaveLength(1);
+    expect(results[0]?.text).toContain('still at the office');
+  });
+
+  it('answers with a failure, not an empty answer, when the daily folder is a file rather than a folder', async () => {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: 'tenant-2', vaultScope: undefined });
+    // A regular file standing where the daily folder belongs: the store is in the wrong shape,
+    // so the search must say it could not read, never that nothing matched.
+    await mkdir(path.join(baseDir, 'tenant-2'), { recursive: true });
+    await writeFile(path.join(baseDir, 'tenant-2', 'memory'), 'not a folder');
+
+    const outcome = await search(client, { query: 'Juniper-47' });
+    expect(outcome.ok).toBe(false);
   });
 
   it('answers with a failure, not an empty answer, when a daily file in the window cannot be read', async () => {
@@ -226,7 +299,7 @@ function buildTools({
   searchNotes,
 }: {
   keepsNothing?: boolean;
-  searchNotes?: (params: { query: string; today: string }) => Promise<RecallOutcome>;
+  searchNotes?: (params: { query: string; today: string }) => Promise<SearchNotesOutcome>;
 } = {}) {
   const watch = new TurnReadWatch();
   watch.observe([{ role: 'user', content: 'Any news on my delivery?' }]);
@@ -272,7 +345,7 @@ describe('the search_memory_notes tool', () => {
     const { tools } = buildTools({
       searchNotes: params => {
         seen.push(params);
-        return Promise.resolve({ ok: true, results: [FOUND] });
+        return Promise.resolve({ ok: true, results: [FOUND], unshownMatches: 0, withheldByScreen: 0 });
       },
     });
 
@@ -307,16 +380,52 @@ describe('the search_memory_notes tool', () => {
   });
 
   it('says plainly that nothing matched, and names the days it searched', async () => {
-    const { tools } = buildTools({ searchNotes: () => Promise.resolve({ ok: true, results: [] }) });
+    const { tools } = buildTools({
+      searchNotes: () => Promise.resolve({ ok: true, results: [], unshownMatches: 0, withheldByScreen: 0 }),
+    });
 
     const answer = await callSearch(tools, 'Juniper-47');
     expect(answer.isError).toBe(false);
     expect(answer.text).toContain('No notes from the last 14 days mention "Juniper-47"');
   });
 
+  it('never says nothing matched when matches existed but none could be shown', async () => {
+    const { tools } = buildTools({
+      searchNotes: () => Promise.resolve({ ok: true, results: [], unshownMatches: 2, withheldByScreen: 0 }),
+    });
+
+    const answer = await callSearch(tools, 'Juniper-47');
+    expect(answer.isError).toBe(false);
+    expect(answer.text).not.toContain('No notes from the last 14 days mention');
+    expect(answer.text).toContain('do mention "Juniper-47"');
+    expect(answer.text).toContain('None of them fit in the space this search may show.');
+  });
+
+  it('never says nothing matched when the safety screen withheld every match', async () => {
+    const { tools } = buildTools({
+      searchNotes: () => Promise.resolve({ ok: true, results: [], unshownMatches: 0, withheldByScreen: 1 }),
+    });
+
+    const answer = await callSearch(tools, 'Juniper-47');
+    expect(answer.isError).toBe(false);
+    expect(answer.text).not.toContain('No notes from the last 14 days mention');
+    expect(answer.text).toContain('The safety screen withheld one of them');
+  });
+
+  it('says a matching note was withheld beside the notes it does show', async () => {
+    const { tools } = buildTools({
+      searchNotes: () => Promise.resolve({ ok: true, results: [FOUND], unshownMatches: 1, withheldByScreen: 1 }),
+    });
+
+    const answer = await callSearch(tools, 'Juniper-47');
+    expect(answer.isError).toBe(false);
+    expect(answer.text).toContain('Shipment Juniper-47 needs the short mounting bracket.');
+    expect(answer.text).toContain('One more matching note was withheld by the safety screen.');
+  });
+
   it('answers a failed search with an error, never with the no-match words', async () => {
     const { tools } = buildTools({
-      searchNotes: (): Promise<RecallOutcome> =>
+      searchNotes: (): Promise<SearchNotesOutcome> =>
         Promise.resolve({ ok: false, code: 'request_failed', reason: 'the log could not be read' }),
     });
 
@@ -328,14 +437,18 @@ describe('the search_memory_notes tool', () => {
 
   it('marks the turn as holding outside text when a found note is not the person\u2019s own words', async () => {
     const read: RecallItem = { ...FOUND, metadata: { origin: 'tool_ingested' } };
-    const { tools, watch } = buildTools({ searchNotes: () => Promise.resolve({ ok: true, results: [read] }) });
+    const { tools, watch } = buildTools({
+      searchNotes: () => Promise.resolve({ ok: true, results: [read], unshownMatches: 0, withheldByScreen: 0 }),
+    });
 
     await callSearch(tools, 'Juniper-47');
     expect(watch.reason).toBe('memory_holds_outside_text');
   });
 
   it('leaves the turn unmarked when every found note is the person\u2019s own words', async () => {
-    const { tools, watch } = buildTools({ searchNotes: () => Promise.resolve({ ok: true, results: [FOUND] }) });
+    const { tools, watch } = buildTools({
+      searchNotes: () => Promise.resolve({ ok: true, results: [FOUND], unshownMatches: 0, withheldByScreen: 0 }),
+    });
 
     await callSearch(tools, 'Juniper-47');
     expect(watch.reason).toBeUndefined();
@@ -344,7 +457,7 @@ describe('the search_memory_notes tool', () => {
   it('is not offered in a private chat', async () => {
     const { tools } = buildTools({
       keepsNothing: true,
-      searchNotes: () => Promise.resolve({ ok: true, results: [FOUND] }),
+      searchNotes: () => Promise.resolve({ ok: true, results: [FOUND], unshownMatches: 0, withheldByScreen: 0 }),
     });
 
     expect(await toolNames(tools)).not.toContain('search_memory_notes');

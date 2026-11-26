@@ -90,6 +90,7 @@ import {
   type RetainItem,
   type RetainOutcome,
   type RetryOperationOutcome,
+  type SearchNotesOutcome,
 } from './memoryClient';
 import { MISSING_ORIGIN_REASON, everyItemNamesOrigin } from './memoryOrigin';
 import { loadPagesForMessage, pageLineShownText, sanitizeMemoryLine } from './memoryPageLoader';
@@ -146,6 +147,16 @@ function firstDayInSearchWindow(today: string): string {
   return new Date(Date.parse(`${today}T00:00:00Z`) - SEARCH_NOTES_WINDOW_DAYS * SEARCH_WINDOW_DAY_MS)
     .toISOString()
     .slice(0, 10);
+}
+
+/**
+ * Whether a daily file belongs to the search window: its day on or after the window's first
+ * day and on or before today. A file dated after today is outside the window the search
+ * promises, however it came to be there.
+ */
+function dailyFileInSearchWindow(input: { file: string; firstDay: string; today: string }): boolean {
+  const day = input.file.slice(0, 10);
+  return day >= input.firstDay && day <= input.today;
 }
 
 /**
@@ -368,9 +379,12 @@ export class MarkdownMemoryClient implements MemoryClient {
    *
    * The budget buys the whole answer the tool renders, not the note text alone: the opening line,
    * and for each note the line naming its day, whose words it is and where it is kept, are charged
-   * beside the note itself, and recall's item cap applies beside the token budget. A daily file
-   * inside the window that cannot be read fails the search, because it may hold the very note
-   * being searched for; it is never reported as a file with no match in it.
+   * beside the note itself, and recall's item cap applies beside the token budget. A match the
+   * allowance cannot show never ends the search and never reads as no match: the search walks
+   * past it to a shorter match that may still fit, and counts it as a match left unshown, so the
+   * answer can tell a search that found nothing from one that found more than it could show.
+   * A daily file inside the window that cannot be read fails the search, because it may hold
+   * the very note being searched for; it is never reported as a file with no match in it.
    */
   async searchNotes(params: {
     query: string;
@@ -379,7 +393,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     maxItems: number;
     timeoutMs: number;
     currentSessionId?: string | undefined;
-  }): Promise<RecallOutcome> {
+  }): Promise<SearchNotesOutcome> {
     try {
       const budget = Math.max(params.maxTokens, 0);
       const maxItems = Math.max(params.maxItems, 0);
@@ -409,7 +423,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         tenantNamespace: this.namespace,
         scope: this.vaultScope,
       });
-      let listingUnreadable = false;
+      const unreadableListings: string[] = [];
       const unreadableFiles: string[] = [];
       const vaults = await Promise.all(
         readable.map(async namespace => {
@@ -417,21 +431,30 @@ export class MarkdownMemoryClient implements MemoryClient {
             baseDir: this.baseDir,
             namespace,
             maxDailyFiles: SEARCH_NOTES_WINDOW_DAYS + 1,
+            latestDailyFile: params.today,
             resolveTombstones: true,
             onDailyFileUnreadable: file => {
               unreadableFiles.push(file);
             },
             onDailyListingUnreadable: () => {
-              listingUnreadable = true;
+              unreadableListings.push(namespace);
             },
           });
           return {
             namespace: sanitizeNamespace(namespace),
-            scan: { ...scan, entries: scan.entries.filter(entry => entry.file.slice(0, 10) >= since) },
+            scan: {
+              ...scan,
+              entries: scan.entries.filter(entry =>
+                dailyFileInSearchWindow({ file: entry.file, firstDay: since, today: params.today }),
+              ),
+            },
           };
         }),
       );
-      if (listingUnreadable || unreadableFiles.some(file => file.slice(0, 10) >= since)) {
+      if (
+        unreadableListings.length > 0 ||
+        unreadableFiles.some(file => dailyFileInSearchWindow({ file, firstDay: since, today: params.today }))
+      ) {
         return failure('markdown note search could not read every daily file in its window');
       }
       const rankedLists = await Promise.all(
@@ -448,6 +471,7 @@ export class MarkdownMemoryClient implements MemoryClient {
       );
       // The same thing saved on several days is shown once, as its best-ranked copy, as in recall.
       const shown = new Set<string>();
+      let unshownMatches = 0;
       for (const item of interleaveRanked(rankedLists)) {
         const body = normalizedEntryBody(item.text);
         if (shown.has(body)) {
@@ -455,18 +479,18 @@ export class MarkdownMemoryClient implements MemoryClient {
         }
         shown.add(body);
         const occurredAt = entryOccurredAt(item);
-        const ok = take({
+        const taken = take({
           id: item.id,
           text: entryRecallText(item.text),
           ...(occurredAt !== undefined && { occurred_start: occurredAt }),
           metadata: entryMetadata(item.text),
         });
-        if (!ok) {
-          break;
+        if (!taken) {
+          unshownMatches += 1;
         }
       }
 
-      return { ok: true, results };
+      return { ok: true, results, unshownMatches, withheldByScreen: 0 };
     } catch (error) {
       return failure(failureReason('markdown note search failed', error));
     }

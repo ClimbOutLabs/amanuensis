@@ -35,6 +35,17 @@ export function timeoutFailure(timeoutMs: number): MemoryFailure {
 
 export type RecallOutcome = { ok: true; results: RecallItem[] } | MemoryFailure;
 
+/**
+ * A note search's answer. `results` holds the notes the search may show, best first, fitted to
+ * the search's allowance. `unshownMatches` counts notes that matched but were left out because
+ * showing them would have passed the allowance, so a caller can tell a search that found
+ * nothing from one that found more than it could show. `withheldByScreen` counts matched notes
+ * the recall screen withheld before they could be shown; the store itself never screens, so it
+ * reports 0, and the host binding that screens a search's results reports its own count here.
+ */
+export type SearchNotesOutcome =
+  { ok: true; results: RecallItem[]; unshownMatches: number; withheldByScreen: number } | MemoryFailure;
+
 export interface RetainItem {
   content: string;
   timestamp: string;
@@ -102,7 +113,7 @@ export interface MemoryClient {
     timeoutMs: number;
     /** The chat being answered: notes retained from it are never returned. */
     currentSessionId?: string | undefined;
-  }): Promise<RecallOutcome>;
+  }): Promise<SearchNotesOutcome>;
 
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;
 

@@ -220,14 +220,17 @@ describe('a call that read the stored memory pages', () => {
     expect(callReadsMemoryPages(storedCall({ name, stamp: OWN_TOOL }))).toBe(true);
   });
 
-  it.each(['read_page', 'list_pages', 'search_memory_notes'])('counts a %s call reached through the call_tool wrapper', tool_name => {
-    const call = storedCall({
-      name: 'call_tool',
-      args: { mcp_server: 'memory_pages', tool_name, input: {} },
-      stamp: OWN_TOOL,
-    });
-    expect(callReadsMemoryPages(call)).toBe(true);
-  });
+  it.each(['read_page', 'list_pages', 'search_memory_notes'])(
+    'counts a %s call reached through the call_tool wrapper',
+    tool_name => {
+      const call = storedCall({
+        name: 'call_tool',
+        args: { mcp_server: 'memory_pages', tool_name, input: {} },
+        stamp: OWN_TOOL,
+      });
+      expect(callReadsMemoryPages(call)).toBe(true);
+    },
+  );
 
   it.each(['read_page', 'list_pages', 'search_memory_notes'])(
     'does not count a %s call wrapped for a server that is not the memory pages',

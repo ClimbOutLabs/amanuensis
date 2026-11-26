@@ -30,10 +30,10 @@ import { z } from 'zod';
 import { redactSecretShapes } from '../../dataExport/secretScrub';
 import { loadAliasIndex, matchAliases, pagesNamed } from './aliasIndex';
 import { localDay } from './localDay';
-import { recalledItemSourceLabel } from './memoryCapability';
-import { estimateTokens } from './markdownMemoryFiles';
 import { SEARCH_NOTES_WINDOW_DAYS, searchNotesOpeningLine } from './markdownMemoryClient';
-import type { RecallItem, RecallOutcome } from './memoryClient';
+import { estimateTokens } from './markdownMemoryFiles';
+import { recalledItemSourceLabel } from './memoryCapability';
+import type { RecallItem, SearchNotesOutcome } from './memoryClient';
 import { isPersonOrigin } from './memoryOrigin';
 import {
   lineSide,
@@ -350,7 +350,7 @@ export interface MemoryPagesToolSetOptions {
    * Searches this chat's daily memory notes for a term, over the window ending on the given day.
    * Absent where the memory backend keeps no searchable daily notes; then the search tool is not offered.
    */
-  searchNotes?: ((params: { query: string; today: string }) => Promise<RecallOutcome>) | undefined;
+  searchNotes?: ((params: { query: string; today: string }) => Promise<SearchNotesOutcome>) | undefined;
   /** The person's name, which is not counted when a fact is compared with what they typed. */
   personName: string | undefined;
   /** Makes fact ids; tests supply their own. */
@@ -565,9 +565,31 @@ export class MemoryPagesToolSet extends LocalToolMCP {
       // counts as outside text for the rest of the turn.
       watch.noteBlock({ holdsOutsideText: outcome.results.some(item => !isPersonOrigin(item.metadata)) });
       if (outcome.results.length === 0) {
-        return toolResultResponse({
-          text: `No notes from the last ${String(SEARCH_NOTES_WINDOW_DAYS)} days mention "${input.query}". Tell the user in one plain line that you searched the notes of the last ${String(SEARCH_NOTES_WINDOW_DAYS)} days and found nothing.`,
-        });
+        // An empty answer says which kind of empty it is. Only a search that matched nothing
+        // may be told to the user as "found nothing": notes the safety screen withheld and
+        // notes the search's allowance could not show are matches, and are reported as such.
+        if (outcome.withheldByScreen === 0 && outcome.unshownMatches === 0) {
+          return toolResultResponse({
+            text: `No notes from the last ${String(SEARCH_NOTES_WINDOW_DAYS)} days mention "${input.query}". Tell the user in one plain line that you searched the notes of the last ${String(SEARCH_NOTES_WINDOW_DAYS)} days and found nothing.`,
+          });
+        }
+        const sentences: string[] = [
+          `Notes from the last ${String(SEARCH_NOTES_WINDOW_DAYS)} days do mention "${input.query}".`,
+        ];
+        if (outcome.withheldByScreen > 0) {
+          sentences.push(
+            `The safety screen withheld ${outcome.withheldByScreen === 1 ? 'one of them' : `${String(outcome.withheldByScreen)} of them`}, so ${outcome.withheldByScreen === 1 ? 'it' : 'they'} cannot be shown.`,
+          );
+        }
+        if (outcome.unshownMatches > 0) {
+          sentences.push(
+            outcome.withheldByScreen > 0
+              ? 'The rest did not fit in the space this search may show.'
+              : 'None of them fit in the space this search may show.',
+          );
+        }
+        sentences.push('Tell the user in one plain line that you found matching notes but could not show them here.');
+        return toolResultResponse({ text: sentences.join(' ') });
       }
       // Each note stands as the recall block shows it: a line naming its day, whose words it is, and
       // where it is kept, then the note's own text on its own line, so a reply that says the note
@@ -580,8 +602,19 @@ export class MemoryPagesToolSet extends LocalToolMCP {
           ].join('\n'),
         )
         .join('\n\n');
+      // The answer stays inside the allowance the search fitted it to, so no line is added for
+      // matches the allowance left out. A note the safety screen withheld is different: the
+      // person is told a match was held back, in one short line after the notes shown.
+      const withheldLine =
+        outcome.withheldByScreen === 0
+          ? []
+          : [
+              outcome.withheldByScreen === 1
+                ? 'One more matching note was withheld by the safety screen.'
+                : `${String(outcome.withheldByScreen)} more matching notes were withheld by the safety screen.`,
+            ];
       return toolResultResponse({
-        text: `${searchNotesOpeningLine(input.query)}\n\n${shown}`,
+        text: [`${searchNotesOpeningLine(input.query)}\n\n${shown}`, ...withheldLine].join('\n\n'),
       });
     } catch (error) {
       this.#options.logger.warn('A memory note search could not read the notes', extractErrorLogFields(error));
