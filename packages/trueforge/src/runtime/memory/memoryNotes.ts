@@ -201,6 +201,10 @@ export const FactMarkerSchema = z.strictObject({
   kind: z.literal('fact'),
   id: FactIdSchema,
   src: FactSourceSchema,
+  receipt: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,128}$/)
+    .optional(),
   since: FactDateSchema.optional(),
   until: FactDateSchema.optional(),
   seen: FactDateSchema.optional(),
@@ -248,7 +252,7 @@ export function formatMarker(marker: Marker): string {
     return `<!-- note: ${marker.source} ${marker.date} -->`;
   }
   const fields = [`id=${marker.id}`, `src=${marker.src}`];
-  for (const key of ['since', 'until', 'seen'] as const) {
+  for (const key of ['since', 'until', 'seen', 'receipt'] as const) {
     const value = marker[key];
     if (value !== undefined) {
       fields.push(`${key}=${value}`);

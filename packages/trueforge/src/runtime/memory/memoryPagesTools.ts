@@ -120,7 +120,9 @@ export const UpdateFactToolSchema = z
   .object({
     about: AboutSchema,
     old_text: TextSchema.describe('The fact as it was saved, in the same words.'),
-    new_text: TextSchema.describe('One short line, in plain words, of what is true now.'),
+    new_text: TextSchema.describe(
+      'One complete sentence the user typed, or one exact line from a successful read naming the person or matter.',
+    ),
     kind: KindSchema,
     page_summary: PageAboutSchema,
   })
@@ -296,10 +298,6 @@ const NO_TYPED_MESSAGE =
 /** What the model does after a line was saved that is not in the person's typed words. */
 const SAVED_FROM_OUTSIDE_NEXT =
   'Tell the user in one plain line what you noted. It is saved with a mark that it came from an outside source, because it is not in the words the user typed. Do not describe files, pages or history.';
-
-/** What the model does after outside words were added beside a line of the person's own, which stays. */
-const SAVED_BESIDE_OWN_NEXT =
-  "The new line was added with a mark that it came from an outside source. The line in the user's own words was kept, because only their own typed words can replace it. Tell the user in one plain line that you noted the new fact and kept their earlier line, and that they can say the new fact themselves to replace it.";
 
 /** Longest name a page made from words the person did not type may have. */
 const MAX_OUTSIDE_PAGE_NAME_CHARS = 60;
@@ -747,7 +745,9 @@ export class MemoryPagesToolSet extends LocalToolMCP {
         message: 'The old and new fact are the same. Nothing was changed.',
       };
     }
-    const own = this.#isOwn(after.text);
+    const { watch } = this.#options;
+    const own = watch.personText.split(/(?<=[.!?])\s+|\n+/u).some(sentence => sentence.trim() === after.text);
+    const receipt = own ? undefined : watch.sourceForUpdate({ text: after.text, subject: input.about });
     return this.#change({
       about: input.about,
       kind: input.kind,
@@ -759,18 +759,31 @@ export class MemoryPagesToolSet extends LocalToolMCP {
           return { saved: false, message: target.message };
         }
         const { at, ref } = target;
+        if (!own && receipt === undefined) {
+          return {
+            saved: false,
+            message: 'Nothing was changed. Ask the person for the updated fact in their own words.',
+          };
+        }
         const fact = (page: MemoryPage) => {
           const id = uniqueFactId({ page, newId });
-          return own ? saidFact({ text: after.text, id, today }) : readFact({ text: after.text, id, today });
+          return own
+            ? saidFact({ text: after.text, id, today })
+            : statementWith({ text: after.text, id, src: 'read_content', since: today, receipt });
         };
         // Only the person's own typed words replace a line of their own. Other words are added beside it.
-        if (isOwnLine(at) && !own) {
+        const compound = /[;]|[.!?]\s/u.test(at.fact.text);
+        if (!own || compound) {
           if (currentFactsSaying({ page: ref.page, text: after.text }).length > 0) {
             return { saved: false, unchanged: true, message: 'That is already saved. Nothing was changed.' };
           }
           const beside = addFact(ref.page, { section: sectionAfterChange(at), fact: fact(ref.page) });
           await write({ kind: ref.kind, slug: ref.slug, page: beside });
-          return { saved: true, activity: `Noted about ${title}: ${after.text}`, next: SAVED_BESIDE_OWN_NEXT };
+          return {
+            saved: true,
+            activity: `Noted about ${title}: ${after.text}`,
+            next: 'The earlier line was kept. Tell the person the update was saved alongside it.',
+          };
         }
         const refused = this.#ownLineRefusal(at);
         if (refused !== undefined) {
@@ -782,7 +795,6 @@ export class MemoryPagesToolSet extends LocalToolMCP {
         return {
           saved: true,
           activity: `Changed a note about ${title}: ${after.text}`,
-          ...(own ? {} : { next: SAVED_FROM_OUTSIDE_NEXT }),
         };
       },
     });
@@ -910,6 +922,14 @@ const NOTHING_TO_ADD: AsyncIterable<never> = {
 export function memoryPagesCapability(options: MemoryPagesToolSetOptions): AgentCapability {
   return {
     systemToolSets: [new MemoryPagesToolSet(options)],
+    toolResponseProcessors: [
+      {
+        process: results => {
+          options.watch.observeResults(results);
+          return Promise.resolve({});
+        },
+      },
+    ],
     preLLMProcessors: [
       {
         processPreLLM: execution => {
