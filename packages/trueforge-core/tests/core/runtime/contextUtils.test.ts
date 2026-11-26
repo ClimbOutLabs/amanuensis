@@ -11,6 +11,7 @@ import {
   isHostWrappedText,
   isRetrievalToolName,
   isUntrustedDocumentText,
+  lastPersonAuthoredText,
   lastUserMessageText,
   personMessageIndex,
   untrustedDocumentTag,
@@ -26,17 +27,21 @@ describe('isFreshnessQuestion', () => {
     'Is your information up to date?',
     'Does GPT-5 exist?',
     'Has the new model been released yet?',
-    'What happened in 2026?',
   ])('flags %p as a freshness question', text => {
     expect(isFreshnessQuestion(text)).toBe(true);
   });
 
-  it.each(['What is the capital of France?', 'Explain how a hash map works.', 'Write me a haiku about the ocean.'])(
-    'does not flag %p as a freshness question',
-    text => {
-      expect(isFreshnessQuestion(text)).toBe(false);
-    },
-  );
+  it.each([
+    'What is the capital of France?',
+    'Explain how a hash map works.',
+    'Write me a haiku about the ocean.',
+    // A bare year is not a request for current information: a question about a
+    // past year and a dated statement both stay out of the grounding path.
+    'What happened in 2026?',
+    'The signed lease came back on 12 March 2028.',
+  ])('does not flag %p as a freshness question', text => {
+    expect(isFreshnessQuestion(text)).toBe(false);
+  });
 });
 
 describe('isRetrievalToolName / hasRetrievalTool', () => {
@@ -84,6 +89,36 @@ describe('lastUserMessageText', () => {
 
   it('returns undefined when there is no genuine user message', () => {
     expect(lastUserMessageText([internalSystemMessage('note')])).toBeUndefined();
+  });
+});
+
+describe('lastPersonAuthoredText', () => {
+  it('skips a trailing document message whose parts are all host-wrapped', () => {
+    const context: ContextMessage[] = [
+      { role: 'user', content: 'I sent the sheet.' },
+      { role: 'user', content: [{ type: 'text', text: untrustedDocumentTag('Count date: 14 March 2028') }] },
+    ];
+    expect(lastPersonAuthoredText(context)).toBe('I sent the sheet.');
+  });
+
+  it('keeps the authored parts of a mixed message and drops the host-wrapped ones', () => {
+    const context: ContextMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Is this edition out yet?' },
+          { type: 'text', text: untrustedDocumentTag('sheet body') },
+        ],
+      },
+    ];
+    expect(lastPersonAuthoredText(context)).toBe('Is this edition out yet?');
+  });
+
+  it('returns undefined when the context holds only host-wrapped text', () => {
+    const context: ContextMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: untrustedDocumentTag('sheet body') }] },
+    ];
+    expect(lastPersonAuthoredText(context)).toBeUndefined();
   });
 });
 

@@ -23,7 +23,7 @@ import {
 import { getEmptyCurrentContextUsage } from '../core/runtime/contextUsage';
 import type { AgentThreadMetrics } from '../core/runtime/metrics';
 import type { ITurnResourceResolver } from './ITurnResourceResolver';
-import type { TurnRecord } from './models/TurnRecord';
+import { MAIN_THREAD_ID, type TurnRecord } from './models/TurnRecord';
 import { EventType, type PersistedTurnEvent, type TurnCreatedEvent, type TurnDoneEvent } from './schemas/events';
 import type { TokenPagination } from './schemas/pagination';
 import {
@@ -35,6 +35,7 @@ import {
 } from './schemas/turn';
 import type { ISessionStore } from './store/ISessionStore';
 import { TurnNotRunningError } from './store/SessionStoreErrors';
+import { findFinalAnswerEvent } from './store/threadAnswerCommit';
 
 /** Streaming yield union — deltas pass through; never persisted. No sequence_number. */
 export type TurnStreamingEvent = PersistedTurnEvent | ModelMessageDeltaEvent;
@@ -825,7 +826,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       }
 
       case InternalEventType.AGENT_CONTEXT_APPEND: {
-        await this.store.appendToThreadContext({
+        const contextInput = {
           ...scope,
           thread_id: event.thread_id,
           context: this.sanitizeAppendedContext(event.context),
@@ -833,7 +834,16 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
           completion: event.completion ?? null,
           tool_call_memo: event.tool_call_memo,
           task_state: event.task_state,
-        });
+        };
+        // The append that publishes the root thread's final answer commits
+        // through the store's one-answer operation: the context append and
+        // the answer event land together, and a second, different final for
+        // the turn is refused there instead of overwriting the accepted one.
+        if (event.thread_id === MAIN_THREAD_ID && findFinalAnswerEvent(event.output, MAIN_THREAD_ID) !== undefined) {
+          await this.store.commitThreadAnswer({ ...contextInput, events: event.output });
+          return null;
+        }
+        await this.store.appendToThreadContext(contextInput);
         if (event.output.length > 0) {
           await this.store.appendToEvents({
             ...scope,

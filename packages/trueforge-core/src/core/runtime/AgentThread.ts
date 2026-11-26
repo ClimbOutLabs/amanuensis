@@ -244,6 +244,7 @@ import {
   isInternalSystemMessage,
   isLLMContextMessage,
   isLLMToolMessage,
+  lastPersonAuthoredText,
   lastUserMessageText,
   makeUnknownToolInfo,
   NO_SANDBOX_PROMPT,
@@ -849,11 +850,12 @@ interface StepLLMCallOptions {
   emptyTerminalFallback: string | undefined;
   /** True for the step past the reply's step budget: the request carries no tools, and any call written anyway is dropped. */
   forcedAnswer: ForcedAnswer | null;
-  // Set by the caller only when the previous stepLLMCall call ended in the empty-answer nudge:
-  // that call's response was never durably persisted, but its start/delta stream already reached
-  // live clients under this id. Reusing it here (instead of a fresh id) keeps the id a live
-  // client folds on identical to the one that ends up in durable output, so the retried answer
-  // replaces the discarded stream instead of appearing as a second, unpersisted message.
+  // Set by the caller only when the previous stepLLMCall call ended in a nudge whose response
+  // was never durably persisted (the empty-answer nudge, or the grounding nudge that discards a
+  // draft before publishing): that call's start/delta stream already reached live clients under
+  // this id. Reusing it here (instead of a fresh id) keeps the id a live client folds on
+  // identical to the one that ends up in durable output, so the retried answer replaces the
+  // discarded stream instead of appearing as a second, unpersisted message.
   retryModelMessageEventId: string | undefined;
 }
 
@@ -4254,9 +4256,24 @@ export class AgentThread {
     }
 
     let requestBody = this.transformToLLMRequest(tools);
+    // Whether this step's answer can still be corrected by the grounding check
+    // below is decidable before the call: root thread, no nudge sent yet this
+    // turn, a retrieval tool attached, none called yet this turn, and the
+    // person's own words ask for current information. A forced answer step is
+    // the host's last resort and is never corrected.
+    const groundingMayCorrect =
+      forcedAnswer === null &&
+      this.parent === undefined &&
+      !this.groundingNudgeSentThisTurn &&
+      hasRetrievalTool(toolMapping.keys()) &&
+      !hasCalledRetrievalTool(this.context) &&
+      isFreshnessQuestion(lastPersonAuthoredText(this.context) ?? '');
     // A model may stream guesses before its presentation call arrives. Wait for the complete
-    // message before showing prose when the host offers exact rows.
-    const bufferSourceAnswer = this.exactSourceValues?.hasRows === true || this.exactPresentationAttempted;
+    // message before showing prose when the host offers exact rows. The same buffering covers a
+    // step the grounding check may still correct: a discarded draft must not stream live as if
+    // it were the answer, so its prose is held and emitted once, only if the answer is accepted.
+    const bufferSourceAnswer =
+      this.exactSourceValues?.hasRows === true || this.exactPresentationAttempted || groundingMayCorrect;
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
@@ -4930,6 +4947,45 @@ export class AgentThread {
       const prior = typeof assistantMessage.content === 'string' ? assistantMessage.content.trim() : '';
       assistantMessage.content = [prior, heldActionsNote(this.heldSentences)].filter(part => part !== '').join('\n\n');
     }
+    // Decide before publishing: on a grounding-eligible step, a candidate that
+    // answered from memory is discarded here, before the closing line, the
+    // terminal event, or any append can publish it as the turn's answer. A
+    // model cannot reliably self-identify or state its own training cutoff, so
+    // a freshness question answered with no retrieval tool called this turn,
+    // even though one is attached, gets one corrective step instead of being
+    // accepted outright; the second answer is accepted whatever it does. Only
+    // the nudge is appended, carrying the discarded call's usage so its spend
+    // is still counted, and the retry reuses this call's message id so a live
+    // client folds the accepted answer over the buffered draft's place in the
+    // stream. The empty and silent paths keep their precedence: a candidate
+    // with nothing in it to correct belongs to them, not to this check.
+    if (
+      groundingMayCorrect &&
+      finishReason === 'stop' &&
+      !hasToolCalls(assistantMessage) &&
+      !shouldNudgeForEmptyReasoning &&
+      !emptyTerminalFailure &&
+      !silentAfterTools
+    ) {
+      this.groundingNudgeSentThisTurn = true;
+      yield* this.appendToContext({
+        context: [internalSystemMessage(GROUNDING_NUDGE_MESSAGE)],
+        output: [],
+        currentContextUsage: undefined,
+        usage: result.value.usage,
+        groundingNudge: true,
+      });
+      // The state machine normally reaches `llm-call-required` only from null
+      // (turn start) or `tool-response-required`/`user-input-required`
+      // (VALID_TRANSITIONS); appending a plain message and asking for another
+      // LLM call re-derives `llm-call-required` from a context that already
+      // ended in that state, which VALID_TRANSITIONS never allows for ordinary
+      // steps. Reset here, the same way execute() does at the start of a fresh
+      // call, since this genuinely starts a new local request/response cycle
+      // within the same turn.
+      this.currentState = null;
+      return { outcome: 'continue', modelMessageEventId, retryModelMessageEventId: modelMessageEventId };
+    }
     // A reply that wrote spaces without naming them gets the host's own closing line, saved with the
     // reply like the held-actions note above, so the person always learns which page changed.
     if (
@@ -5101,42 +5157,6 @@ export class AgentThread {
     }
 
     if (!hasToolCalls(assistantMessage)) {
-      // Host-enforced grounding check: a model cannot reliably self-identify
-      // or state its own training cutoff (see the model-identity section
-      // above), so a freshness question answered from memory alone, with no
-      // retrieval tool called this turn even though one is attached, gets one
-      // corrective step instead of being accepted outright. Root threads
-      // only: a sub-agent's "user" message is the delegated task, not
-      // something to second-guess this way. At most once per turn
-      // (`groundingNudgeSentThisTurn`); the second answer is accepted
-      // whatever it does.
-      if (
-        !this.parent &&
-        finishReason === 'stop' &&
-        !this.groundingNudgeSentThisTurn &&
-        hasRetrievalTool(toolMapping.keys()) &&
-        !hasCalledRetrievalTool(this.context) &&
-        isFreshnessQuestion(lastUserMessageText(this.context) ?? '')
-      ) {
-        this.groundingNudgeSentThisTurn = true;
-        yield* this.appendToContext({
-          context: [internalSystemMessage(GROUNDING_NUDGE_MESSAGE)],
-          output: [],
-          currentContextUsage: undefined,
-          usage: undefined,
-          groundingNudge: true,
-        });
-        // The state machine normally reaches `llm-call-required` only from
-        // null (turn start) or `tool-response-required`/`user-input-required`
-        // (VALID_TRANSITIONS); appending a plain message and asking for
-        // another LLM call re-derives `llm-call-required` from a context that
-        // already ended in that state, which VALID_TRANSITIONS never allows
-        // for ordinary steps. Reset here, the same way execute() does at the
-        // start of a fresh call, since this genuinely starts a new local
-        // request/response cycle within the same turn.
-        this.currentState = null;
-        return { outcome: 'continue', modelMessageEventId, retryModelMessageEventId: undefined };
-      }
       yield {
         type: InternalEventType.AGENT_DONE,
         status: 'done',

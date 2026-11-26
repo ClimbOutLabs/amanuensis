@@ -157,7 +157,7 @@ describe('the closing line after space writes', () => {
     expect(finals.at(-1)).toContain('I stopped before the page was complete. Ask me to continue.');
   });
 
-  it('is written once when the grounding nudge brings a second final answer', async () => {
+  it('is written once, on the accepted answer, when a genuine grounding nudge discards the first draft', async () => {
     const searchTools = makeMockIMCPServer({
       name: 'web',
       preload: true,
@@ -170,10 +170,24 @@ describe('the closing line after space writes', () => {
         },
       ],
     });
-    const history = writeHistory({ user: 'Make a space for my 2027 trip plan.', ids: ['c1'], name: 'Trip plan' });
-    const { finals } = await runReply({ replies: ['Done.', 'Done, from memory.'], history, toolSets: [searchTools] });
-    expect(finals.filter(content => content.includes('I saved'))).toHaveLength(1);
-    expect(finals).toHaveLength(2);
+    const history = writeHistory({
+      user: 'Make a space for my trip plan with the latest prices.',
+      ids: ['c1'],
+      name: 'Trip plan',
+    });
+    const { finals, deltas, saved } = await runReply({
+      replies: ['Draft one.', 'Final answer.'],
+      history,
+      toolSets: [searchTools],
+    });
+    // One final only: the accepted answer, carrying the closing line once.
+    expect(finals).toHaveLength(1);
+    expect(finals[0]).toContain('Final answer.');
+    expect(finals[0]?.match(/I saved/g)).toHaveLength(1);
+    // The discarded draft reaches neither the live stream nor the saved history.
+    expect(deltas.join('')).not.toContain('Draft one.');
+    expect(saved.filter(content => typeof content === 'string' && content.includes('Draft one.'))).toHaveLength(0);
+    expect(saved.filter(content => typeof content === 'string' && content.includes('I saved'))).toHaveLength(1);
   });
 
   it('adds nothing on a sub-agent thread', async () => {

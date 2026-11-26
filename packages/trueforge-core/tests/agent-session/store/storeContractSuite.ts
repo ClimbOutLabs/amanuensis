@@ -24,6 +24,7 @@ import {
   StaleApprovalContinuationError,
   StaleTaskChecklistError,
   TurnAlreadyExistsError,
+  TurnAnswerConflictError,
   TurnNotFoundError,
   TurnNotRunningError,
 } from '../../../src/agent-session/store/SessionStoreErrors';
@@ -4251,6 +4252,142 @@ export function runStoreContractSuite<
       expect(mustGet(turn).snapshot.mcp_servers).toEqual({
         svc: { id: 'svc', name: 'svc', transport_type: 'sse' },
       });
+    });
+  });
+
+  describe('commitThreadAnswer', () => {
+    function finalAnswer(content: string): ReturnType<typeof makeModelMessageEvent> {
+      return { ...makeModelMessageEvent(), content };
+    }
+
+    function commit(store: Store, input: { turnId: string; answer: PersistedTurnEvent; contextText: string }) {
+      return store.commitThreadAnswer({
+        session_id: sessionId,
+        turn_id: input.turnId,
+        thread_id: MAIN_THREAD_ID,
+        context: [{ role: 'assistant', content: input.contextText }],
+        current_context_usage: null,
+        completion: null,
+        tool_call_memo: undefined,
+        task_state: undefined,
+        events: [input.answer],
+      });
+    }
+
+    async function committedFinals(store: Store, turnId: string): Promise<PersistedTurnEvent[]> {
+      const { data } = await store.listTurnEvents({
+        session_id: sessionId,
+        turn_id: turnId,
+        limit: 50,
+        page_token: undefined,
+        order: undefined,
+      });
+      return data.filter(event => event.type === EventType.MODEL_MESSAGE);
+    }
+
+    it('commits the context append and the answer event as one unit', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      const answer = finalAnswer('the accepted answer');
+
+      await commit(store, { turnId: 'turn-1', answer, contextText: 'the accepted answer' });
+
+      const turn = await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' });
+      expect(turn?.snapshot.threads[MAIN_THREAD_ID]?.context).toEqual([
+        { role: 'assistant', content: 'the accepted answer' },
+      ]);
+      expect(await committedFinals(store, 'turn-1')).toEqual([answer]);
+    });
+
+    it('identical replay returns the committed result and writes nothing twice', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      const answer = finalAnswer('the accepted answer');
+
+      await commit(store, { turnId: 'turn-1', answer, contextText: 'the accepted answer' });
+      // The acknowledgment was lost; the caller retries the same accepted write.
+      await commit(store, { turnId: 'turn-1', answer, contextText: 'the accepted answer' });
+
+      const turn = await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' });
+      expect(turn?.snapshot.threads[MAIN_THREAD_ID]?.context).toEqual([
+        { role: 'assistant', content: 'the accepted answer' },
+      ]);
+      expect(await committedFinals(store, 'turn-1')).toEqual([answer]);
+    });
+
+    it('rejects a competing final and leaves the accepted answer intact', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      const accepted = finalAnswer('the accepted answer');
+      await commit(store, { turnId: 'turn-1', answer: accepted, contextText: 'the accepted answer' });
+
+      const competing = finalAnswer('a second, different answer');
+      await expect(
+        commit(store, { turnId: 'turn-1', answer: competing, contextText: 'a second, different answer' }),
+      ).rejects.toBeInstanceOf(TurnAnswerConflictError);
+      await expect(
+        commit(store, { turnId: 'turn-1', answer: competing, contextText: 'a second, different answer' }),
+      ).rejects.toBeInstanceOf(SessionStoreConflictError);
+
+      const turn = await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' });
+      expect(turn?.snapshot.threads[MAIN_THREAD_ID]?.context).toEqual([
+        { role: 'assistant', content: 'the accepted answer' },
+      ]);
+      expect(await committedFinals(store, 'turn-1')).toEqual([accepted]);
+    });
+
+    it('rejects the same answer id carrying different content', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      const accepted = finalAnswer('the accepted answer');
+      await commit(store, { turnId: 'turn-1', answer: accepted, contextText: 'the accepted answer' });
+
+      const rewritten: PersistedTurnEvent = { ...accepted, content: 'rewritten after the fact' };
+      await expect(
+        commit(store, { turnId: 'turn-1', answer: rewritten, contextText: 'rewritten after the fact' }),
+      ).rejects.toBeInstanceOf(TurnAnswerConflictError);
+
+      expect(await committedFinals(store, 'turn-1')).toEqual([accepted]);
+    });
+
+    it('a reconnecting client reads back the one accepted answer', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      const answer = finalAnswer('the accepted answer');
+      await commit(store, { turnId: 'turn-1', answer, contextText: 'the accepted answer' });
+      // Retry after the lost acknowledgment, as a resumed worker would.
+      await commit(store, { turnId: 'turn-1', answer, contextText: 'the accepted answer' });
+
+      const finals = await committedFinals(store, 'turn-1');
+      expect(finals).toEqual([answer]);
+      const turn = await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' });
+      const context = turn?.snapshot.threads[MAIN_THREAD_ID]?.context ?? [];
+      expect(context[context.length - 1]).toEqual({ role: 'assistant', content: 'the accepted answer' });
+    });
+
+    it('rejects a commit for a missing turn', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await expect(
+        commit(store, { turnId: missingTurnId, answer: finalAnswer('orphan'), contextText: 'orphan' }),
+      ).rejects.toBeInstanceOf(TurnNotFoundError);
+    });
+
+    it('rejects a first commit once the turn is already terminal', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      await finishTurn(store, 'turn-1');
+
+      await expect(
+        commit(store, { turnId: 'turn-1', answer: finalAnswer('too late'), contextText: 'too late' }),
+      ).rejects.toBeInstanceOf(TurnNotRunningError);
+      expect(await committedFinals(store, 'turn-1')).toEqual([]);
     });
   });
 

@@ -466,6 +466,14 @@ export interface AppendToThreadContextInput {
   task_state: TaskStateSnapshot | undefined;
 }
 
+/**
+ * A thread context append bundled with the output events it publishes, where
+ * the events carry the thread's final answer. See commitThreadAnswer.
+ */
+export interface CommitThreadAnswerInput extends AppendToThreadContextInput {
+  events: PersistedTurnEvent[];
+}
+
 export interface OverwriteThreadContextInput {
   session_id: string;
   turn_id: string;
@@ -885,6 +893,27 @@ export interface ISessionStore<
 
   /** Appends messages to a thread's context; optionally updates usage / completion marker. */
   appendToThreadContext(input: AppendToThreadContextInput): Promise<void>;
+
+  /**
+   * Commits a thread's accepted answer: the context append and its output
+   * events land as one transaction, so a crash can never persist one without
+   * the other. Store contract, **first final wins**, mirroring the terminal
+   * state rule on updateTurnState:
+   * - The events carry exactly one final model message for the thread (a
+   *   model message with no tool calls); that message is the turn's accepted
+   *   answer for the thread.
+   * - Repeating the same commit (same answer event, same content) returns
+   *   success and writes nothing twice, even after the turn has gone
+   *   terminal: a caller whose acknowledgment was lost can retry safely.
+   * - A commit carrying a different answer for the same turn and thread, or
+   *   the same answer event id with different content, is rejected with
+   *   TurnAnswerConflictError and leaves the accepted answer intact.
+   * - A first commit for a missing turn is rejected as not found, and for a
+   *   turn that is no longer running as not running, under the same
+   *   concurrency control as the write itself, never as a racy read-then-write
+   *   outside the critical section.
+   */
+  commitThreadAnswer(input: CommitThreadAnswerInput): Promise<void>;
 
   /** Replaces a thread's context wholesale (context-overwrite event). */
   overwriteThreadContext(input: OverwriteThreadContextInput): Promise<void>;
