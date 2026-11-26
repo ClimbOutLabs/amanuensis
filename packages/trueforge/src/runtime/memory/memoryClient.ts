@@ -35,6 +35,17 @@ export function timeoutFailure(timeoutMs: number): MemoryFailure {
 
 export type RecallOutcome = { ok: true; results: RecallItem[] } | MemoryFailure;
 
+/**
+ * A note search's answer. `results` holds the notes the search may show, best first, fitted to
+ * the search's allowance. `unshownMatches` counts notes that matched but were left out because
+ * showing them would have passed the allowance, so a caller can tell a search that found
+ * nothing from one that found more than it could show. `withheldByScreen` counts matched notes
+ * the recall screen withheld before they could be shown; the store itself never screens, so it
+ * reports 0, and the host binding that screens a search's results reports its own count here.
+ */
+export type SearchNotesOutcome =
+  { ok: true; results: RecallItem[]; unshownMatches: number; withheldByScreen: number } | MemoryFailure;
+
 export interface RetainItem {
   content: string;
   timestamp: string;
@@ -84,6 +95,25 @@ export interface MemoryClient {
     /** The meaning gate of this message, worked out once by `meaningGate`; left out, recall works it out itself. */
     gate?: MeaningGate | undefined;
   }): Promise<RecallOutcome>;
+
+  /**
+   * Optional: the daily-log notes inside the recent window that match a search, ranked and budgeted
+   * the way `recall` ranks and budgets them, so a term a turn only learns midway can still find a
+   * note. The window is the daily files of the last 14 days ending on `today`; the curated file is
+   * not a daily note and is never returned. Only the markdown client implements it, as the notes
+   * live in its daily files. Never throws: a read failure is a failed outcome, never an empty one.
+   */
+  searchNotes?(params: {
+    query: string;
+    /** The calendar day `YYYY-MM-DD` in the person's time zone; the window ends on it. */
+    today: string;
+    maxTokens: number;
+    /** Recall's own item cap, applied beside the token budget. */
+    maxItems: number;
+    timeoutMs: number;
+    /** The chat being answered: notes retained from it are never returned. */
+    currentSessionId?: string | undefined;
+  }): Promise<SearchNotesOutcome>;
 
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;
 

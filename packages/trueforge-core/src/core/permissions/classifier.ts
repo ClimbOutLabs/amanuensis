@@ -2926,7 +2926,7 @@ async function classifyReminderTool(action: SentinelAction, ctx: ClassifyContext
 /**
  * Memory page tools are the host's own, named by server. Three write the person's own words from this chat to
  * their own pages and leave a commit that undoes the write, so they run without asking; the tools themselves
- * refuse in a chat that has read outside text. Two only read the person's own pages, and run without asking
+ * refuse in a chat that has read outside text. Three only read the person's own memory, and run without asking
  * too. Any other name fails closed.
  */
 function classifyMemoryPagesTool(action: SentinelAction): TierDecision {

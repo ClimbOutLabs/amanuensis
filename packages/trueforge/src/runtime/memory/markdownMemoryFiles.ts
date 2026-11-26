@@ -677,6 +677,30 @@ function keepParsedDailyLog({ filePath, parsed }: { filePath: string; parsed: Pa
   }
 }
 
+/** True when a filesystem error says the path simply is not there, as apart from being unreadable. */
+function pathErrorCode(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  const code = pathErrorCode(error);
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+/** True only when the path does not exist at all, as apart from a path that exists in the wrong shape. */
+function isNonexistentPathError(error: unknown): boolean {
+  return pathErrorCode(error) === 'ENOENT';
+}
+
+/** One daily log's read: its entries, and whether the file was there but could not be read. */
+interface DailyLogRead {
+  entries: readonly ScannedMemoryEntry[];
+  /** True when the file was listed but reading it failed, as apart from holding no entries. */
+  unreadable: boolean;
+}
+
 /**
  * One daily log's entries. The file is read again whenever its size, time or identity differs from the
  * last read, so an edit made by hand or by another process is seen on the next scan.
@@ -689,7 +713,7 @@ async function readDailyLogEntries({
   filePath: string;
   safeNamespace: string;
   file: string;
-}): Promise<readonly ScannedMemoryEntry[]> {
+}): Promise<DailyLogRead> {
   let content: string;
   let stats: Stats;
   let readAt: number;
@@ -705,14 +729,16 @@ async function readDailyLogEntries({
       // Re-inserting moves the file to the recently read end.
       parsedDailyLogs.delete(filePath);
       parsedDailyLogs.set(filePath, known);
-      return known.entries;
+      return { entries: known.entries, unreadable: false };
     }
     readAt = Date.now();
     content = await readFile(filePath, 'utf8');
-  } catch {
-    // A file removed or unreadable mid-scan holds no entries; the rest of the scan goes on.
+  } catch (error) {
+    // A file removed mid-scan holds no entries; the rest of the scan goes on. A file that is
+    // there but cannot be read is reported as such, so a caller that must not mistake it for a
+    // file with no entries can be told apart through the scan's options.
     forgetParsedDailyLog(filePath);
-    return [];
+    return { entries: [], unreadable: !isMissingPathError(error) };
   }
   // Every later scan hands out these same objects, so a caller that changed one would change it for all.
   const entries = Object.freeze(dailyLogEntries({ safeNamespace, file, content }).map(entry => Object.freeze(entry)));
@@ -727,7 +753,7 @@ async function readDailyLogEntries({
       entries,
     },
   });
-  return entries;
+  return { entries, unreadable: false };
 }
 
 /**
@@ -741,7 +767,21 @@ export async function scanNamespaceEntries(options: {
   baseDir: string;
   namespace: string;
   maxDailyFiles: number;
+  /**
+   * The last daily file day (`YYYY-MM-DD`) the scan may read. Files dated after it are left
+   * out before the `maxDailyFiles` bound is applied, so a future-dated file can neither enter
+   * a window that ends earlier nor push a file inside the window out of the scan.
+   */
+  latestDailyFile?: string | undefined;
   resolveTombstones?: boolean;
+  /**
+   * Told the name of each daily file that was listed but could not be read. Left out, such a
+   * file is skipped quietly, as it always has been; the note search passes it because an
+   * unreadable file must not be mistaken for a file with no match in it.
+   */
+  onDailyFileUnreadable?: ((file: string) => void) | undefined;
+  /** Told when the daily folder itself could not be listed, so no list of its files could be trusted. */
+  onDailyListingUnreadable?: (() => void) | undefined;
 }): Promise<NamespaceScan> {
   const safeNamespace = sanitizeNamespace(options.namespace);
   const dir = namespaceDirFor(options.baseDir, options.namespace);
@@ -762,18 +802,32 @@ export async function scanNamespaceEntries(options: {
   let files: string[] = [];
   try {
     files = (await readdir(path.join(dir, 'memory')))
-      .filter(name => DAILY_LOG_FILE_PATTERN.test(name))
+      .filter(
+        name =>
+          DAILY_LOG_FILE_PATTERN.test(name) &&
+          (options.latestDailyFile === undefined || name.slice(0, 10) <= options.latestDailyFile),
+      )
       .sort()
       .reverse()
       .slice(0, options.maxDailyFiles);
-  } catch {
-    // Missing daily directory is normal for a fresh namespace.
+  } catch (error) {
+    // A daily directory that was never made is normal for a fresh namespace. Any other failure
+    // to list it leaves the scan empty for a reason a caller may need to know about: a path
+    // that is there but is a file rather than a folder (ENOTDIR) is a store in the wrong
+    // shape, not an empty one, so it is reported like any other listing failure.
+    if (!isNonexistentPathError(error)) {
+      options.onDailyListingUnreadable?.();
+    }
   }
   for (let start = 0; start < files.length; start += DAILY_LOG_READ_CONCURRENCY) {
     const batch = await Promise.all(
-      files
-        .slice(start, start + DAILY_LOG_READ_CONCURRENCY)
-        .map(file => readDailyLogEntries({ filePath: path.join(dir, 'memory', file), safeNamespace, file })),
+      files.slice(start, start + DAILY_LOG_READ_CONCURRENCY).map(async file => {
+        const read = await readDailyLogEntries({ filePath: path.join(dir, 'memory', file), safeNamespace, file });
+        if (read.unreadable) {
+          options.onDailyFileUnreadable?.(file);
+        }
+        return read.entries;
+      }),
     );
     for (const fileEntries of batch) {
       // The marks live beside the dated files, so they are applied to each scan and never kept with a parsed file.

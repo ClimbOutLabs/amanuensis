@@ -32,7 +32,7 @@ describe('memory page tool classification', () => {
     expect(decision).toMatchObject({ tier: 1, reason: 'memory_page_write', auto_deny: null, card: null });
   });
 
-  it.each(['list_pages', 'read_page'])('runs %s without a card, as a read', async name => {
+  it.each(['list_pages', 'read_page', 'search_memory_notes'])('runs %s without a card, as a read', async name => {
     const decision = await classifyTier(action(name), makeCtx());
     expect(decision).toMatchObject({ tier: 1, reason: 'memory_page_read', auto_deny: null, card: null });
   });

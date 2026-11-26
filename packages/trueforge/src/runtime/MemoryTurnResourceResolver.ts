@@ -21,10 +21,11 @@ import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
 import type { InternalSourceState } from './internalSourceGuard';
-import { memoryCapability, type MemoryConfig } from './memory/memoryCapability';
+import { memoryCapability, RecallScreener, resolveScreenClient, type MemoryConfig } from './memory/memoryCapability';
 import type { MemoryClient } from './memory/memoryClient';
 import { memoryPagesCapability } from './memory/memoryPagesTools';
 import type { SummarizeTurnContext } from './memory/memoryRetain';
+import type { ScreenClient } from './memory/screenClient';
 import { TurnReadWatch } from './memory/turnReadWatch';
 import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from './PersonaTurnResourceResolver';
 import { isStaleSearchProviderMount } from './sessionResources';
@@ -51,6 +52,8 @@ export interface MemoryTurnContext {
   itemTrackingEnabled?: boolean | undefined;
   /** Reads the facts the person pulled out of this chat's recall, from where they are stored with the chat. Absent: nothing is excluded. */
   loadRecallExclusions?: (() => Promise<readonly string[]>) | undefined;
+  /** Test override for the recall screen client; production builds one from `config.screen`. Screens opening recall and the note search alike. */
+  screenClient?: ScreenClient | undefined;
   /** Present when summaries are on for this turn, so a vanished earlier turn is never rebuilt as a raw exchange. */
   summarize: SummarizeTurnContext | undefined;
   /** The person's IANA time zone from the request; a recalled memory's day is shown in it. */
@@ -83,6 +86,7 @@ function memoryCapabilitiesForTurn(input: {
       client: memory.client,
       config: memory.config,
       logger: input.logger,
+      screenClient: memory.screenClient,
       sessionId: memory.sessionId,
       previousTurnId: memory.previousTurnId,
       recallEnabled: memory.recallEnabled,
@@ -248,6 +252,38 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       return undefined;
     }
     const watch = new TurnReadWatch();
+    // The note search rides on the same offer as the page reads: it is bound only where the backend
+    // keeps searchable daily notes, with recall's own budget, item cap and deadline, and this chat left out.
+    const search = this.#memory.client?.searchNotes?.bind(this.#memory.client);
+    // What the search finds clears the recall screen before the model may see it, through the
+    // same screener opening recall uses: a note the screen would withhold from recall is
+    // withheld from the search too, and the binding reports how many it withheld.
+    const screener = new RecallScreener({
+      config: this.#memory.config,
+      screenClient: resolveScreenClient({ config: this.#memory.config, screenClient: this.#memory.screenClient }),
+      logger: this.logger,
+    });
+    const searchNotes =
+      search === undefined
+        ? undefined
+        : async ({ query, today }: { query: string; today: string }) => {
+            const outcome = await search({
+              query,
+              today,
+              maxTokens: this.#memory.config.recallMaxTokens,
+              maxItems: this.#memory.config.recallMaxItems,
+              timeoutMs: this.#memory.config.recallTimeoutMs,
+              currentSessionId: this.#memory.sessionId,
+            });
+            if (!outcome.ok) {
+              return outcome;
+            }
+            const screened = await screener.screenItems({
+              items: outcome.results,
+              budgetMs: this.#memory.config.screen.timeoutMs,
+            });
+            return { ...outcome, results: screened.injectedItems, withheldByScreen: screened.withheld };
+          };
     const capability = memoryPagesCapability({
       vaultDir,
       runner: execFileRunner,
@@ -266,6 +302,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       keepsNothing: this.#memory.keepsNothing,
       maxPageTokens: this.#memory.config.pages.maxTokens,
       watch,
+      searchNotes,
       personName: this.#personName,
       onPageWritten: () => {
         this.#chatWrotePages = true;

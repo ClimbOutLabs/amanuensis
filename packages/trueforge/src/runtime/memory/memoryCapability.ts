@@ -550,15 +550,22 @@ function noteLabelFor(source: MemoryNoteSource): string {
   return source === SENT_MAIL_SOURCE ? SENT_MAIL_LABEL : FINDING_LABEL;
 }
 
+/**
+ * The words that say whose words a recalled item is, exactly as the recall block prints them.
+ * Exported for the note search tool, which shows a found note with the same words.
+ */
+export function recalledItemSourceLabel(item: RecallItem): string {
+  const from = recalledItemSource(item);
+  // Only a fixed phrase is emitted for the origin, never the stored value.
+  return from.kind === 'note' ? noteLabelFor(from.source) : from.kind === 'person' ? PERSON_LABEL : READ_CONTENT_LABEL;
+}
+
 function formatItemLine({ item, today }: { item: RecallItem; today: string }): string {
   const day = item.occurred_start?.slice(0, 10);
   const date = day ? sanitizeMemoryLine(day) : 'undated';
   // The host states the age, so telling an old entry from a fresh one never rests on the reader's arithmetic.
   const age = day ? memoryAge({ day, today }) : undefined;
-  const from = recalledItemSource(item);
-  // Only a fixed phrase is emitted for the origin, never the stored value.
-  const source =
-    from.kind === 'note' ? noteLabelFor(from.source) : from.kind === 'person' ? PERSON_LABEL : READ_CONTENT_LABEL;
+  const source = recalledItemSourceLabel(item);
   const head = age === undefined ? `${date}, ${source}` : `${date}, ${age}, ${source}`;
   return `[${head}] ${shownFactText(item.text)}`;
 }
@@ -1034,6 +1041,220 @@ interface ScreenPartition {
   ran: boolean;
 }
 
+/** What an items-only screening pass hands back: the items that may be shown, and what it withheld. */
+export interface ScreenedItems {
+  injectedItems: RecallItem[];
+  withheld: number;
+  records: MemoryScreenRecord[];
+  ran: boolean;
+}
+
+/**
+ * The recall screen itself: the one owner of how a memory is judged before the model may see
+ * it, shared by the opening recall and the mid-turn note search so the two can never drift
+ * apart. The screen only decides what reaches the model THIS turn; nothing is deleted from
+ * memory.
+ *
+ * The text screened is the exact sanitized text that would be shown, so sanitization can
+ * never authorize a benign verdict for one string while the model sees a different one.
+ *
+ * Latency and fan-out are both bounded so screening never delays a turn past its budget nor
+ * floods the classifier: targets are screened together through a worker pool capped at
+ * `screen.maxConcurrency`, and each call is clamped to whatever remains of the pass's budget
+ * at the moment it begins, recomputed per call so a large batch shares the one deadline
+ * rather than each getting a fresh one. When nothing remains, calls return "unknown"
+ * immediately (fencing untrusted origins, injecting the user's own), so a slow screen or a
+ * huge set degrades safely.
+ */
+export class RecallScreener {
+  private readonly config: MemoryConfig;
+  private readonly screenClient: ScreenClient | undefined;
+  private readonly logger: Logger;
+  private readonly now: () => number;
+
+  constructor(input: {
+    config: MemoryConfig;
+    /** Undefined when the recall screen is disabled; then nothing is screened. */
+    screenClient: ScreenClient | undefined;
+    logger: Logger;
+    /** Milliseconds clock for the screen time budgets; tests supply their own. Default: `Date.now`. */
+    now?: (() => number) | undefined;
+  }) {
+    this.config = input.config;
+    this.screenClient = input.screenClient;
+    this.logger = input.logger;
+    this.now = input.now ?? Date.now;
+  }
+
+  /** True when a screening pass would actually judge anything: the screen is on and a client exists. */
+  get active(): boolean {
+    return this.config.screen.enabled && this.screenClient !== undefined;
+  }
+
+  /**
+   * Screens recalled items and pages at the recall chokepoint, the one place this host fully
+   * controls: other tools write into memory without touching Aman's retain path, so origin
+   * stamps alone cannot be trusted and the TEXT is screened here regardless of origin.
+   */
+  async screenRecall(input: {
+    items: RecallItem[];
+    pages: PageEntry[];
+    recallMs: number;
+    today: string;
+  }): Promise<ScreenPartition> {
+    const { items, pages, recallMs, today } = input;
+    if (!this.active) {
+      return {
+        injectedItems: items,
+        injectedPages: pages,
+        withheld: 0,
+        records: [],
+        ran: false,
+      };
+    }
+    const budgetMs = Math.min(this.config.screen.timeoutMs, Math.max(0, this.config.recallTimeoutMs - recallMs));
+    const screenDeadline = this.now() + budgetMs;
+
+    // Items first, then pages: input order is preserved through the pool, so per-kind indices and
+    // the injected order both stay stable.
+    const targets: ScreenTarget[] = [
+      ...items.map((item, index): ScreenTarget => ({
+        kind: 'item',
+        item,
+        id: itemScreenRecordId(index),
+        origin: item.metadata?.[MEMORY_ORIGIN_METADATA_KEY],
+        // The full sanitized line, prefix included, so the classifier judges every stored byte.
+        text: formatItemLine({ item, today }),
+      })),
+      ...pages.map((entry, index): ScreenTarget => ({
+        kind: 'page',
+        id: pageScreenRecordId(index),
+        origin: undefined,
+        // The classifier judges the drafting lines too, so a withheld page never leaves its lines behind.
+        text: pageEntryText(entry),
+        entry,
+      })),
+    ];
+
+    const outcomes = await mapWithConcurrency(targets, this.config.screen.maxConcurrency, async target => ({
+      target,
+      result: await this.safeClassify(target.text, Math.max(0, screenDeadline - this.now())),
+    }));
+
+    const injectedItems: RecallItem[] = [];
+    const injectedPages: PageEntry[] = [];
+    const records: MemoryScreenRecord[] = [];
+    let withheld = 0;
+
+    for (const { target, result } of outcomes) {
+      const decision = decideScreen({ id: target.id, origin: target.origin, result });
+      if (decision.record !== undefined) {
+        records.push(decision.record);
+      }
+      if (decision.withheld) {
+        withheld += 1;
+        this.logger.debug(SCREEN_WITHHELD_MESSAGES[target.kind], {
+          id: decision.record?.id,
+          score: decision.record?.score,
+          reason: decision.record?.reason,
+        });
+        continue;
+      }
+      switch (target.kind) {
+        case 'item':
+          injectedItems.push(target.item);
+          break;
+        case 'page':
+          injectedPages.push(target.entry);
+          break;
+      }
+    }
+
+    return {
+      injectedItems,
+      injectedPages,
+      withheld,
+      records,
+      ran: true,
+    };
+  }
+
+  /**
+   * Screens items on their own, for a caller that holds no pages: the mid-turn note search,
+   * whose results must clear the same screen as opening recall before the model may see them.
+   * Each item is judged on the exact note text the search shows for it.
+   */
+  async screenItems(input: { items: RecallItem[]; budgetMs: number }): Promise<ScreenedItems> {
+    const { items, budgetMs } = input;
+    if (!this.active) {
+      return { injectedItems: items, withheld: 0, records: [], ran: false };
+    }
+    const screenDeadline = this.now() + Math.max(0, budgetMs);
+    const targets: ScreenTarget[] = items.map((item, index): ScreenTarget => ({
+      kind: 'item',
+      item,
+      id: itemScreenRecordId(index),
+      origin: item.metadata?.[MEMORY_ORIGIN_METADATA_KEY],
+      text: sanitizeMemoryText(item.text),
+    }));
+    const outcomes = await mapWithConcurrency(targets, this.config.screen.maxConcurrency, async target => ({
+      target,
+      result: await this.safeClassify(target.text, Math.max(0, screenDeadline - this.now())),
+    }));
+
+    const injectedItems: RecallItem[] = [];
+    const records: MemoryScreenRecord[] = [];
+    let withheld = 0;
+    for (const { target, result } of outcomes) {
+      const decision = decideScreen({ id: target.id, origin: target.origin, result });
+      if (decision.record !== undefined) {
+        records.push(decision.record);
+      }
+      if (decision.withheld) {
+        withheld += 1;
+        this.logger.debug(SCREEN_WITHHELD_MESSAGES[target.kind], {
+          id: decision.record?.id,
+          score: decision.record?.score,
+          reason: decision.record?.reason,
+        });
+        continue;
+      }
+      if (target.kind === 'item') {
+        injectedItems.push(target.item);
+      }
+    }
+    return { injectedItems, withheld, records, ran: true };
+  }
+
+  /**
+   * Defense in depth: ScreenClient.classify is documented never to throw, but a client bug must
+   * not fail the turn either. No budget left resolves to "unknown" without a network call.
+   */
+  private async safeClassify(text: string, deadlineMs: number): Promise<ScreenClassifyResult> {
+    const screenClient = this.screenClient;
+    if (screenClient === undefined || deadlineMs <= 0) {
+      return {
+        ok: false,
+        flagged: false,
+        score: 0,
+        reasonCode: 'screen_timeout',
+        reason: 'no screen budget remained',
+      };
+    }
+    try {
+      return await screenClient.classify({ text, timeoutMs: deadlineMs });
+    } catch (error) {
+      return {
+        ok: false,
+        flagged: false,
+        score: 0,
+        reasonCode: 'screen_internal_error',
+        reason: `screen classify threw unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+}
+
 function isCompletedStatus(status: string): boolean {
   return status === 'completed' || status === 'success' || status === 'succeeded';
 }
@@ -1048,8 +1269,8 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
   private readonly logger: Logger;
   private readonly sessionId: string;
   private readonly previousTurnId: string | null;
-  /** Undefined when the recall screen is disabled; then recall is lossless and unscreened. */
-  private readonly screenClient: ScreenClient | undefined;
+  /** The recall screen, shared with the turn's note search binding. Inactive when the screen is disabled; then recall is lossless and unscreened. */
+  private readonly screener: RecallScreener;
   /** When false, memory recall and retention are disabled by the user for this session. */
   private readonly recallEnabled: boolean;
   /**
@@ -1111,7 +1332,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     this.logger = input.logger;
     this.sessionId = input.sessionId;
     this.previousTurnId = input.previousTurnId;
-    this.screenClient = input.screenClient;
     this.recallEnabled = input.recallEnabled ?? true;
     this.internalSourceState = input.internalSourceState;
     this.blockWatch = input.blockWatch;
@@ -1122,6 +1342,12 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     this.keepsNothing = input.keepsNothing ?? false;
     this.loadRecallExclusions = input.loadRecallExclusions;
     this.itemTrackingEnabled = input.itemTrackingEnabled ?? true;
+    this.screener = new RecallScreener({
+      config: this.config,
+      screenClient: input.screenClient,
+      logger: this.logger,
+      now: this.now,
+    });
   }
 
   /** Hydrates durable pending-retain and post-compaction-damping state from the previous turn's capability_state. */
@@ -1452,7 +1678,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       return recallStats;
     }
 
-    const screening = await this.screenRecall({
+    const screening = await this.screener.screenRecall({
       items,
       pages: pages.entries,
       recallMs: recall.recallMs,
@@ -1655,134 +1881,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     return { block, holdsOutsideText: items.some(item => item.state === 'open' && item.source !== 'person') };
   }
 
-  /**
-   * Screens recalled items and pages at the recall chokepoint, the one place this host fully
-   * controls: other tools write into memory without touching Aman's retain path, so origin stamps
-   * alone cannot be trusted and the TEXT is screened here regardless of origin. The screen only
-   * decides what reaches the model THIS turn; nothing is deleted from memory.
-   *
-   * The text screened is the exact sanitized text that would be injected, so sanitization can never
-   * authorize a benign verdict for one string while the model sees a different one.
-   *
-   * Latency and fan-out are both bounded so screening never delays the turn past the recall budget
-   * nor floods the classifier: items and pages are screened together through a worker pool capped
-   * at `screen.maxConcurrency`, and each call is clamped to whatever remains of the screen budget
-   * (the smaller of the per-call timeout and the leftover `recallTimeoutMs`) at the moment it
-   * begins, recomputed per call so a large batch shares the one deadline rather than each getting a
-   * fresh one. When nothing remains, calls return "unknown" immediately (fencing untrusted origins,
-   * injecting the user's own), so a slow recall or a huge recall set degrades safely.
-   */
-  private async screenRecall(input: {
-    items: RecallItem[];
-    pages: PageEntry[];
-    recallMs: number;
-    today: string;
-  }): Promise<ScreenPartition> {
-    const { items, pages, recallMs, today } = input;
-    if (!this.config.screen.enabled || this.screenClient === undefined) {
-      return {
-        injectedItems: items,
-        injectedPages: pages,
-        withheld: 0,
-        records: [],
-        ran: false,
-      };
-    }
-    const budgetMs = Math.min(this.config.screen.timeoutMs, Math.max(0, this.config.recallTimeoutMs - recallMs));
-    const screenDeadline = this.now() + budgetMs;
-
-    // Items first, then pages: input order is preserved through the pool, so per-kind indices and
-    // the injected order both stay stable.
-    const targets: ScreenTarget[] = [
-      ...items.map((item, index): ScreenTarget => ({
-        kind: 'item',
-        item,
-        id: itemScreenRecordId(index),
-        origin: item.metadata?.[MEMORY_ORIGIN_METADATA_KEY],
-        // The full sanitized line, prefix included, so the classifier judges every stored byte.
-        text: formatItemLine({ item, today }),
-      })),
-      ...pages.map((entry, index): ScreenTarget => ({
-        kind: 'page',
-        id: pageScreenRecordId(index),
-        origin: undefined,
-        // The classifier judges the drafting lines too, so a withheld page never leaves its lines behind.
-        text: pageEntryText(entry),
-        entry,
-      })),
-    ];
-
-    const outcomes = await mapWithConcurrency(targets, this.config.screen.maxConcurrency, async target => ({
-      target,
-      result: await this.safeClassify(target.text, Math.max(0, screenDeadline - this.now())),
-    }));
-
-    const injectedItems: RecallItem[] = [];
-    const injectedPages: PageEntry[] = [];
-    const records: MemoryScreenRecord[] = [];
-    let withheld = 0;
-
-    for (const { target, result } of outcomes) {
-      const decision = decideScreen({ id: target.id, origin: target.origin, result });
-      if (decision.record !== undefined) {
-        records.push(decision.record);
-      }
-      if (decision.withheld) {
-        withheld += 1;
-        this.logger.debug(SCREEN_WITHHELD_MESSAGES[target.kind], {
-          id: decision.record?.id,
-          score: decision.record?.score,
-          reason: decision.record?.reason,
-        });
-        continue;
-      }
-      switch (target.kind) {
-        case 'item':
-          injectedItems.push(target.item);
-          break;
-        case 'page':
-          injectedPages.push(target.entry);
-          break;
-      }
-    }
-
-    return {
-      injectedItems,
-      injectedPages,
-      withheld,
-      records,
-      ran: true,
-    };
-  }
-
-  /**
-   * Defense in depth: ScreenClient.classify is documented never to throw, but a client bug must
-   * not fail the turn either. No budget left resolves to "unknown" without a network call.
-   */
-  private async safeClassify(text: string, deadlineMs: number): Promise<ScreenClassifyResult> {
-    const screenClient = this.screenClient;
-    if (screenClient === undefined || deadlineMs <= 0) {
-      return {
-        ok: false,
-        flagged: false,
-        score: 0,
-        reasonCode: 'screen_timeout',
-        reason: 'no screen budget remained',
-      };
-    }
-    try {
-      return await screenClient.classify({ text, timeoutMs: deadlineMs });
-    } catch (error) {
-      return {
-        ok: false,
-        flagged: false,
-        score: 0,
-        reasonCode: 'screen_internal_error',
-        reason: `screen classify threw unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  }
-
   /** Defense in depth: maps an unexpected client throw to the same shape a normal failure returns. */
   private async safeGetOperation(op: string): Promise<GetOperationOutcome> {
     try {
@@ -1967,8 +2065,9 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
 /**
  * The screen client for a turn: a test-supplied override wins; otherwise one is built from config
  * only when the screen is enabled, so a disabled screen constructs nothing and recall is unscreened.
+ * Exported for the turn resolver, which builds the note search's screener from the same client.
  */
-function resolveScreenClient(input: {
+export function resolveScreenClient(input: {
   config: MemoryConfig;
   screenClient?: ScreenClient | undefined;
 }): ScreenClient | undefined {
