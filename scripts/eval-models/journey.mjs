@@ -197,8 +197,8 @@ export async function checkScheduledRun({
     }),
   );
   if (expect.brief_checks !== undefined && expect.brief_checks.length > 0) {
-    // Word checks on the brief itself, for cases that turn on what the brief says. Only reply
-    // checks are allowed here; the set parser enforces that.
+    // Word checks on the brief itself, for cases that turn on what the brief says. Only the
+    // checks that read a reply are allowed here; the set parser enforces that.
     results.push(
       ...runChecks({ checks: expect.brief_checks, reply: replyTextOf(finished.state.output), toolCalls: [] }).map(
         item => ({ ...item, check: `the brief: ${item.check}` }),

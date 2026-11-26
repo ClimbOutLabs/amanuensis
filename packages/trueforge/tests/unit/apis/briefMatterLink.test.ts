@@ -17,8 +17,8 @@
  *
  * All people, organizations and references in this file are invented for the fixture.
  */
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { AgentSpecSchema, type Turn } from '@truefoundry/trueforge-core/agent-session';
+import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -205,7 +205,9 @@ async function runChatTurn(
   if (response.status !== 200 && response.status !== 201) {
     throw new Error(`turn failed (${String(response.status)}): ${JSON.stringify(body).slice(0, 500)}`);
   }
-  const list = ListTurnsResponseSchema.parse(await (await server.request(`/api/v1/sessions/${sessionId}/turns`)).json());
+  const list = ListTurnsResponseSchema.parse(
+    await (await server.request(`/api/v1/sessions/${sessionId}/turns`)).json(),
+  );
   const turnId = list.data[0]?.id;
   if (turnId === undefined) {
     throw new Error('no turn listed');
@@ -440,7 +442,9 @@ function describeScenario(scenario: BriefMatterMailScenario, options: { secondRe
         }
         const toolNames = briefOpening.tools.map(tool => tool.function?.name);
         const canReadMemory =
-          toolNames.includes('list_pages') || toolNames.includes('read_page') || toolNames.includes('search_memory_notes');
+          toolNames.includes('list_pages') ||
+          toolNames.includes('read_page') ||
+          toolNames.includes('search_memory_notes');
         const historyInPrompt = JSON.stringify(briefOpening).includes('no delivery date');
         expect(canReadMemory || historyInPrompt).toBe(true);
       });

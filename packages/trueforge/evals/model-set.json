@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "memories": [
     {
       "text": "My dentist is Dr. Amara Okafor at Harbour Smiles in Kelvinton.",
@@ -814,16 +814,173 @@
             "timezone": "UTC",
             "brief_checks": [
               {
-                "type": "reply_includes",
-                "any": ["C-771"]
+                "type": "brief_link",
+                "acknowledgment": "C-771",
+                "matter": "R-1842"
               },
               {
-                "type": "reply_includes",
-                "any": ["R-1842"]
+                "type": "brief_pending",
+                "item": "certified copy"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "brief-matter-link-ambiguous",
+      "group": "brief",
+      "approval_policy": "approve",
+      "client_timezone": "UTC",
+      "steps": [
+        {
+          "prompt": "I asked the Records Office for a certified copy of my file today. They assigned my request the reference R-1842 and said it would take a few weeks.",
+          "journey": {
+            "type": "memory_saved",
+            "words": ["R-1842"],
+            "saved_in": ["shared"],
+            "not_saved_in": ["Fern", "Quill"]
+          }
+        },
+        {
+          "prompt": "I also asked the Records Office for a certified copy of my property record today. They assigned that request the reference R-2077.",
+          "journey": {
+            "type": "memory_saved",
+            "words": ["R-2077"],
+            "saved_in": ["shared"],
+            "not_saved_in": ["Fern", "Quill"]
+          }
+        },
+        {
+          "prompt": "The certified copy still has not arrived. It is delayed. Who can I contact at the Records Office, and when would it make sense to escalate, maybe by filing a complaint with the Review Desk?",
+          "checks": [
+            {
+              "type": "reply_includes",
+              "any": ["Records Office"]
+            },
+            {
+              "type": "reply_excludes",
+              "all": ["you filed a complaint", "complaint was filed"]
+            }
+          ]
+        },
+        {
+          "prompt": "Please remind me in two days at 9 in the morning to call the Records Office about the delayed certified copy.",
+          "checks": [
+            {
+              "type": "tool_called",
+              "tools": ["set_reminder"]
+            }
+          ]
+        },
+        {
+          "prompt": "I called the Records Office this morning. They located request R-1842, but they gave me no delivery date. The certified copy is still pending.",
+          "journey": {
+            "type": "memory_saved",
+            "words": ["R-1842"],
+            "saved_in": ["shared"],
+            "not_saved_in": ["Fern", "Quill"]
+          }
+        },
+        {
+          "prompt": "Please set up a morning brief for me every day at 7:30.",
+          "checks": [
+            {
+              "type": "tool_called",
+              "tools": ["create_schedule"]
+            }
+          ],
+          "journey": {
+            "type": "scheduled_run",
+            "cron": "30 7 * * *",
+            "timezone": "UTC",
+            "brief_checks": [
+              {
+                "type": "brief_link",
+                "acknowledgment": "C-771",
+                "matter": "R-1842"
               },
               {
-                "type": "reply_excludes",
-                "all": ["has been delivered", "was delivered", "file a complaint"]
+                "type": "brief_no_link",
+                "acknowledgment": "C-771",
+                "matter": "R-2077"
+              },
+              {
+                "type": "brief_pending",
+                "item": "certified copy"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "brief-matter-link-none",
+      "group": "brief",
+      "approval_policy": "approve",
+      "client_timezone": "UTC",
+      "steps": [
+        {
+          "prompt": "I asked the Records Office for a certified copy of my file today. They assigned my request the reference R-3305 and said it would take a few weeks.",
+          "journey": {
+            "type": "memory_saved",
+            "words": ["R-3305"],
+            "saved_in": ["shared"],
+            "not_saved_in": ["Fern", "Quill"]
+          }
+        },
+        {
+          "prompt": "The certified copy still has not arrived. It is delayed. Who can I contact at the Records Office, and when would it make sense to escalate, maybe by filing a complaint with the Review Desk?",
+          "checks": [
+            {
+              "type": "reply_includes",
+              "any": ["Records Office"]
+            },
+            {
+              "type": "reply_excludes",
+              "all": ["you filed a complaint", "complaint was filed"]
+            }
+          ]
+        },
+        {
+          "prompt": "Please remind me in two days at 9 in the morning to call the Records Office about the delayed certified copy.",
+          "checks": [
+            {
+              "type": "tool_called",
+              "tools": ["set_reminder"]
+            }
+          ]
+        },
+        {
+          "prompt": "I called the Records Office this morning. They located request R-3305, but they gave me no delivery date. The certified copy is still pending.",
+          "journey": {
+            "type": "memory_saved",
+            "words": ["R-3305"],
+            "saved_in": ["shared"],
+            "not_saved_in": ["Fern", "Quill"]
+          }
+        },
+        {
+          "prompt": "Please set up a morning brief for me every day at 7:30.",
+          "checks": [
+            {
+              "type": "tool_called",
+              "tools": ["create_schedule"]
+            }
+          ],
+          "journey": {
+            "type": "scheduled_run",
+            "cron": "30 7 * * *",
+            "timezone": "UTC",
+            "brief_checks": [
+              {
+                "type": "brief_no_link",
+                "acknowledgment": "C-771",
+                "matter": "R-3305"
+              },
+              {
+                "type": "brief_pending",
+                "item": "certified copy"
               }
             ]
           }
