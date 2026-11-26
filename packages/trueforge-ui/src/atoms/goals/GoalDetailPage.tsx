@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { openDeliveryLink } from '../../deliveries/openDelivery.js';
 import {
   formatGoalDateTime,
+  formatGoalTarget,
   goalEventLine,
   goalProgressCounts,
   goalSourceKindLabel,
@@ -415,7 +416,7 @@ export function GoalDetailPage({ goalId }: { goalId: string }) {
         {summary.reason !== null ? <p className="text-sm text-text-secondary">{summary.reason}</p> : null}
         <p className="text-xs text-text-secondary">
           {goal.targetAt !== null
-            ? `Target: ${formatGoalDateTime({ iso: goal.targetAt, timezone: goal.timezone })} (${goal.timezone}). `
+            ? `Target: ${formatGoalTarget({ iso: goal.targetAt, hasTime: goal.targetHasTime, timezone: goal.timezone })} (${goal.timezone}). `
             : ''}
           {counts.total > 0
             ? `${String(counts.confirmed)} of ${String(counts.total)} steps confirmed.`

@@ -91,6 +91,10 @@ export const CreateGoalToolSchema = z
     outcome: z.string().trim().min(1).max(2000),
     success_criteria: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
     target_at: z.string().nullable().optional(),
+    target_has_time: z
+      .boolean()
+      .optional()
+      .describe('True only when the person named a time of day for the target. Leave it out for a date alone.'),
     timezone: z.string().trim().min(1).max(100).optional(),
     agent_name: z.string().trim().min(1).max(200).optional(),
     selected_sources: z.array(GoalSourceToolSchema).max(50).optional(),
@@ -244,6 +248,7 @@ export class GoalToolSet extends LocalToolMCP {
       outcome: input.outcome,
       success_criteria: input.success_criteria ?? [],
       target_at: input.target_at ?? null,
+      target_has_time: input.target_has_time ?? false,
       timezone: input.timezone ?? 'UTC',
       selected_sources: input.selected_sources ?? [],
       steps: (input.steps ?? []).map(step => ({
@@ -344,6 +349,7 @@ const GOAL_INSTRUCTION_SECTION = 'goals';
 const GOAL_INSTRUCTION =
   'create_goal makes a goal draft when the person asks Aman to keep track of an outcome over time. ' +
   'A draft does nothing until the person reviews its activation card and activates it, so never say a goal is being watched before then. ' +
+  'When the person names a target date with no time of day, the deadline is the date alone: set target_has_time to false. Set it to true only when they named a time. ' +
   'list_goals and get_goal answer where things stand. request_goal_check checks an active goal now and reports what changed and what is next.';
 
 const GOAL_READ_INSTRUCTION =

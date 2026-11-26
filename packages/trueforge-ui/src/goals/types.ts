@@ -79,6 +79,8 @@ export type GoalItem = {
   successCriteria: string[];
   /** ISO 8601 target time, or null when the goal has no date. */
   targetAt: string | null;
+  /** True when the person gave the target a time of day. False reads the target as a date alone. */
+  targetHasTime: boolean;
   /** The IANA time zone the goal's dates and daily allowance are read in. */
   timezone: string;
   lifecycle: GoalLifecycle;
@@ -220,6 +222,7 @@ export type CreateGoalInput = {
   outcome: string;
   successCriteria: string[];
   targetAt: string | null;
+  targetHasTime?: boolean;
   timezone: string;
   selectedSources: GoalSourceRef[];
   steps: CreateGoalStepInput[];
@@ -237,6 +240,7 @@ export type UpdateGoalInput = {
   outcome?: string;
   successCriteria?: string[];
   targetAt?: string | null;
+  targetHasTime?: boolean;
   timezone?: string;
   selectedSources?: GoalSourceRef[];
   executionPolicy?: GoalExecutionPolicy;

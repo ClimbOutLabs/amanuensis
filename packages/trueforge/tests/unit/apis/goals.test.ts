@@ -232,6 +232,27 @@ describe('goals API', () => {
     expect(goalOf(after.json)['lifecycle']).toBe('draft');
   });
 
+  it('carries whether the target has a time from create through update, defaulting to a date alone', async () => {
+    const { app } = setup();
+    const plain = await call(app, 'POST', '/api/v1/goals', createBody());
+    expect(plain.status).toBe(201);
+    expect(goalOf(plain.json)['target_has_time']).toBe(false);
+
+    const timed = await call(app, 'POST', '/api/v1/goals', { ...createBody(), target_has_time: true });
+    expect(timed.status).toBe(201);
+    expect(goalOf(timed.json)['target_has_time']).toBe(true);
+    const goalId = String(goalOf(timed.json)['goal_id']);
+
+    const updated = await call(app, 'PUT', `/api/v1/goals/${goalId}`, {
+      expected_revision: goalOf(timed.json)['revision'],
+      target_at: '2027-06-15T07:00:00.000Z',
+      target_has_time: false,
+    });
+    expect(updated.status).toBe(200);
+    expect(goalOf(updated.json)['target_at']).toBe('2027-06-15T07:00:00.000Z');
+    expect(goalOf(updated.json)['target_has_time']).toBe(false);
+  });
+
   it('refuses a check on a draft goal and hides the goal from another owner', async () => {
     const shared = { store: new InMemoryGoalStore() };
     const { app } = setup(OWNER_SUBJECT_ID, shared);

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import {
   formatGoalDate,
+  formatGoalTarget,
   goalStatusSummary,
   lastCheckFromEvents,
   type GoalStatusSummary,
@@ -137,7 +138,7 @@ export function GoalsListPage() {
                 ) : null}
                 <span className="text-xs leading-5 text-text-secondary">
                   {goal.targetAt !== null
-                    ? `Target ${formatGoalDate({ iso: goal.targetAt, timezone: goal.timezone })}. `
+                    ? `Target ${formatGoalTarget({ iso: goal.targetAt, hasTime: goal.targetHasTime, timezone: goal.timezone })}. `
                     : ''}
                   {goal.lifecycle === 'active' && goal.nextCheckAt !== null
                     ? `Next check ${formatGoalDate({ iso: goal.nextCheckAt, timezone: goal.timezone })}.`

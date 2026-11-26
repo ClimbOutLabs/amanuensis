@@ -44,6 +44,8 @@ export interface GoalTable {
   outcome: string;
   success_criteria: string;
   target_at: string | Date | null;
+  /** Stored as 0 or 1 on both databases, because this one store serves both and SQLite cannot bind a boolean. */
+  target_has_time: number;
   timezone: string | null;
   lifecycle: string;
   revision: number;
@@ -336,6 +338,7 @@ export interface CreateGoalInput extends PersonOwner {
   outcome: string;
   success_criteria: readonly string[];
   target_at: string | null;
+  target_has_time: boolean;
   timezone: string | null;
   lifecycle: GoalLifecycle;
   linked_space_id: string | null;
@@ -350,6 +353,7 @@ export interface GoalPatch {
   outcome?: string | undefined;
   success_criteria?: readonly string[] | undefined;
   target_at?: string | null | undefined;
+  target_has_time?: boolean | undefined;
   timezone?: string | null | undefined;
   lifecycle?: GoalLifecycle | undefined;
   pinned_agent_id?: string | null | undefined;
@@ -746,6 +750,7 @@ function toGoal(row: GoalTable): Goal {
     outcome: row.outcome,
     success_criteria: parseStringArray(row.success_criteria),
     target_at: toIsoOrNull(row.target_at),
+    target_has_time: row.target_has_time === 1,
     timezone: row.timezone,
     lifecycle: row.lifecycle,
     revision: row.revision,
@@ -1005,6 +1010,7 @@ export class GoalStore implements IGoalStore {
       outcome: input.outcome,
       success_criteria: [...input.success_criteria],
       target_at: input.target_at,
+      target_has_time: input.target_has_time,
       timezone: input.timezone,
       lifecycle: input.lifecycle,
       revision: 1,
@@ -1029,6 +1035,7 @@ export class GoalStore implements IGoalStore {
         outcome: goal.outcome,
         success_criteria: JSON.stringify(goal.success_criteria),
         target_at: goal.target_at,
+        target_has_time: goal.target_has_time ? 1 : 0,
         timezone: goal.timezone,
         lifecycle: goal.lifecycle,
         revision: goal.revision,
@@ -1111,6 +1118,7 @@ export class GoalStore implements IGoalStore {
         outcome?: string;
         success_criteria?: string;
         target_at?: string | null;
+        target_has_time?: number;
         timezone?: string | null;
         lifecycle?: string;
         pinned_agent_id?: string | null;
@@ -1134,6 +1142,9 @@ export class GoalStore implements IGoalStore {
       }
       if (input.patch.target_at !== undefined) {
         set.target_at = input.patch.target_at;
+      }
+      if (input.patch.target_has_time !== undefined) {
+        set.target_has_time = input.patch.target_has_time ? 1 : 0;
       }
       if (input.patch.timezone !== undefined) {
         set.timezone = input.patch.timezone;
@@ -2057,6 +2068,7 @@ export class GoalStore implements IGoalStore {
               outcome: goal.outcome,
               success_criteria: JSON.stringify(goal.success_criteria),
               target_at: goal.target_at,
+              target_has_time: goal.target_has_time ? 1 : 0,
               timezone: goal.timezone,
               lifecycle: goal.lifecycle,
               revision: goal.revision,

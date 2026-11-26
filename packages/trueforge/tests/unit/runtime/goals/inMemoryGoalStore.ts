@@ -69,6 +69,7 @@ export class InMemoryGoalStore implements IGoalStore {
       outcome: input.outcome,
       success_criteria: input.success_criteria,
       target_at: input.target_at,
+      target_has_time: input.target_has_time,
       timezone: input.timezone,
       lifecycle: 'draft',
       revision: 1,

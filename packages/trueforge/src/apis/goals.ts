@@ -77,6 +77,7 @@ function toWireGoal(record: GoalRecord): Goal {
     outcome: record.outcome,
     success_criteria: [...record.success_criteria],
     target_at: record.target_at,
+    target_has_time: record.target_has_time,
     timezone: record.timezone,
     lifecycle: record.lifecycle,
     revision: record.revision,
@@ -226,6 +227,7 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
         outcome: body.outcome,
         success_criteria: body.success_criteria,
         target_at: body.target_at,
+        target_has_time: body.target_has_time,
         timezone: body.timezone,
         selected_sources: body.selected_sources,
         steps: body.steps.map(step => ({
@@ -273,6 +275,7 @@ export function createGoalsRouter<TTransaction>(deps: GoalsRouterDeps<TTransacti
           ...(body.outcome === undefined ? {} : { outcome: body.outcome }),
           ...(body.success_criteria === undefined ? {} : { success_criteria: body.success_criteria }),
           ...(body.target_at === undefined ? {} : { target_at: body.target_at }),
+          ...(body.target_has_time === undefined ? {} : { target_has_time: body.target_has_time }),
           ...(body.timezone === undefined ? {} : { timezone: body.timezone }),
           ...(body.agent_id === undefined ? {} : { agent_id: body.agent_id }),
           ...(body.selected_sources === undefined ? {} : { selected_sources: body.selected_sources }),

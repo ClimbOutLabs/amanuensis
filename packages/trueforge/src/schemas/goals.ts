@@ -68,6 +68,8 @@ export const GoalSchema = z
     /** Observable success criteria, one statement each. */
     success_criteria: z.array(z.string()),
     target_at: NullableIsoTimestamp,
+    /** True when the person gave the target a time of day. False reads the target as a date alone. */
+    target_has_time: z.boolean(),
     timezone: z.string().min(1).nullable(),
     lifecycle: GoalLifecycleSchema,
     /** Store revision. Every committed change advances it by one. */

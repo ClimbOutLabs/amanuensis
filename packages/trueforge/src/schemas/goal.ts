@@ -100,6 +100,7 @@ export const GoalSchema = z
     outcome: z.string().min(1),
     success_criteria: z.array(z.string()),
     target_at: z.string().nullable(),
+    target_has_time: z.boolean(),
     timezone: z.string().min(1),
     lifecycle: GoalLifecycleSchema,
     revision: z.number().int().nonnegative(),
@@ -165,6 +166,7 @@ export const CreateGoalRequestSchema = z
     outcome: z.string().trim().min(1).max(2000),
     success_criteria: z.array(z.string().trim().min(1).max(500)).max(20).default([]),
     target_at: z.string().nullable().default(null),
+    target_has_time: z.boolean().default(false),
     timezone: z.string().trim().min(1).max(100).default('UTC'),
     selected_sources: z.array(GoalSourceRefSchema).max(50).default([]),
     steps: z.array(CreateGoalStepRequestSchema).max(50).default([]),
@@ -182,6 +184,7 @@ export const UpdateGoalRequestSchema = z
     outcome: z.string().trim().min(1).max(2000).optional(),
     success_criteria: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
     target_at: z.string().nullable().optional(),
+    target_has_time: z.boolean().optional(),
     timezone: z.string().trim().min(1).max(100).optional(),
     agent_id: z
       .string()

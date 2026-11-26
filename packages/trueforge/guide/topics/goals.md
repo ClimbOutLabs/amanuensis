@@ -14,11 +14,14 @@ To make a goal, do the following:
 
 1. On the Goals page, choose **New goal**. In a chat, ask Aman to make the goal instead.
 2. Say the outcome in one sentence, and how you will know it is done.
-3. Add the steps the work breaks into, in order. A step can wait on an earlier step.
-4. Pick the sources Aman may read for this goal, such as one document. A check reads only the sources you picked for that goal, and nothing else.
-5. Pick the agent that will do the checking.
+3. Set a deadline if the work has one. Give a **Target date**, and a **Time (optional)** only when the deadline has a time.
+4. Add the steps the work breaks into, in order. A step can wait on an earlier step.
+5. Pick the sources Aman may read for this goal, such as one document. A check reads only the sources you picked for that goal, and nothing else.
+6. Pick the agent that will do the checking.
 
 The goal is saved as a draft. A draft is never checked, and nothing runs until you activate it. You can pick the agent on the draft, or change the one you picked, any time before you activate it.
+
+Note: The activation card and the goal page show the deadline as a date alone unless you set a time. A time you set shows in the goal's time zone.
 
 ## Activate a goal
 

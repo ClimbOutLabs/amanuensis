@@ -93,6 +93,8 @@ export interface CreateGoalDraftInput {
   outcome: string;
   success_criteria: readonly string[];
   target_at: string | null;
+  /** Whether the person gave the target a time of day. Defaults to false, a date alone. */
+  target_has_time?: boolean;
   timezone: string;
   selected_sources: readonly GoalSourceRef[];
   steps: readonly GoalDraftStepInput[];
@@ -245,6 +247,7 @@ export function createGoalService(deps: GoalServiceDeps) {
         outcome: input.outcome,
         success_criteria: input.success_criteria,
         target_at: input.target_at,
+        target_has_time: input.target_has_time ?? false,
         timezone: input.timezone,
         agent_id: input.agent_id,
         selected_sources: input.selected_sources,
@@ -303,6 +306,7 @@ export function createGoalService(deps: GoalServiceDeps) {
           input.patch.success_criteria !== undefined ||
           input.patch.selected_sources !== undefined ||
           input.patch.target_at !== undefined ||
+          input.patch.target_has_time !== undefined ||
           input.patch.agent_id !== undefined;
         if (material) {
           throw new GoalStateError(

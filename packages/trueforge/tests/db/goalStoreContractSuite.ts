@@ -32,6 +32,7 @@ function fundraiserGoal(overrides: Partial<CreateGoalInput> = {}): CreateGoalInp
     outcome: 'Have the venue, volunteers, and equipment confirmed by 1 June',
     success_criteria: ['Venue confirmed', 'Equipment quote accepted', 'Ten volunteers confirmed'],
     target_at: '2027-06-01T17:00:00.000Z',
+    target_has_time: true,
     timezone: 'America/New_York',
     lifecycle: 'draft',
     linked_space_id: null,
@@ -92,6 +93,23 @@ export function runGoalStoreContractSuite(getStore: () => IGoalStore | GoalStore
     ]);
     expect(created.execution_policy).toEqual({ check_frequency: 'daily' });
     expect(await store.getGoal({ tenant_id: TENANT, created_by: OWNER, goal_id: created.goal_id })).toEqual(created);
+  });
+
+  it('round-trips whether the target carries a time, and patches it with the target', async () => {
+    const store = getStore();
+    const created = await store.createGoal(fundraiserGoal());
+    expect(created.target_has_time).toBe(true);
+    const updated = await store.updateGoal({
+      tenant_id: TENANT,
+      created_by: OWNER,
+      goal_id: created.goal_id,
+      expected_revision: 1,
+      patch: { target_at: '2027-06-01T07:00:00.000Z', target_has_time: false },
+    });
+    expect(updated.target_has_time).toBe(false);
+    const reread = await store.getGoal({ tenant_id: TENANT, created_by: OWNER, goal_id: created.goal_id });
+    expect(reread?.target_at).toBe('2027-06-01T07:00:00.000Z');
+    expect(reread?.target_has_time).toBe(false);
   });
 
   it('keeps owner binding on reads: another owner sees nothing', async () => {
