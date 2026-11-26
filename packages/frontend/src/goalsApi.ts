@@ -191,6 +191,7 @@ function parseGoal(value: unknown): GoalItem | null {
     outcome,
     success_criteria: successCriteria,
     target_at: targetAt,
+    target_has_time: targetHasTime,
     timezone,
     lifecycle,
     revision,
@@ -214,6 +215,7 @@ function parseGoal(value: unknown): GoalItem | null {
     typeof outcome !== 'string' ||
     !isStringArray(successCriteria) ||
     !isNullableString(targetAt) ||
+    typeof targetHasTime !== 'boolean' ||
     typeof timezone !== 'string' ||
     typeof lifecycle !== 'string' ||
     !isGoalLifecycle(lifecycle) ||
@@ -236,6 +238,7 @@ function parseGoal(value: unknown): GoalItem | null {
     outcome,
     successCriteria,
     targetAt,
+    targetHasTime,
     timezone,
     lifecycle,
     revision,
@@ -635,6 +638,7 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
           outcome: input.outcome,
           success_criteria: input.successCriteria,
           target_at: input.targetAt,
+          target_has_time: input.targetHasTime ?? false,
           timezone: input.timezone,
           selected_sources: input.selectedSources.map(sourceRefBody),
           steps: input.steps.map(step => ({
@@ -674,6 +678,9 @@ export function createGoalsApi({ fetcher, client }: { fetcher: typeof fetch; cli
       }
       if (input.targetAt !== undefined) {
         payload.target_at = input.targetAt;
+      }
+      if (input.targetHasTime !== undefined) {
+        payload.target_has_time = input.targetHasTime;
       }
       if (input.timezone !== undefined) {
         payload.timezone = input.timezone;

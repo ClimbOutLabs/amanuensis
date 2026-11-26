@@ -86,6 +86,8 @@ export interface GoalRecord {
   outcome: string;
   success_criteria: readonly string[];
   target_at: string | null;
+  /** True when the person gave the target a time of day. False reads the target as a date alone. */
+  target_has_time: boolean;
   timezone: string;
   lifecycle: GoalLifecycle;
   revision: number;
@@ -205,6 +207,7 @@ export interface CreateGoalInput {
   outcome: string;
   success_criteria: readonly string[];
   target_at: string | null;
+  target_has_time: boolean;
   timezone: string;
   agent_id: string | null;
   selected_sources: readonly GoalSourceRef[];
@@ -221,6 +224,7 @@ export interface GoalPatch {
   outcome?: string;
   success_criteria?: readonly string[];
   target_at?: string | null;
+  target_has_time?: boolean;
   timezone?: string;
   /** The saved agent this goal runs as; activation pins its setup. */
   agent_id?: string | null;

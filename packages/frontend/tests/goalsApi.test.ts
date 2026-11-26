@@ -33,6 +33,7 @@ function goalWire(overrides: Record<string, unknown>): Record<string, unknown> {
     outcome: 'Hold a community fundraiser with the venue and equipment confirmed',
     success_criteria: ['Venue confirmed in writing'],
     target_at: '2026-06-20T17:00:00.000Z',
+    target_has_time: true,
     timezone: 'America/Los_Angeles',
     lifecycle: 'draft',
     revision: 1,
@@ -163,6 +164,7 @@ test('goals API creates a draft with snake case steps and dependency indexes', a
     outcome: 'Hold a community fundraiser with the venue and equipment confirmed',
     success_criteria: ['Venue confirmed in writing'],
     target_at: null,
+    target_has_time: false,
     timezone: 'America/Los_Angeles',
     selected_sources: [{ source_kind: 'document', source_ref: 'venue-booking-letter', label: 'Venue booking letter' }],
     steps: [

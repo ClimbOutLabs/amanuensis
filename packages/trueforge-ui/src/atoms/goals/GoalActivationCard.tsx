@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 
-import { formatGoalDate, goalSourceKindLabel, goalStepStatusLabel } from '../../goals/goalAttention.js';
+import { formatGoalTarget, goalSourceKindLabel, goalStepStatusLabel } from '../../goals/goalAttention.js';
 import { parseWholeNumber } from '../../goals/parseWholeNumber.js';
 import type { GoalActivationPreview, GoalExecutionPolicy, GoalNotificationPolicy } from '../../goals/types.js';
 import { cn } from '../lib/cn.js';
@@ -107,7 +107,7 @@ export function GoalActivationCard({
         ) : null}
         <p className="text-text-secondary">
           {goal.targetAt !== null
-            ? `By ${formatGoalDate({ iso: goal.targetAt, timezone: goal.timezone })} (${goal.timezone})`
+            ? `By ${formatGoalTarget({ iso: goal.targetAt, hasTime: goal.targetHasTime, timezone: goal.timezone })} (${goal.timezone})`
             : 'No target date.'}
         </p>
       </CardSection>

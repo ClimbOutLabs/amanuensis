@@ -25,6 +25,7 @@ function goal(overrides: Partial<GoalItem>): GoalItem {
     outcome: 'Hold a community fundraiser with the venue and equipment confirmed',
     successCriteria: ['Venue confirmed in writing'],
     targetAt: '2026-06-20T17:00:00.000Z',
+    targetHasTime: true,
     timezone: 'America/Los_Angeles',
     lifecycle: 'active',
     revision: 2,

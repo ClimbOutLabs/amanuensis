@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import { useGoals } from '../../goals/GoalsContext.js';
+import { targetInstant } from '../../goals/goalTargetTime.js';
 import type { CreateGoalInput, GoalAgentOption, GoalDetail, GoalSourceKind, GoalSourceRef } from '../../goals/types.js';
 import { Button } from '../primitives/Button.js';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../primitives/Dialog.js';
@@ -55,6 +56,7 @@ export function GoalCreateDialog({
   const [outcome, setOutcome] = useState('');
   const [criteriaText, setCriteriaText] = useState('');
   const [targetDate, setTargetDate] = useState('');
+  const [targetTime, setTargetTime] = useState('');
   const [timezone, setTimezone] = useState(browserTimezone);
   const [sources, setSources] = useState<SourceDraft[]>([]);
   const [steps, setSteps] = useState<StepDraft[]>([
@@ -127,6 +129,9 @@ export function GoalCreateDialog({
       .map((step, index) => (step.description.trim() !== '' ? index : -1))
       .filter(index => index >= 0);
     const keptPositionByDraft = new Map(keptStepIndexes.map((draftIndex, position) => [draftIndex, position]));
+    const effectiveTimezone = timezone.trim() === '' ? 'UTC' : timezone.trim();
+    // A date with no time is a date alone: the goal records that no time was
+    // given, and the stored instant is the start of the date in its zone.
     const input: CreateGoalInput = {
       agentId,
       title: title.trim(),
@@ -135,8 +140,16 @@ export function GoalCreateDialog({
         .split('\n')
         .map(line => line.trim())
         .filter(line => line !== ''),
-      targetAt: targetDate === '' ? null : new Date(targetDate).toISOString(),
-      timezone: timezone.trim() === '' ? 'UTC' : timezone.trim(),
+      targetAt:
+        targetDate === ''
+          ? null
+          : targetInstant({
+              date: targetDate,
+              time: targetTime === '' ? '00:00' : targetTime,
+              timezone: effectiveTimezone,
+            }),
+      targetHasTime: targetDate !== '' && targetTime !== '',
+      timezone: effectiveTimezone,
       selectedSources: completeSources,
       steps: keptStepIndexes.map(draftIndex => {
         const step = steps[draftIndex];
@@ -253,13 +266,23 @@ export function GoalCreateDialog({
 
           <div className="flex flex-wrap gap-3">
             <label className={`${labelClass} min-w-44 flex-1`}>
-              <span>Target date and time</span>
+              <span>Target date</span>
               <input
                 aria-label="Target date"
-                type="datetime-local"
+                type="date"
                 className={inputClass}
                 value={targetDate}
                 onChange={event => setTargetDate(event.target.value)}
+              />
+            </label>
+            <label className={`${labelClass} min-w-44 flex-1`}>
+              <span>Time (optional)</span>
+              <input
+                aria-label="Target time"
+                type="time"
+                className={inputClass}
+                value={targetTime}
+                onChange={event => setTargetTime(event.target.value)}
               />
             </label>
             <label className={`${labelClass} min-w-44 flex-1`}>

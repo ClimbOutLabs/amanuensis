@@ -2,11 +2,14 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { GoalCreateDialog } from '@/atoms/goals/GoalCreateDialog.js';
 import { GoalDetailPage } from '@/atoms/goals/GoalDetailPage.js';
+import { GoalEditDialog } from '@/atoms/goals/GoalEditDialog.js';
 import { GoalsListPage } from '@/atoms/goals/GoalsListPage.js';
 import { GoalsProvider } from '@/goals/GoalsContext.js';
 import {
   GoalSetupChangedError,
+  type CreateGoalInput,
   type GoalActivationPreview,
   type GoalCheckResult,
   type GoalDetail,
@@ -14,6 +17,7 @@ import {
   type GoalItem,
   type GoalStep,
   type GoalsApi,
+  type UpdateGoalInput,
 } from '@/goals/types.js';
 
 const shell = {
@@ -56,6 +60,7 @@ function fundraiserGoal(overrides: Partial<GoalItem>): GoalItem {
     outcome: 'Hold a community fundraiser with the venue, equipment, and volunteers confirmed',
     successCriteria: ['Venue confirmed in writing', 'Equipment booked'],
     targetAt: '2026-06-20T17:00:00.000Z',
+    targetHasTime: false,
     timezone: 'America/Los_Angeles',
     lifecycle: 'draft',
     revision: 1,
@@ -269,6 +274,25 @@ describe('Goal page, draft and activation card', () => {
     expect(screen.getByRole('button', { name: 'Advanced: work limits' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'Activate goal' })).toBeDefined();
     expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
+  });
+
+  it('keeps a deadline time the person set, on the card and the page', async () => {
+    // December 20 at 5 PM in the goal's zone is 1 AM UTC the next day. The
+    // goal records that this target carries a time, so the time survives.
+    const draft = fundraiserGoal({
+      targetAt: '2026-12-21T01:00:00.000Z',
+      targetHasTime: true,
+    });
+    const steps = [venueStep({}), equipmentStep({})];
+    const api = makeApi({
+      getGoal: () => Promise.resolve({ goal: draft, steps, nextStepId: null }),
+      getActivationPreview: () => Promise.resolve({ goal: draft, steps, setup: { ...SETUP } }),
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    expect(await screen.findByText('Review and activate')).toBeDefined();
+    expect(screen.getByText('By December 20, 2026 at 5:00 PM (America/Los_Angeles)')).toBeDefined();
+    expect(screen.getByText(/Target: December 20, 2026 at 5:00 PM \(America\/Los_Angeles\)/)).toBeDefined();
   });
 
   it('reads a comma-grouped daily allowance at its full value when activating', async () => {
@@ -714,5 +738,135 @@ describe('Goal page, editing a draft', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Activate goal' }));
     await waitFor(() => expect(activateGoal).toHaveBeenCalledTimes(1));
     expect(activateGoal).toHaveBeenCalledWith('goal-1', { expectedRevision: 2, setupDigest: 'digest-1' });
+  });
+});
+
+describe('Goal target, set in the create and edit forms', () => {
+  function fieldValue(label: string): string {
+    const field = screen.getByLabelText(label);
+    return field instanceof HTMLInputElement ? field.value : '';
+  }
+
+  // Drives the create form for the winter market stall and returns what the
+  // form handed the API, plus the detail the API answered, so each test can
+  // follow the deadline from the form to the screens that show it.
+  async function createThroughForm({ date, time }: { date: string; time?: string }) {
+    const inputs: CreateGoalInput[] = [];
+    const createdDetails: GoalDetail[] = [];
+    const api = makeApi({
+      createGoal: input => {
+        inputs.push(input);
+        const detail: GoalDetail = {
+          goal: fundraiserGoal({
+            title: input.title,
+            outcome: input.outcome,
+            successCriteria: input.successCriteria,
+            targetAt: input.targetAt,
+            targetHasTime: input.targetHasTime ?? false,
+            timezone: input.timezone,
+            selectedSources: input.selectedSources,
+          }),
+          steps: [],
+          nextStepId: null,
+        };
+        createdDetails.push(detail);
+        return Promise.resolve(detail);
+      },
+    });
+    renderWithApi(api, <GoalCreateDialog open onClose={() => undefined} onCreated={() => undefined} />);
+    // The agent list loads on open and the first agent is picked for the form.
+    expect(await screen.findByText('Fundraiser helper')).toBeDefined();
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Winter market stall' } });
+    fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'Run a stall at the winter market' } });
+    fireEvent.change(screen.getByLabelText('Target date'), { target: { value: date } });
+    if (time !== undefined) {
+      fireEvent.change(screen.getByLabelText('Target time'), { target: { value: time } });
+    }
+    fireEvent.change(screen.getByLabelText('Time zone'), { target: { value: 'America/Los_Angeles' } });
+    fireEvent.change(screen.getByLabelText('Step 1'), { target: { value: 'Book the stall' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
+    await waitFor(() => expect(inputs).toHaveLength(1));
+    const input = inputs[0];
+    const detail = createdDetails[0];
+    if (input === undefined || detail === undefined) {
+      throw new Error('The create form did not save the goal.');
+    }
+    return { input, detail };
+  }
+
+  function showCreated(detail: GoalDetail) {
+    cleanup();
+    const api = makeApi({
+      getGoal: () => Promise.resolve(detail),
+      getActivationPreview: () => Promise.resolve({ goal: detail.goal, steps: [], setup: { ...SETUP } }),
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+  }
+
+  it('sends a date alone as a date alone, and the card and page show the date alone', async () => {
+    const { input, detail } = await createThroughForm({ date: '2026-12-20' });
+
+    // December 20 with no time is stored as the start of that date in the
+    // goal's zone, and recorded as carrying no time.
+    expect(input.targetAt).toBe('2026-12-20T08:00:00.000Z');
+    expect(input.targetHasTime).toBe(false);
+
+    showCreated(detail);
+    expect(await screen.findByText('Review and activate')).toBeDefined();
+    expect(screen.getByText('By December 20, 2026 (America/Los_Angeles)')).toBeDefined();
+    expect(screen.getByText(/Target: December 20, 2026 \(America\/Los_Angeles\)/)).toBeDefined();
+    expect(screen.queryByText(/December 20, 2026 at \d/)).toBeNull();
+  });
+
+  it('sends a date with a 5 PM time as a timed deadline, and the card and page keep 5 PM', async () => {
+    const { input, detail } = await createThroughForm({ date: '2026-12-20', time: '17:00' });
+
+    // 5 PM on December 20 in Los Angeles is 1 AM UTC on December 21.
+    expect(input.targetAt).toBe('2026-12-21T01:00:00.000Z');
+    expect(input.targetHasTime).toBe(true);
+
+    showCreated(detail);
+    expect(await screen.findByText('Review and activate')).toBeDefined();
+    expect(screen.getByText('By December 20, 2026 at 5:00 PM (America/Los_Angeles)')).toBeDefined();
+    expect(screen.getByText(/Target: December 20, 2026 at 5:00 PM \(America\/Los_Angeles\)/)).toBeDefined();
+  });
+
+  it('opens the edit form on the stored target in the goal zone, and clearing the time makes it a date alone', async () => {
+    const draft = fundraiserGoal({ targetAt: '2026-12-21T01:00:00.000Z', targetHasTime: true });
+    const updates: UpdateGoalInput[] = [];
+    const api = makeApi({
+      updateGoal: (_goalId, input) => {
+        updates.push(input);
+        return Promise.resolve({ goal: draft, steps: [], nextStepId: null });
+      },
+    });
+    renderWithApi(
+      api,
+      <GoalEditDialog detail={{ goal: draft, steps: [], nextStepId: null }} onClose={() => undefined} onSaved={() => undefined} />,
+    );
+
+    // 1 AM UTC on December 21 reads in Los Angeles as December 20 at 17:00.
+    expect(fieldValue('Target date')).toBe('2026-12-20');
+    expect(fieldValue('Target time')).toBe('17:00');
+
+    fireEvent.change(screen.getByLabelText('Target time'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(updates).toHaveLength(1));
+    expect(updates[0]?.targetAt).toBe('2026-12-20T08:00:00.000Z');
+    expect(updates[0]?.targetHasTime).toBe(false);
+  });
+
+  it('opens the edit form with an empty time for a date-alone target, whatever hour it is stored at', async () => {
+    // The chat-created shape: the stored instant falls at 2 AM in the zone,
+    // and no time was ever picked, so the time field stays empty.
+    const draft = fundraiserGoal({ targetAt: '2027-03-15T09:00:00.000Z', targetHasTime: false });
+    const api = makeApi({});
+    renderWithApi(
+      api,
+      <GoalEditDialog detail={{ goal: draft, steps: [], nextStepId: null }} onClose={() => undefined} onSaved={() => undefined} />,
+    );
+
+    expect(fieldValue('Target date')).toBe('2027-03-15');
+    expect(fieldValue('Target time')).toBe('');
   });
 });

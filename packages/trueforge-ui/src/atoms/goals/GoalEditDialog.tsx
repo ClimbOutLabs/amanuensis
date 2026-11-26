@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import { useGoals } from '../../goals/GoalsContext.js';
+import { targetInstant, targetWallParts } from '../../goals/goalTargetTime.js';
 import { parseWholeNumber } from '../../goals/parseWholeNumber.js';
 import type { GoalAgentOption, GoalDetail, UpdateGoalInput } from '../../goals/types.js';
 import { Button } from '../primitives/Button.js';
@@ -37,7 +38,15 @@ export function GoalEditDialog({
   const [title, setTitle] = useState(goal.title);
   const [outcome, setOutcome] = useState(goal.outcome);
   const [criteriaText, setCriteriaText] = useState(goal.successCriteria.join('\n'));
-  const [targetDate, setTargetDate] = useState(goal.targetAt === null ? '' : goal.targetAt.slice(0, 16));
+  // The target fields open on the stored target read in the goal's own zone.
+  // A goal whose target has no time opens with the time empty, whatever hour
+  // the stored instant happens to fall at.
+  const initialTargetParts =
+    goal.targetAt === null ? null : targetWallParts({ iso: goal.targetAt, timezone: goal.timezone });
+  const initialTargetDate = initialTargetParts?.date ?? '';
+  const initialTargetTime = goal.targetHasTime ? (initialTargetParts?.time ?? '') : '';
+  const [targetDate, setTargetDate] = useState(initialTargetDate);
+  const [targetTime, setTargetTime] = useState(initialTargetTime);
   const [timezone, setTimezone] = useState(goal.timezone);
   const [checksPerDay, setChecksPerDay] = useState(String(goal.executionPolicy.checksPerDay));
   const [dailyAllowance, setDailyAllowance] = useState(String(goal.executionPolicy.dailyTokenAllowance));
@@ -74,6 +83,7 @@ export function GoalEditDialog({
   // The edit is diffed against the goal as loaded, field by field, so an
   // untouched field is never sent. On a started goal the fields that say what
   // the goal is working toward are not offered for editing at all.
+  const nextTimezone = timezone.trim() === '' ? goal.timezone : timezone.trim();
   const patch: Omit<UpdateGoalInput, 'expectedRevision'> = {};
   if (title.trim() !== goal.title) patch.title = title.trim();
   if (!started) {
@@ -83,12 +93,19 @@ export function GoalEditDialog({
       .map(line => line.trim())
       .filter(line => line !== '');
     if (JSON.stringify(criteria) !== JSON.stringify(goal.successCriteria)) patch.successCriteria = criteria;
-    if (targetDate !== (goal.targetAt === null ? '' : goal.targetAt.slice(0, 16))) {
-      patch.targetAt = targetDate === '' ? null : new Date(targetDate).toISOString();
+    if (targetDate !== initialTargetDate || targetTime !== initialTargetTime) {
+      patch.targetAt =
+        targetDate === ''
+          ? null
+          : targetInstant({
+              date: targetDate,
+              time: targetTime === '' ? '00:00' : targetTime,
+              timezone: nextTimezone,
+            });
+      patch.targetHasTime = targetDate !== '' && targetTime !== '';
     }
     if ((agentId === '' ? null : agentId) !== goal.agentId) patch.agentId = agentId === '' ? null : agentId;
   }
-  const nextTimezone = timezone.trim() === '' ? goal.timezone : timezone.trim();
   if (nextTimezone !== goal.timezone) patch.timezone = nextTimezone;
   if (
     parsedChecks !== null &&
@@ -226,14 +243,25 @@ export function GoalEditDialog({
           </label>
           <div className="flex flex-wrap gap-3">
             <label className={`${labelClass} min-w-44 flex-1`}>
-              <span>Target date and time</span>
+              <span>Target date</span>
               <input
                 aria-label="Target date"
-                type="datetime-local"
+                type="date"
                 className={inputClass}
                 value={targetDate}
                 disabled={started}
                 onChange={event => setTargetDate(event.target.value)}
+              />
+            </label>
+            <label className={`${labelClass} min-w-44 flex-1`}>
+              <span>Time (optional)</span>
+              <input
+                aria-label="Target time"
+                type="time"
+                className={inputClass}
+                value={targetTime}
+                disabled={started}
+                onChange={event => setTargetTime(event.target.value)}
               />
             </label>
             <label className={`${labelClass} min-w-44 flex-1`}>

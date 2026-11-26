@@ -185,6 +185,7 @@ function goalRecordOf(stored: StoredGoal): GoalRecord {
     outcome: stored.outcome,
     success_criteria: stored.success_criteria,
     target_at: stored.target_at,
+    target_has_time: stored.target_has_time,
     timezone: stored.timezone ?? 'UTC',
     lifecycle: stored.lifecycle,
     revision: stored.revision,
@@ -453,6 +454,7 @@ export function createGoalStoreAdapter(deps: GoalStoreAdapterDeps): IGoalStore {
             outcome: input.outcome,
             success_criteria: [...input.success_criteria],
             target_at: input.target_at,
+            target_has_time: input.target_has_time,
             timezone: input.timezone,
             lifecycle: 'draft',
             linked_space_id: input.linked_space_id,
@@ -560,6 +562,9 @@ export function createGoalStoreAdapter(deps: GoalStoreAdapterDeps): IGoalStore {
         }
         if (changes.target_at !== undefined) {
           patch.target_at = changes.target_at;
+        }
+        if (changes.target_has_time !== undefined) {
+          patch.target_has_time = changes.target_has_time;
         }
         if (changes.timezone !== undefined) {
           patch.timezone = changes.timezone;

@@ -72,11 +72,33 @@ describe('goal tools', () => {
     expect(goals).toHaveLength(1);
     expect(goals[0]?.lifecycle).toBe('draft');
 
+    // No time of day was named for this target, so the stored draft records
+    // the target as a date alone.
+    expect(goals[0]?.target_has_time).toBe(false);
+
     const listed = toolText(await tools.callTool({ name: 'list_goals', arguments: {} }));
     expect(listed).toContain('Community fundraiser');
 
     const fetched = toolText(await tools.callTool({ name: 'get_goal', arguments: { goal: 'Community fundraiser' } }));
     expect(fetched).toContain('Confirm the venue');
+  });
+
+  it('records a target time when the person named one', async () => {
+    const { store, tools } = setup();
+    const draftInput = fundraiserDraft();
+    await tools.callTool({
+      name: 'create_goal',
+      arguments: {
+        title: draftInput.title,
+        outcome: draftInput.outcome,
+        target_at: draftInput.target_at,
+        target_has_time: true,
+        timezone: draftInput.timezone,
+      },
+    });
+    const goals = [...store.goals.values()];
+    expect(goals).toHaveLength(1);
+    expect(goals[0]?.target_has_time).toBe(true);
   });
 
   it('runs a check from chat once the goal is active, and refuses while it is a draft', async () => {

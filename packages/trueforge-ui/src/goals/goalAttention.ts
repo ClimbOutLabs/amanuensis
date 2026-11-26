@@ -296,6 +296,23 @@ export function formatGoalDateTime({ iso, timezone }: { iso: string; timezone: s
   }
 }
 
+/**
+ * A goal's target as the person set it: the date alone when they gave it no
+ * time, or the date and time when they did. The stored instant alone cannot
+ * say which, so the goal records it and this is the one place that reads it.
+ */
+export function formatGoalTarget({
+  iso,
+  hasTime,
+  timezone,
+}: {
+  iso: string;
+  hasTime: boolean;
+  timezone: string;
+}): string {
+  return hasTime ? formatGoalDateTime({ iso, timezone }) : formatGoalDate({ iso, timezone });
+}
+
 /** A date read in the goal's own time zone, such as "June 15, 2026". */
 export function formatGoalDate({ iso, timezone }: { iso: string; timezone: string }): string {
   const date = new Date(iso);
