@@ -373,7 +373,7 @@ export async function overwriteThreadContext(db: Kysely<Database>, input: Overwr
 }
 
 /**
- * commitThreadAnswer — one transaction binds the context append and the
+ * commitThreadAnswer: one transaction binds the context append and the
  * answer events, so the accepted answer is never half-persisted. The
  * committed-final check runs inside the transaction, so the first-final-wins
  * decision and the write share one snapshot; an identical replay returns
@@ -393,6 +393,20 @@ export async function commitThreadAnswer(db: Kysely<Database>, input: CommitThre
   };
 
   await db.transaction().execute(async trx => {
+    // Lock the turn row FOR UPDATE before reading the prior events. The
+    // running fence in the context update takes FOR SHARE, which does not
+    // exclude another committer, so two racing commits could both read no
+    // prior final and both write. This lock is held to the end of the
+    // transaction, so committers for one turn serialize and the second one
+    // reads the committed final below. A missing turn locks nothing, and
+    // the fence still reads it as not found.
+    await trx
+      .selectFrom('turn')
+      .select(sql`1`.as('one'))
+      .where('session_id', '=', keys.session_id)
+      .where('turn_id', '=', keys.turn_id)
+      .forUpdate()
+      .executeTakeFirst();
     const prior = await listThreadModelMessagesInTransaction(trx, {
       session_id: input.session_id,
       turn_id: input.turn_id,

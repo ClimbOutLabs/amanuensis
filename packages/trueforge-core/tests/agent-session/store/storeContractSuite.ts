@@ -4317,6 +4317,27 @@ export function runStoreContractSuite<
       expect(await committedFinals(store, 'turn-1')).toEqual([answer]);
     });
 
+    it('identical replay still returns success after the turn has gone terminal', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      const answer = finalAnswer('the accepted answer');
+
+      await commit(store, { turnId: 'turn-1', answer, contextText: 'the accepted answer' });
+      await finishTurn(store, 'turn-1');
+
+      // The acknowledgment was lost before the turn finished, so the retry
+      // lands after the turn went terminal. The replay decision comes before
+      // the running fence, so it still reads as success.
+      await commit(store, { turnId: 'turn-1', answer, contextText: 'the accepted answer' });
+
+      const turn = await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' });
+      expect(turn?.snapshot.threads[MAIN_THREAD_ID]?.context).toEqual([
+        { role: 'assistant', content: 'the accepted answer' },
+      ]);
+      expect(await committedFinals(store, 'turn-1')).toEqual([answer]);
+    });
+
     it('rejects a competing final and leaves the accepted answer intact', async () => {
       const store = createStore();
       await seedSession(store);

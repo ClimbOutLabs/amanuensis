@@ -403,7 +403,7 @@ export async function overwriteThreadContext(db: Kysely<Database>, input: Overwr
 }
 
 /**
- * commitThreadAnswer — one transaction binds the context append and the
+ * commitThreadAnswer: one transaction binds the context append and the
  * answer events, so the accepted answer is never half-persisted. The
  * committed-final check runs inside the transaction, so the first-final-wins
  * decision and the write share one snapshot; an identical replay returns
