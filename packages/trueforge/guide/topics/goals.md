@@ -40,6 +40,8 @@ To check a goal now, do the following:
 
 Aman reads the goal's sources, saves anything new as evidence on the step it belongs to, and updates the steps. The goal page shows the evidence, what changed, and the next step. A source Aman could not read is named on the page, so a quiet goal is never mistaken for a checked one.
 
+Note: If a goal has no sources picked, a check has nothing to read. The check ends as failed, and the goal page says why. Pick at least one source so the goal can be checked.
+
 Note: A draft cannot be checked. Activate the goal first.
 
 ## Confirm a step

@@ -133,6 +133,173 @@ export interface GoalServiceDeps {
   now?: () => Date;
 }
 
+/** Words that carry no fact of their own, so they never decide coverage. */
+const COVERAGE_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'in',
+  'on',
+  'of',
+  'for',
+  'to',
+  'and',
+  'or',
+  'with',
+  'by',
+  'at',
+  'from',
+  'as',
+  'it',
+  'its',
+  'has',
+  'have',
+  'had',
+  'can',
+  'could',
+  'will',
+  'would',
+  'shall',
+  'should',
+  'may',
+  'might',
+  'must',
+  'do',
+  'does',
+  'did',
+]);
+
+/** One word reduced to a plain stem, so "confirmed", "confirms" and "confirm" are the same word. */
+function coverageStem(word: string): string {
+  // Two forms the suffix rules below split apart, repaired directly: "paid"
+  // never stemmed to "pay", and "fees" lost its last letters to the "es"
+  // rule while "fee" kept them, so neither pair ever matched.
+  if (word === 'paid') {
+    return 'pay';
+  }
+  if (word.length > 4 && word.endsWith('ies')) {
+    return `${word.slice(0, -3)}y`;
+  }
+  if (word.length > 3 && word.endsWith('ees')) {
+    return word.slice(0, -1);
+  }
+  if (word.length > 4 && word.endsWith('ing')) {
+    return word.slice(0, -3);
+  }
+  if (word.length > 3 && word.endsWith('ed')) {
+    return word.slice(0, -2);
+  }
+  if (word.length > 3 && word.endsWith('es')) {
+    return word.slice(0, -2);
+  }
+  if (word.length > 2 && word.endsWith('s')) {
+    return word.slice(0, -1);
+  }
+  if (word.length > 3 && word.endsWith('e')) {
+    return word.slice(0, -1);
+  }
+  return word;
+}
+
+/** Words that say a thing does not happen, so a step and a criterion disagree when only one side carries one. */
+const COVERAGE_NEGATION_WORDS = new Set([
+  'not',
+  'no',
+  'never',
+  'cannot',
+  'cant',
+  'dont',
+  'doesnt',
+  'didnt',
+  'wont',
+  'isnt',
+  'arent',
+  'wasnt',
+  'werent',
+  'hasnt',
+  'havent',
+  'hadnt',
+  'mustnt',
+  'shouldnt',
+  'couldnt',
+  'wouldnt',
+]);
+
+/**
+ * The fact-carrying words of a text, in the order they appear: lowercased,
+ * punctuation removed, stop words dropped, the rest stemmed. An amount keeps
+ * its sign, so "50" and "-50" are different words.
+ */
+function coverageWords(text: string): string[] {
+  const words: string[] = [];
+  for (const raw of text
+    .toLowerCase()
+    .replace(/(^|\s)-(\d)/g, '$1neg$2')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')) {
+    if (raw === '' || COVERAGE_STOP_WORDS.has(raw)) {
+      continue;
+    }
+    words.push(coverageStem(raw));
+  }
+  return words;
+}
+
+/** Whether a text says a thing does not happen: it carries a negation word. */
+function coverageNegated(text: string): boolean {
+  for (const raw of text
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')) {
+    if (COVERAGE_NEGATION_WORDS.has(raw)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether a step already carries a success criterion. Word membership alone
+ * cannot decide this: a step can name every word of a criterion and still
+ * state the opposite of it, with the parties swapped ("Sam pays Nora 50"
+ * for "Nora pays Sam 50"), the amount negated ("Pay -50" for "Pay 50"), or
+ * the action forbidden ("Do not charge the fee" for "The fee is charged").
+ * A swallowed criterion is invisible to every check, while a wrongly
+ * appended step sits on the card where the person can see it. So a step
+ * carries a criterion only when it restates the criterion's fact-carrying
+ * words in the same order, across its description and acceptance criteria,
+ * and with the same negation, the way a step's acceptance criteria restate
+ * a criterion verbatim or nearly so. Every doubt appends.
+ */
+function stepCarriesCriterion(step: { description: string; acceptance_criteria: string }, criterion: string): boolean {
+  const wanted = coverageWords(criterion);
+  if (wanted.length === 0) {
+    return false;
+  }
+  const stepNegated = coverageNegated(step.description) || coverageNegated(step.acceptance_criteria);
+  if (coverageNegated(criterion) !== stepNegated) {
+    return false;
+  }
+  const carried = [...coverageWords(step.description), ...coverageWords(step.acceptance_criteria)];
+  let matched = 0;
+  for (const word of carried) {
+    if (word === wanted[matched]) {
+      matched += 1;
+      if (matched === wanted.length) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function createGoalService(deps: GoalServiceDeps) {
   const now = deps.now ?? (() => new Date());
   const store = deps.store;
@@ -237,6 +404,23 @@ export function createGoalService(deps: GoalServiceDeps) {
         acceptance_criteria: step.acceptance_criteria,
         source_refs: step.source_refs ?? [],
       }));
+      // The stored plan must cover the outcome. Checks record evidence against
+      // steps only, so a criterion no step carries could never gather evidence
+      // or be confirmed. Any criterion the given plan leaves out is appended
+      // as a step carrying that criterion. Both entry points (the chat tool
+      // and the API) share this create, so the guarantee holds for each.
+      for (const criterion of input.success_criteria) {
+        if (steps.some(step => stepCarriesCriterion(step, criterion))) {
+          continue;
+        }
+        steps.push({
+          description: criterion,
+          depends_on_indexes: [],
+          status: 'ready' as const,
+          acceptance_criteria: criterion,
+          source_refs: [],
+        });
+      }
       const goal = await store.createGoal({
         tenant_id: actor.tenant_id,
         created_by: actorSubject(actor),

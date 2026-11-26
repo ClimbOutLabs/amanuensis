@@ -63,9 +63,12 @@ describe('goal service', () => {
     const { store, service } = setup();
     const { actor, draft, preview, activated } = await activatedGoal(service);
 
-    // The draft starts with the venue and volunteers ready, the equipment waiting on the venue.
+    // The draft starts with the venue and volunteers ready, the equipment
+    // waiting on the venue, and one appended step at the end: no composed
+    // step carries the "in writing" part of the first criterion, so the
+    // coverage rule appends that criterion as a step of its own.
     expect(draft.goal.lifecycle).toBe('draft');
-    expect(draft.steps.map(step => step.status)).toEqual(['ready', 'planned', 'ready']);
+    expect(draft.steps.map(step => step.status)).toEqual(['ready', 'planned', 'ready', 'ready']);
 
     // Activation pins the setup the card showed and starts the daily checks.
     expect(activated.goal.lifecycle).toBe('active');

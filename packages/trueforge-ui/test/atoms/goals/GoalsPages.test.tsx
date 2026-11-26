@@ -490,6 +490,61 @@ describe('Goal page, running goal', () => {
     expect(screen.getByText(/The next step is saved: Confirm the venue/)).toBeDefined();
     expect(screen.getAllByText(/Work can resume at the next check/).length).toBeGreaterThan(0);
   });
+
+  it('shows the plain reason when a check could not read anything', async () => {
+    const active = fundraiserGoal({
+      lifecycle: 'active',
+      revision: 2,
+      pinnedSetup: { ...SETUP },
+      nextCheckAt: '2026-06-16T16:00:00.000Z',
+      selectedSources: [],
+    });
+    const steps = [venueStep({ sourceRefs: [] }), equipmentStep({})];
+    const checkResult: GoalCheckResult = {
+      cycle: {
+        cycleId: 'cycle-9',
+        goalId: 'goal-1',
+        inputRevision: 2,
+        trigger: 'manual',
+        startedAt: '2026-06-15T16:04:00.000Z',
+        finishedAt: '2026-06-15T16:04:01.000Z',
+        outcome: 'failed',
+        outcomeDetail: 'This goal has no sources selected, so the check had nothing to read.',
+        sessionId: null,
+        nextCheckAt: '2026-06-16T16:00:00.000Z',
+      },
+      goal: active,
+      steps,
+      newEvidence: [],
+      unreadSources: [],
+      nextStepId: 'step-venue',
+    };
+    const api = makeApi({
+      getGoal: () => Promise.resolve({ goal: active, steps, nextStepId: 'step-venue' }),
+      checkGoal: () => Promise.resolve(checkResult),
+      listEvents: () =>
+        Promise.resolve([
+          {
+            eventId: 'event-10',
+            goalId: 'goal-1',
+            sequence: 10,
+            eventType: 'goal_check_finished',
+            actor: 'owner-1',
+            payload: { outcome: 'failed', new_evidence: [], unread_sources: [] },
+            createdAt: '2026-06-15T16:04:01.000Z',
+          },
+        ]),
+    });
+    renderWithApi(api, <GoalDetailPage goalId="goal-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Check now' }));
+    expect(
+      await screen.findByText(
+        'That check failed. This goal has no sources selected, so the check had nothing to read.',
+      ),
+    ).toBeDefined();
+    expect(screen.getByText('This goal has no sources selected, so its checks have nothing to read.')).toBeDefined();
+  });
 });
 
 describe('Goal page, confirming a step', () => {

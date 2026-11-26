@@ -14,6 +14,10 @@
  * Scope is enforced here, by construction: the reader is handed only the goal's
  * selected sources, so a document the agent could reach but the owner did not
  * select is never read into the cycle.
+ *
+ * A check that could read nothing at all (no sources selected, or none of
+ * them readable) finishes as failed, with the reason on the cycle. It must
+ * not report "nothing changed": it never looked.
  */
 import { nextStepOf, unblockedSteps, type GoalActor, type GoalService } from './goalService';
 import type { GoalCycleRecord, GoalEvidenceRecord, GoalRecord, GoalSourceRef, GoalStepRecord } from './goalStorePort';
@@ -93,6 +97,7 @@ export async function runManualCheck(input: {
 
   const newEvidence: GoalEvidenceRecord[] = [];
   const unreadSources: GoalSourceRef[] = [];
+  let readSources = 0;
   let currentSteps = steps;
 
   for (const source of goal.selected_sources) {
@@ -101,6 +106,7 @@ export async function runManualCheck(input: {
       unreadSources.push(source);
       continue;
     }
+    readSources += 1;
     if (latestRevisionByRef.get(source.source_ref) === read.source_revision) {
       continue;
     }
@@ -156,11 +162,25 @@ export async function runManualCheck(input: {
   currentSteps = await store.listSteps({ tenant_id: actor.tenant_id, created_by: actor.subject_id, goal_id });
   const nextStep = nextStepOf(currentSteps);
 
+  // A check that read nothing has not earned "nothing changed": it could not
+  // look, so it finishes as failed with the plain reason, and the goal page
+  // shows that reason where a successful outcome would have stood.
   const changed = newEvidence.length > 0;
-  const outcome = changed ? 'completed' : 'nothing_changed';
-  const detail = changed
-    ? `Recorded ${String(newEvidence.length)} new source${newEvidence.length === 1 ? '' : 's'}.`
-    : 'Nothing new in the selected sources since the last check.';
+  let outcome: 'completed' | 'nothing_changed' | 'failed';
+  let detail: string;
+  if (changed) {
+    outcome = 'completed';
+    detail = `Recorded ${String(newEvidence.length)} new source${newEvidence.length === 1 ? '' : 's'}.`;
+  } else if (readSources > 0) {
+    outcome = 'nothing_changed';
+    detail = 'Nothing new in the selected sources since the last check.';
+  } else if (goal.selected_sources.length === 0) {
+    outcome = 'failed';
+    detail = 'This goal has no sources selected, so the check had nothing to read.';
+  } else {
+    outcome = 'failed';
+    detail = 'None of the selected sources could be read, so the check could not look for changes.';
+  }
 
   const finishedAt = now();
   const nextCheckAt = new Date(finishedAt.getTime() + (24 * 60 * 60 * 1000) / goal.execution_policy.checks_per_day);
