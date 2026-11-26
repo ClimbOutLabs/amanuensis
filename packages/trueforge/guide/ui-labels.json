@@ -410,5 +410,7 @@
   "Activate goal": "packages/trueforge-ui/src/atoms/goals/GoalActivationCard.tsx",
   "Check now": "packages/trueforge-ui/src/atoms/goals/GoalDetailPage.tsx",
   "End goal": "packages/trueforge-ui/src/atoms/goals/GoalDetailPage.tsx",
-  "Confirm step": "packages/trueforge-ui/src/atoms/goals/GoalDetailPage.tsx"
+  "Confirm step": "packages/trueforge-ui/src/atoms/goals/GoalDetailPage.tsx",
+  "Target date": "packages/trueforge-ui/src/atoms/goals/GoalCreateDialog.tsx",
+  "Time (optional)": "packages/trueforge-ui/src/atoms/goals/GoalCreateDialog.tsx"
 }

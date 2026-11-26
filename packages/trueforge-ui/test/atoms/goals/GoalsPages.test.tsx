@@ -842,7 +842,11 @@ describe('Goal target, set in the create and edit forms', () => {
     });
     renderWithApi(
       api,
-      <GoalEditDialog detail={{ goal: draft, steps: [], nextStepId: null }} onClose={() => undefined} onSaved={() => undefined} />,
+      <GoalEditDialog
+        detail={{ goal: draft, steps: [], nextStepId: null }}
+        onClose={() => undefined}
+        onSaved={() => undefined}
+      />,
     );
 
     // 1 AM UTC on December 21 reads in Los Angeles as December 20 at 17:00.
@@ -863,7 +867,11 @@ describe('Goal target, set in the create and edit forms', () => {
     const api = makeApi({});
     renderWithApi(
       api,
-      <GoalEditDialog detail={{ goal: draft, steps: [], nextStepId: null }} onClose={() => undefined} onSaved={() => undefined} />,
+      <GoalEditDialog
+        detail={{ goal: draft, steps: [], nextStepId: null }}
+        onClose={() => undefined}
+        onSaved={() => undefined}
+      />,
     );
 
     expect(fieldValue('Target date')).toBe('2027-03-15');

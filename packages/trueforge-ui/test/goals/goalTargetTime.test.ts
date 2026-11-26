@@ -36,7 +36,9 @@ describe('target wall clock conversions', () => {
   });
 
   it('falls back to UTC for a zone it does not know', () => {
-    expect(targetInstant({ date: '2026-12-20', time: '17:00', timezone: 'Not/AZone' })).toBe('2026-12-20T17:00:00.000Z');
+    expect(targetInstant({ date: '2026-12-20', time: '17:00', timezone: 'Not/AZone' })).toBe(
+      '2026-12-20T17:00:00.000Z',
+    );
     expect(targetWallParts({ iso: '2026-12-20T17:00:00.000Z', timezone: 'Not/AZone' })).toEqual({
       date: '2026-12-20',
       time: '17:00',
@@ -50,20 +52,20 @@ describe('target wall clock conversions', () => {
 
 describe('formatGoalTarget', () => {
   it('shows the date alone when the target carries no time', () => {
-    expect(
-      formatGoalTarget({ iso: '2027-03-15T09:00:00.000Z', hasTime: false, timezone: 'America/Los_Angeles' }),
-    ).toBe('March 15, 2027');
+    expect(formatGoalTarget({ iso: '2027-03-15T09:00:00.000Z', hasTime: false, timezone: 'America/Los_Angeles' })).toBe(
+      'March 15, 2027',
+    );
   });
 
   it('shows the date and time when the target carries a time', () => {
-    expect(
-      formatGoalTarget({ iso: '2026-12-21T01:00:00.000Z', hasTime: true, timezone: 'America/Los_Angeles' }),
-    ).toBe('December 20, 2026 at 5:00 PM');
+    expect(formatGoalTarget({ iso: '2026-12-21T01:00:00.000Z', hasTime: true, timezone: 'America/Los_Angeles' })).toBe(
+      'December 20, 2026 at 5:00 PM',
+    );
   });
 
   it('keeps a midnight the person picked as a time', () => {
-    expect(
-      formatGoalTarget({ iso: '2026-12-20T08:00:00.000Z', hasTime: true, timezone: 'America/Los_Angeles' }),
-    ).toBe('December 20, 2026 at 12:00 AM');
+    expect(formatGoalTarget({ iso: '2026-12-20T08:00:00.000Z', hasTime: true, timezone: 'America/Los_Angeles' })).toBe(
+      'December 20, 2026 at 12:00 AM',
+    );
   });
 });
