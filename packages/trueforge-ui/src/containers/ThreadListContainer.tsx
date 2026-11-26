@@ -460,6 +460,7 @@ function RecentChatsSection({
   collapsible,
   search,
   folderHeading,
+  archivedToggle,
 }: {
   children: ReactNode;
   viewportRef: Ref<HTMLDivElement>;
@@ -469,6 +470,8 @@ function RecentChatsSection({
   search?: RecentChatsSearch;
   /** Puts a Folders heading with the new-folder control above the list. */
   folderHeading: boolean;
+  /** The archived view switch, rendered above the list rather than inside it. */
+  archivedToggle?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(true);
   const shell = useOptionalShellMode();
@@ -534,6 +537,7 @@ function RecentChatsSection({
           />
         </label>
       ) : null}
+      {isOpen ? archivedToggle : null}
       {folderHeading && chatFolders !== null ? (
         <div className="flex shrink-0 items-center justify-between px-2.5 pt-1 pb-0.5">
           <h3 className="m-0 text-xs font-normal text-text-secondary">Folders</h3>
@@ -798,6 +802,18 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
         hideScrollbar={isRecentHistory}
         collapsible={!isRecentHistory}
         folderHeading={isRecentHistory}
+        archivedToggle={
+          chatFolders?.setArchived !== undefined ? (
+            <button
+              type="button"
+              aria-pressed={showArchived}
+              className="mx-2 mb-1 rounded-md px-2 py-1 text-left text-sm text-text-secondary hover:bg-ghost-button-hover"
+              onClick={() => setShowArchived(value => !value)}
+            >
+              {showArchived ? 'Back to chats' : 'Archived chats'}
+            </button>
+          ) : null
+        }
         search={
           isRecentHistory
             ? {
@@ -812,16 +828,6 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
             : undefined
         }
       >
-        {chatFolders?.setArchived !== undefined ? (
-          <button
-            type="button"
-            aria-pressed={showArchived}
-            className="mx-2 mb-1 rounded-md px-2 py-1 text-left text-sm text-text-secondary hover:bg-ghost-button-hover"
-            onClick={() => setShowArchived(value => !value)}
-          >
-            {showArchived ? 'Back to chats' : 'Archived chats'}
-          </button>
-        ) : null}
         {chatFolders?.loadError != null ? (
           <p role="alert" className="mx-2 mb-2 rounded-md bg-failure-bg/12 px-2 py-1.5 text-sm text-failure-bg">
             {chatFolders.loadError}

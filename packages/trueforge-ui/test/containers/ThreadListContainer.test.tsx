@@ -296,6 +296,52 @@ describe('ThreadListContainer', () => {
     expect(searchField.className).not.toMatch(/text-\[0\.8125rem\]/);
   });
 
+  it('places the Archived chats control above the Folders heading, outside the folder list', async () => {
+    const chatFolders: ChatFolderStore = {
+      load: async () => ({
+        folders: [{ id: 'folder-work', name: 'Work' }],
+        assignments: [],
+        folderSessions: [{ folderId: 'folder-work', sessions: [] }],
+        unfiledSessions: [],
+      }),
+      createFolder: async ({ name }) => ({ id: 'folder-new', name }),
+      renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+      deleteFolder: async () => {},
+      setSessionFolder: async () => {},
+      setSessionArchived: async () => {},
+    };
+
+    const { container } = renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-1', title: 'Current session' }],
+      },
+      variant: 'recent-history',
+      chatFolders,
+    });
+
+    const toggle = await screen.findByRole('button', { name: 'Archived chats' });
+    const foldersHeading = screen.getByRole('heading', { name: 'Folders' });
+
+    // The control comes before the Folders heading in the rail, as the guide describes it:
+    // above the list, not inside the folder list where it reads as a folder.
+    const position = toggle.compareDocumentPosition(foldersHeading);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const viewport = container.querySelector('[data-slot="aui_thread-list-viewport"]');
+    if (viewport === null) throw new Error('Expected the thread list viewport');
+    expect(viewport.contains(toggle)).toBe(false);
+    expect(viewport.contains(screen.getByRole('region', { name: 'Work' }))).toBe(true);
+
+    // The control still switches the list between the regular and archived views.
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('thread-row-Current session')).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Back to chats' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('thread-row-Current session')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to chats' }));
+    expect(screen.getByTestId('thread-row-Current session')).toBeInTheDocument();
+  });
+
   it('renders loading and empty list states from the runtime', () => {
     const { unmount } = renderThreadList({
       adapter: {
