@@ -154,29 +154,52 @@ describe('coverage matching', () => {
     });
   }
 
-  it('appends the letters and photos criteria when one step prints only the form', async () => {
+  // Each pair below shares every fact-carrying word, so a word-membership
+  // rule calls the criterion covered. The step states the opposite of the
+  // criterion: the parties are swapped, the amount is negated, or the step
+  // forbids what the criterion requires. The criterion must stay visible on
+  // the plan, so it is appended as its own step.
+  const REVERSED: readonly { criterion: string; step: string }[] = [
+    { criterion: 'Nora pays Sam 50', step: 'Sam pays Nora 50' },
+    { criterion: 'Pay 50', step: 'Pay -50' },
+    { criterion: 'The fee is charged', step: 'Do not charge the fee' },
+  ];
+  for (const { criterion, step } of REVERSED) {
+    it(`appends "${criterion}" when the only step is "${step}"`, async () => {
+      const steps = await draftSteps([criterion], [{ description: step, acceptance_criteria: '' }]);
+      expect(steps.map(candidate => candidate.description)).toEqual([step, criterion]);
+    });
+  }
+
+  it('appends all three printing criteria when one step prints only the form', async () => {
     const criteria = ['The form is printed', 'The letters are printed', 'The photos are printed'];
     const steps = await draftSteps(criteria, [{ description: 'Print the form', acceptance_criteria: '' }]);
-    // The form criterion is genuinely carried by the step: same object, same
-    // action. The letters and photos are different objects the step never
-    // names, so each is appended.
+    // The letters and photos are different objects the step never names. The
+    // form criterion names the same object and action as the step, but in
+    // the opposite order, and word order is part of the match: a step that
+    // cannot be read as restating the criterion leaves the criterion
+    // appended, where the person can see it on the plan.
     expect(steps.map(step => step.description)).toEqual([
       'Print the form',
+      'The form is printed',
       'The letters are printed',
       'The photos are printed',
     ]);
   });
 
   it('treats fees and fee as the same word, and paid and pay as the same word', async () => {
-    const steps = await draftSteps(['The fees are paid'], [{ description: 'Pay the fee', acceptance_criteria: '' }]);
-    expect(steps.map(step => step.description)).toEqual(['Pay the fee']);
+    const steps = await draftSteps(
+      ['The fees are paid'],
+      [{ description: 'The fee is paid', acceptance_criteria: '' }],
+    );
+    expect(steps.map(step => step.description)).toEqual(['The fee is paid']);
   });
 
   it('treats charged and charge as the same word', async () => {
     const steps = await draftSteps(
       ['The fee is charged'],
-      [{ description: 'Charge the fee', acceptance_criteria: '' }],
+      [{ description: 'Fee charge recorded', acceptance_criteria: '' }],
     );
-    expect(steps.map(step => step.description)).toEqual(['Charge the fee']);
+    expect(steps.map(step => step.description)).toEqual(['Fee charge recorded']);
   });
 });

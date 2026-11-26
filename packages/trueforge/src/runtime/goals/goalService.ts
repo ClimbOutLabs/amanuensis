@@ -207,46 +207,97 @@ function coverageStem(word: string): string {
   return word;
 }
 
-/** The fact-carrying words of a text: lowercased, punctuation removed, stop words dropped, the rest stemmed. */
-function coverageWords(text: string): ReadonlySet<string> {
-  const words = new Set<string>();
+/** Words that say a thing does not happen, so a step and a criterion disagree when only one side carries one. */
+const COVERAGE_NEGATION_WORDS = new Set([
+  'not',
+  'no',
+  'never',
+  'cannot',
+  'cant',
+  'dont',
+  'doesnt',
+  'didnt',
+  'wont',
+  'isnt',
+  'arent',
+  'wasnt',
+  'werent',
+  'hasnt',
+  'havent',
+  'hadnt',
+  'mustnt',
+  'shouldnt',
+  'couldnt',
+  'wouldnt',
+]);
+
+/**
+ * The fact-carrying words of a text, in the order they appear: lowercased,
+ * punctuation removed, stop words dropped, the rest stemmed. An amount keeps
+ * its sign, so "50" and "-50" are different words.
+ */
+function coverageWords(text: string): string[] {
+  const words: string[] = [];
   for (const raw of text
     .toLowerCase()
+    .replace(/(^|\s)-(\d)/g, '$1neg$2')
     .replace(/[^a-z0-9]+/g, ' ')
     .split(' ')) {
     if (raw === '' || COVERAGE_STOP_WORDS.has(raw)) {
       continue;
     }
-    words.add(coverageStem(raw));
+    words.push(coverageStem(raw));
   }
   return words;
 }
 
+/** Whether a text says a thing does not happen: it carries a negation word. */
+function coverageNegated(text: string): boolean {
+  for (const raw of text
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')) {
+    if (COVERAGE_NEGATION_WORDS.has(raw)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
- * Whether a step already carries a success criterion. A composed plan phrases
- * a criterion in its own words ("Book the equipment" for "The equipment is
- * booked"), so the match is on the criterion's fact-carrying words, across
- * the step's description and acceptance criteria. The step carries the
- * criterion only when every one of those words appears. Anything less lets a
- * step swallow a criterion it does not cover: one that shares only the verb
- * ("Renew the library card" for a passport renewal), a neighbouring object
- * ("Renew the passport" for a license renewal), or one printed thing for
- * three. A swallowed criterion is invisible to every check, while a wrongly
- * appended step sits on the card where the person can see it. So the rule is
- * full containment, and every doubt appends.
+ * Whether a step already carries a success criterion. Word membership alone
+ * cannot decide this: a step can name every word of a criterion and still
+ * state the opposite of it, with the parties swapped ("Sam pays Nora 50"
+ * for "Nora pays Sam 50"), the amount negated ("Pay -50" for "Pay 50"), or
+ * the action forbidden ("Do not charge the fee" for "The fee is charged").
+ * A swallowed criterion is invisible to every check, while a wrongly
+ * appended step sits on the card where the person can see it. So a step
+ * carries a criterion only when it restates the criterion's fact-carrying
+ * words in the same order, across its description and acceptance criteria,
+ * and with the same negation, the way a step's acceptance criteria restate
+ * a criterion verbatim or nearly so. Every doubt appends.
  */
 function stepCarriesCriterion(step: { description: string; acceptance_criteria: string }, criterion: string): boolean {
   const wanted = coverageWords(criterion);
-  if (wanted.size === 0) {
+  if (wanted.length === 0) {
     return false;
   }
-  const carried = new Set([...coverageWords(step.description), ...coverageWords(step.acceptance_criteria)]);
-  for (const word of wanted) {
-    if (!carried.has(word)) {
-      return false;
+  const stepNegated = coverageNegated(step.description) || coverageNegated(step.acceptance_criteria);
+  if (coverageNegated(criterion) !== stepNegated) {
+    return false;
+  }
+  const carried = [...coverageWords(step.description), ...coverageWords(step.acceptance_criteria)];
+  let matched = 0;
+  for (const word of carried) {
+    if (word === wanted[matched]) {
+      matched += 1;
+      if (matched === wanted.length) {
+        return true;
+      }
     }
   }
-  return true;
+  return false;
 }
 
 export function createGoalService(deps: GoalServiceDeps) {
