@@ -2,11 +2,20 @@ import type {
   AddThreadsAndAppendEventsInput,
   AddThreadsInput,
   AppendToThreadContextInput,
+  CommitThreadAnswerInput,
   OverwriteThreadContextInput,
   PatchMCPServersInput,
   PatchSandboxInfoInput,
   RemoveThreadsInput,
 } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
+import {
+  SessionStoreInvariantError,
+  TurnAnswerConflictError,
+} from '@truefoundry/trueforge-core/agent-session/store/SessionStoreErrors';
+import {
+  findFinalAnswerEvent,
+  turnEventsEqual,
+} from '@truefoundry/trueforge-core/agent-session/store/threadAnswerCommit';
 import type {
   ContextMessage,
   SubAgentCompletionMarker,
@@ -16,7 +25,7 @@ import { sql, type Kysely, type RawBuilder, type Transaction } from 'kysely';
 import { jsonbBind, jsonbSet, nowIso } from '../../sqlExpressions';
 import type { Database, TurnThreadCheckpoint } from '../../types';
 import { sortedByAppendId } from '../sqlExpressions';
-import { appendToEventsInTransaction } from './events';
+import { appendToEventsInTransaction, listThreadModelMessagesInTransaction } from './events';
 import {
   assertTurnRunning,
   classifyTurnFenceWriteFailure,
@@ -257,95 +266,97 @@ function usageSetExpr(usage: CurrentContextUsage | null): RawBuilder<string> {
   return sql`coalesce(${jsonbBind(usage)}, current_context_usage)`;
 }
 
-async function fencedTurnThreadContextUpdate(
-  db: Kysely<Database>,
-  args: {
-    keys: TurnKeys;
-    thread_id: string;
-    context: ContextMessage[];
-    replace_array: boolean;
-    current_context_usage: CurrentContextUsage | null;
-    completion: SubAgentCompletionMarker | null;
-    tool_call_memo: AppendToThreadContextInput['tool_call_memo'];
-    task_state: AppendToThreadContextInput['task_state'];
-    /** When replace_array, usage is set unconditionally (overwrite contract). */
-    usage_unconditional: CurrentContextUsage | null;
-  },
+interface FencedThreadContextUpdateArgs {
+  keys: TurnKeys;
+  thread_id: string;
+  context: ContextMessage[];
+  replace_array: boolean;
+  current_context_usage: CurrentContextUsage | null;
+  completion: SubAgentCompletionMarker | null;
+  tool_call_memo: AppendToThreadContextInput['tool_call_memo'];
+  task_state: AppendToThreadContextInput['task_state'];
+  /** When replace_array, usage is set unconditionally (overwrite contract). */
+  usage_unconditional: CurrentContextUsage | null;
+}
+
+async function fencedTurnThreadContextUpdate(db: Kysely<Database>, args: FencedThreadContextUpdateArgs): Promise<void> {
+  await db.transaction().execute(trx => fencedTurnThreadContextUpdateInTransaction(trx, args));
+}
+
+async function fencedTurnThreadContextUpdateInTransaction(
+  trx: DbOrTrx,
+  args: FencedThreadContextUpdateArgs,
 ): Promise<void> {
   const { keys, thread_id, context, replace_array } = args;
 
-  await db.transaction().execute(async trx => {
-    await assertTurnRunning(trx, keys);
+  await assertTurnRunning(trx, keys);
 
-    const now = nowIso();
+  const now = nowIso();
 
-    if (replace_array) {
-      await trx
-        .deleteFrom('turn_thread_context')
-        .where('session_id', '=', keys.session_id)
-        .where('turn_id', '=', keys.turn_id)
-        .where('thread_id', '=', thread_id)
-        .execute();
-    }
-
-    if (context.length > 0) {
-      const logRows = context.map(body => ({
-        session_id: keys.session_id,
-        thread_id,
-        turn_id: keys.turn_id,
-        body: jsonbBind(body),
-        created_at: now,
-      }));
-
-      const inserted = await trx.insertInto('thread_context_log').values(logRows).returning(['append_id']).execute();
-
-      let nextPos = replace_array ? 1 : await getNextPos(trx, keys, thread_id);
-
-      const contextMappingRows: {
-        session_id: string;
-        turn_id: string;
-        thread_id: string;
-        pos: number;
-        append_id: number;
-      }[] = [];
-
-      for (const row of sortedByAppendId(inserted)) {
-        contextMappingRows.push({
-          session_id: keys.session_id,
-          turn_id: keys.turn_id,
-          thread_id,
-          pos: nextPos,
-          append_id: row.append_id,
-        });
-        nextPos++;
-      }
-
-      if (contextMappingRows.length > 0) {
-        await trx.insertInto('turn_thread_context').values(contextMappingRows).execute();
-      }
-    }
-
-    const usageExpr =
-      args.usage_unconditional !== null
-        ? jsonbBind(args.usage_unconditional)
-        : usageSetExpr(args.current_context_usage);
-
-    const updateResult = await trx
-      .updateTable('turn_thread')
-      .set({
-        checkpoint: checkpointPatchExpr(args.completion, args.tool_call_memo, args.task_state),
-        current_context_usage: usageExpr,
-        updated_at: now,
-      })
+  if (replace_array) {
+    await trx
+      .deleteFrom('turn_thread_context')
       .where('session_id', '=', keys.session_id)
       .where('turn_id', '=', keys.turn_id)
       .where('thread_id', '=', thread_id)
-      .executeTakeFirst();
+      .execute();
+  }
 
-    if (Number(updateResult.numUpdatedRows) === 0) {
-      await classifyTurnThreadWriteFailure(trx, keys, thread_id);
+  if (context.length > 0) {
+    const logRows = context.map(body => ({
+      session_id: keys.session_id,
+      thread_id,
+      turn_id: keys.turn_id,
+      body: jsonbBind(body),
+      created_at: now,
+    }));
+
+    const inserted = await trx.insertInto('thread_context_log').values(logRows).returning(['append_id']).execute();
+
+    let nextPos = replace_array ? 1 : await getNextPos(trx, keys, thread_id);
+
+    const contextMappingRows: {
+      session_id: string;
+      turn_id: string;
+      thread_id: string;
+      pos: number;
+      append_id: number;
+    }[] = [];
+
+    for (const row of sortedByAppendId(inserted)) {
+      contextMappingRows.push({
+        session_id: keys.session_id,
+        turn_id: keys.turn_id,
+        thread_id,
+        pos: nextPos,
+        append_id: row.append_id,
+      });
+      nextPos++;
     }
-  });
+
+    if (contextMappingRows.length > 0) {
+      await trx.insertInto('turn_thread_context').values(contextMappingRows).execute();
+    }
+  }
+
+  const usageExpr =
+    args.usage_unconditional !== null ? jsonbBind(args.usage_unconditional) : usageSetExpr(args.current_context_usage);
+
+  const updateResult = await trx
+    .updateTable('turn_thread')
+    .set({
+      checkpoint: checkpointPatchExpr(args.completion, args.tool_call_memo, args.task_state),
+      current_context_usage: usageExpr,
+      updated_at: now,
+    })
+    .where('session_id', '=', keys.session_id)
+    .where('turn_id', '=', keys.turn_id)
+    .where('thread_id', '=', thread_id)
+    .executeTakeFirst();
+
+  if (Number(updateResult.numUpdatedRows) === 0) {
+    await classifyTurnThreadWriteFailure(trx, keys, thread_id);
+  }
 }
 
 /**
@@ -389,6 +400,70 @@ export async function overwriteThreadContext(db: Kysely<Database>, input: Overwr
     task_state: undefined,
     usage_unconditional: input.event.current_context_usage,
   });
+}
+
+/**
+ * commitThreadAnswer: one transaction binds the context append and the
+ * answer events, so the accepted answer is never half-persisted. The
+ * committed-final check runs inside the transaction, so the first-final-wins
+ * decision and the write share one snapshot; an identical replay returns
+ * before the running fence inside the context update, so a retry after the
+ * turn went terminal still reads as success.
+ *
+ * `read write` so the driver emits BEGIN IMMEDIATE: the check is read before
+ * the writes, and a deferred BEGIN would upgrade to a write lock only at the
+ * first write, where SQLITE_BUSY is no longer retryable.
+ */
+export async function commitThreadAnswer(db: Kysely<Database>, input: CommitThreadAnswerInput): Promise<void> {
+  const incoming = findFinalAnswerEvent(input.events, input.thread_id);
+  if (incoming === undefined) {
+    throw new SessionStoreInvariantError(
+      `commitThreadAnswer for turn ${input.turn_id} carries no final answer for thread ${input.thread_id}`,
+    );
+  }
+  const keys: TurnKeys = {
+    session_id: input.session_id,
+    turn_id: input.turn_id,
+  };
+
+  await db
+    .transaction()
+    .setAccessMode('read write')
+    .execute(async trx => {
+      const prior = await listThreadModelMessagesInTransaction(trx, {
+        session_id: input.session_id,
+        turn_id: input.turn_id,
+        thread_id: input.thread_id,
+      });
+      const committed = findFinalAnswerEvent(prior, input.thread_id);
+      if (committed !== undefined) {
+        if (committed.id === incoming.id && turnEventsEqual(committed, incoming)) {
+          return;
+        }
+        throw new TurnAnswerConflictError({
+          turn_id: input.turn_id,
+          thread_id: input.thread_id,
+          committed_event_id: committed.id,
+          incoming_event_id: incoming.id,
+        });
+      }
+      await fencedTurnThreadContextUpdateInTransaction(trx, {
+        keys,
+        thread_id: input.thread_id,
+        context: input.context,
+        replace_array: false,
+        current_context_usage: input.current_context_usage,
+        completion: input.completion,
+        tool_call_memo: input.tool_call_memo,
+        task_state: input.task_state,
+        usage_unconditional: null,
+      });
+      await appendToEventsInTransaction(trx, {
+        session_id: input.session_id,
+        turn_id: input.turn_id,
+        events: input.events,
+      });
+    });
 }
 
 /**

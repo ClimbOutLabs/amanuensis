@@ -26,6 +26,7 @@ import type {
   ChatSearchHit,
   ClearChatSearchIndexInput,
   CommandExecutionRecord,
+  CommitThreadAnswerInput,
   CompleteImplementationPlanDispatchInput,
   CreateSessionFolderInput,
   CreateSessionInput,
@@ -149,6 +150,7 @@ import {
   addThreadsAndAppendEvents as addThreadsAndAppendEventsQuery,
   addThreads as addThreadsQuery,
   appendToThreadContext as appendToThreadContextQuery,
+  commitThreadAnswer as commitThreadAnswerQuery,
   overwriteThreadContext as overwriteThreadContextQuery,
   patchMCPServers as patchMCPServersQuery,
   patchSandboxInfo as patchSandboxInfoQuery,
@@ -449,6 +451,10 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
 
   appendToThreadContext(input: AppendToThreadContextInput): Promise<void> {
     return appendToThreadContextQuery(this.db, input);
+  }
+
+  commitThreadAnswer(input: CommitThreadAnswerInput): Promise<void> {
+    return commitThreadAnswerQuery(this.db, input);
   }
 
   overwriteThreadContext(input: OverwriteThreadContextInput): Promise<void> {

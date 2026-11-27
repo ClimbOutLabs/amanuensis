@@ -29,6 +29,7 @@ import type {
   ChatSearchHit,
   ClearChatSearchIndexInput,
   CommandExecutionRecord,
+  CommitThreadAnswerInput,
   CompleteImplementationPlanDispatchInput,
   CreateSessionFolderInput,
   CreateSessionInput,
@@ -100,9 +101,11 @@ import {
   StaleApprovalContinuationError,
   StaleTaskChecklistError,
   TurnAlreadyExistsError,
+  TurnAnswerConflictError,
   TurnNotFoundError,
   TurnNotRunningError,
 } from './SessionStoreErrors';
+import { findFinalAnswerEvent, turnEventsEqual } from './threadAnswerCommit';
 
 /* eslint-disable @typescript-eslint/require-await -- in-memory store is synchronous; methods stay async so thrown SessionStore*Error reject as Promises for ISessionStore callers */
 
@@ -1345,6 +1348,11 @@ export class InMemorySessionStore<
 
   async appendToThreadContext(input: AppendToThreadContextInput): Promise<void> {
     const turn = this.requireRunningTurn(input.session_id, input.turn_id);
+    this.applyThreadContextAppend(turn, input);
+    return;
+  }
+
+  private applyThreadContextAppend(turn: TurnRecord<TTurnCustom>, input: AppendToThreadContextInput): void {
     const thread = turn.snapshot.threads[input.thread_id];
     if (!thread) {
       throw new SessionStoreInvariantError(`Thread not found: ${input.thread_id}`);
@@ -1363,6 +1371,37 @@ export class InMemorySessionStore<
       thread.task_state = deepCopy(input.task_state);
     }
     turn.updated_at = new Date();
+  }
+
+  async commitThreadAnswer(input: CommitThreadAnswerInput): Promise<void> {
+    const incoming = findFinalAnswerEvent(input.events, input.thread_id);
+    if (incoming === undefined) {
+      throw new SessionStoreInvariantError(
+        `commitThreadAnswer for turn ${input.turn_id} carries no final answer for thread ${input.thread_id}`,
+      );
+    }
+    const list = this.events.get(turnKey(input));
+    const committed = list === undefined ? undefined : findFinalAnswerEvent(list, input.thread_id);
+    if (committed !== undefined) {
+      // First final wins. An identical replay is the same commit arriving
+      // again after a lost acknowledgment: it succeeds and writes nothing,
+      // even once the turn is terminal. Anything else is a second answer.
+      if (committed.id === incoming.id && turnEventsEqual(committed, incoming)) {
+        return;
+      }
+      throw new TurnAnswerConflictError({
+        turn_id: input.turn_id,
+        thread_id: input.thread_id,
+        committed_event_id: committed.id,
+        incoming_event_id: incoming.id,
+      });
+    }
+    const turn = this.requireRunningTurn(input.session_id, input.turn_id);
+    this.applyThreadContextAppend(turn, input);
+    if (!list) {
+      throw new TurnNotFoundError(input.turn_id);
+    }
+    list.push(...deepCopy(input.events));
     return;
   }
 

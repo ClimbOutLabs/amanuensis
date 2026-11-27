@@ -2,11 +2,20 @@ import type {
   AddThreadsAndAppendEventsInput,
   AddThreadsInput,
   AppendToThreadContextInput,
+  CommitThreadAnswerInput,
   OverwriteThreadContextInput,
   PatchMCPServersInput,
   PatchSandboxInfoInput,
   RemoveThreadsInput,
 } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
+import {
+  SessionStoreInvariantError,
+  TurnAnswerConflictError,
+} from '@truefoundry/trueforge-core/agent-session/store/SessionStoreErrors';
+import {
+  findFinalAnswerEvent,
+  turnEventsEqual,
+} from '@truefoundry/trueforge-core/agent-session/store/threadAnswerCommit';
 import type { JsonValue } from '@truefoundry/trueforge-core/core/capabilities/AgentCapability';
 import type { AgentInfo } from '@truefoundry/trueforge-core/core/events/schema';
 import type {
@@ -18,7 +27,7 @@ import { sql, type Kysely, type RawBuilder, type Transaction } from 'kysely';
 import { json, jsonbSet } from '../../sqlExpressions';
 import type { Database, TurnThreadCheckpoint } from '../../types';
 import { values } from '../sqlExpressions';
-import { appendToEventsInTransaction } from './events';
+import { appendToEventsInTransaction, listThreadModelMessagesInTransaction } from './events';
 import {
   assertTurnRunning,
   classifyTurnFenceWriteFailure,
@@ -360,6 +369,77 @@ export async function overwriteThreadContext(db: Kysely<Database>, input: Overwr
     // Overwrite replaces context only; task state is untouched.
     task_state: undefined,
     usage_unconditional: input.event.current_context_usage,
+  });
+}
+
+/**
+ * commitThreadAnswer: one transaction binds the context append and the
+ * answer events, so the accepted answer is never half-persisted. The
+ * committed-final check runs inside the transaction, so the first-final-wins
+ * decision and the write share one snapshot; an identical replay returns
+ * before the running fence inside the context update, so a retry after the
+ * turn went terminal still reads as success.
+ */
+export async function commitThreadAnswer(db: Kysely<Database>, input: CommitThreadAnswerInput): Promise<void> {
+  const incoming = findFinalAnswerEvent(input.events, input.thread_id);
+  if (incoming === undefined) {
+    throw new SessionStoreInvariantError(
+      `commitThreadAnswer for turn ${input.turn_id} carries no final answer for thread ${input.thread_id}`,
+    );
+  }
+  const keys: TurnKeys = {
+    session_id: input.session_id,
+    turn_id: input.turn_id,
+  };
+
+  await db.transaction().execute(async trx => {
+    // Lock the turn row FOR UPDATE before reading the prior events. The
+    // running fence in the context update takes FOR SHARE, which does not
+    // exclude another committer, so two racing commits could both read no
+    // prior final and both write. This lock is held to the end of the
+    // transaction, so committers for one turn serialize and the second one
+    // reads the committed final below. A missing turn locks nothing, and
+    // the fence still reads it as not found.
+    await trx
+      .selectFrom('turn')
+      .select(sql`1`.as('one'))
+      .where('session_id', '=', keys.session_id)
+      .where('turn_id', '=', keys.turn_id)
+      .forUpdate()
+      .executeTakeFirst();
+    const prior = await listThreadModelMessagesInTransaction(trx, {
+      session_id: input.session_id,
+      turn_id: input.turn_id,
+      thread_id: input.thread_id,
+    });
+    const committed = findFinalAnswerEvent(prior, input.thread_id);
+    if (committed !== undefined) {
+      if (committed.id === incoming.id && turnEventsEqual(committed, incoming)) {
+        return;
+      }
+      throw new TurnAnswerConflictError({
+        turn_id: input.turn_id,
+        thread_id: input.thread_id,
+        committed_event_id: committed.id,
+        incoming_event_id: incoming.id,
+      });
+    }
+    await fencedTurnThreadContextUpdate(trx, {
+      keys,
+      thread_id: input.thread_id,
+      context: input.context,
+      replace_array: false,
+      current_context_usage: input.current_context_usage,
+      completion: input.completion,
+      tool_call_memo: input.tool_call_memo,
+      task_state: input.task_state,
+      usage_unconditional: null,
+    });
+    await appendToEventsInTransaction(trx, {
+      session_id: input.session_id,
+      turn_id: input.turn_id,
+      events: input.events,
+    });
   });
 }
 

@@ -142,6 +142,28 @@ export class TurnNotRunningError extends SessionStoreConflictError {
   }
 }
 
+/**
+ * A second, different final answer for a turn and thread that already has one
+ * committed. The first final wins; the committed answer stays intact.
+ */
+export class TurnAnswerConflictError extends SessionStoreConflictError {
+  readonly turn_id: string;
+  readonly thread_id: string;
+  readonly committed_event_id: string;
+  readonly incoming_event_id: string;
+
+  constructor(input: { turn_id: string; thread_id: string; committed_event_id: string; incoming_event_id: string }) {
+    super(
+      `Turn ${input.turn_id} thread ${input.thread_id} already has a committed final answer (${input.committed_event_id}); refusing a different one (${input.incoming_event_id})`,
+    );
+    this.name = 'TurnAnswerConflictError';
+    this.turn_id = input.turn_id;
+    this.thread_id = input.thread_id;
+    this.committed_event_id = input.committed_event_id;
+    this.incoming_event_id = input.incoming_event_id;
+  }
+}
+
 export class ImplementationPlanGrantLifecycleError extends SessionStoreConflictError {
   readonly turn_id: string;
 

@@ -1,4 +1,8 @@
-import type { PersistedTurnEvent, SessionEventItem } from '@truefoundry/trueforge-core/agent-session/schemas/events';
+import {
+  EventType,
+  type PersistedTurnEvent,
+  type SessionEventItem,
+} from '@truefoundry/trueforge-core/agent-session/schemas/events';
 import type { TokenPagination } from '@truefoundry/trueforge-core/agent-session/schemas/pagination';
 import type {
   AppendToEventsInput,
@@ -72,6 +76,27 @@ export async function appendToEventsInTransaction(
   if (inserted.length === 0) {
     await classifyTurnFenceWriteFailure(db, keys);
   }
+}
+
+/**
+ * The turn's persisted model-message events for one thread, oldest first,
+ * read inside the caller's transaction so a commit decision and the write it
+ * guards share one snapshot.
+ */
+export async function listThreadModelMessagesInTransaction(
+  db: Transaction<Database>,
+  input: { session_id: string; turn_id: string; thread_id: string },
+): Promise<PersistedTurnEvent[]> {
+  const rows = await db
+    .selectFrom('session_event')
+    .select('event')
+    .where('session_id', '=', input.session_id)
+    .where('turn_id', '=', input.turn_id)
+    .where(sql<string>`event ->> 'type'`, '=', EventType.MODEL_MESSAGE)
+    .where(sql<string>`event ->> 'thread_id'`, '=', input.thread_id)
+    .orderBy('event_id', 'asc')
+    .execute();
+  return rows.map(row => row.event);
 }
 
 /**

@@ -181,15 +181,17 @@ For current or external facts, require adequate source contents supplied by the 
 
 /**
  * Small, conservative signal that a message is asking about what is current,
- * not a general topic classifier. Three groups of alternatives: freshness
- * words ("latest", "up to date", ...), existence/release phrasing ("does X
- * exist", "has X been released", ...), and a bare `20xx` year, which the model
- * cannot reliably reason about relative to its own (self-unknowable) training
- * cutoff. Deliberately narrow: false negatives leave the model to its own
- * judgment (unchanged behavior); false positives cost one extra model step.
+ * not a general topic classifier. Two groups of alternatives: freshness words
+ * ("latest", "up to date", ...) and existence/release phrasing ("does X exist",
+ * "has X been released", ...). A bare `20xx` year is deliberately not a signal:
+ * a dated statement, or a date inside a document the person sent, is not a
+ * request for current information, and treating it as one corrected answers
+ * that were never guesses. Deliberately narrow: false negatives leave the
+ * model to its own judgment (unchanged behavior); false positives cost one
+ * extra model step.
  */
 const FRESHNESS_QUESTION_PATTERN =
-  /\b(latest|newest|most recent|up[- ]to[- ]date|right now|as of (today|now)|currently)\b|\b(does|is|are|has|have)\b[^.?!\n]{0,60}\b(exist|exists|existed|been released|released yet|come out|out yet|available yet)\b|\b20\d{2}\b/i;
+  /\b(latest|newest|most recent|up[- ]to[- ]date|right now|as of (today|now)|currently)\b|\b(does|is|are|has|have)\b[^.?!\n]{0,60}\b(exist|exists|existed|been released|released yet|come out|out yet|available yet)\b/i;
 
 /** See {@link FRESHNESS_QUESTION_PATTERN}. */
 export function isFreshnessQuestion(text: string): boolean {
@@ -229,6 +231,42 @@ export function lastUserMessageText(context: readonly ContextMessage[]): string 
       continue;
     }
     return assistantMessageContentToStringForSubAgent(message.content);
+  }
+  return undefined;
+}
+
+/**
+ * The person's own words in the latest genuine user message, or undefined when
+ * the context holds none. Host-wrapped text is left out: parts wrapped as
+ * internal notes or as extracted file text are the host's words, not the
+ * person's, and a message carrying only host-wrapped text is skipped in favour
+ * of the earlier genuine message. Host decisions about what the person asked
+ * (the grounding check) read this, never the flattened message, so words from
+ * an attached file cannot speak for the person.
+ */
+export function lastPersonAuthoredText(context: readonly ContextMessage[]): string | undefined {
+  for (let i = context.length - 1; i >= 0; i -= 1) {
+    const message = context[i];
+    if (message === undefined || !isLLMContextMessage(message) || message.role !== 'user') {
+      continue;
+    }
+    if (typeof message.content === 'string') {
+      if (isInternalSystemMessage(message) || isHostWrappedText(message.content)) {
+        continue;
+      }
+      return message.content;
+    }
+    if (Array.isArray(message.content)) {
+      const authored: string[] = [];
+      for (const part of message.content) {
+        if (isTextPart(part) && !isHostWrappedText(part.text)) {
+          authored.push(part.text);
+        }
+      }
+      if (authored.length > 0) {
+        return authored.join('');
+      }
+    }
   }
   return undefined;
 }
