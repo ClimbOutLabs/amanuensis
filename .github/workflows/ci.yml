@@ -901,6 +901,9 @@ jobs:
       - name: Check layout rules
         run: node scripts/check-repo-rules.mjs
 
+      - name: Check file sizes
+        run: node scripts/check-file-sizes.mjs
+
   # No dependency install: must run fast and stay green even when pnpm install fails.
   # Also runs the outside-hosts check, the nightly report's test and the local model bridge's test, which need nothing
   # installed either.
