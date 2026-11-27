@@ -21,10 +21,18 @@ import {
 } from './memoryPages';
 import { foldName } from './pageSlug';
 import { endedBefore } from './statementDates';
-import { statementHits, type StatementHit } from './statementIndex';
+import { statementHits } from './statementIndex';
+import { statementWordCandidates } from './statementWordCandidates';
 
-/** Why a page was loaded: its name was in the message (`direct`, or `possessive` for "Nora's"), or one of its statements was found by meaning. */
-type PageLoadReason = 'direct' | 'possessive' | 'meaning';
+/**
+ * Why a page was loaded: its name was in the message (`direct`, or `possessive` for "Nora's"), one of
+ * its statements was found by meaning, or, when neither of those found anything, one of its statements
+ * shared a distinctive word with the message (`words`).
+ */
+type PageLoadReason = 'direct' | 'possessive' | 'meaning' | 'words';
+
+/** The most statements one message is shown by word match alone, when no name or meaning route found a page. */
+const MAX_WORD_CANDIDATES = 4;
 
 export interface LoadedPage {
   vaultDir: string;
@@ -518,15 +526,17 @@ function pageWithLines({
 }
 
 /** Found statements grouped by page, pages in order of their best statement. */
-function groupHits(hits: readonly StatementHit[]): { hit: StatementHit; chosen: Map<number, Set<number>> }[] {
-  const groups = new Map<string, { hit: StatementHit; chosen: Map<number, Set<number>> }>();
-  for (const hit of hits) {
-    const key = `${hit.vaultDir}\n${hit.kind}/${hit.slug}`;
-    const group = groups.get(key) ?? { hit, chosen: new Map<number, Set<number>>() };
+function groupByPage<
+  T extends { vaultDir: string; kind: PageKind; slug: string; sectionIndex: number; lineIndex: number },
+>(items: readonly T[]): { item: T; chosen: Map<number, Set<number>> }[] {
+  const groups = new Map<string, { item: T; chosen: Map<number, Set<number>> }>();
+  for (const item of items) {
+    const key = `${item.vaultDir}\n${item.kind}/${item.slug}`;
+    const group = groups.get(key) ?? { item, chosen: new Map<number, Set<number>>() };
     groups.set(key, group);
-    const lines = group.chosen.get(hit.sectionIndex) ?? new Set<number>();
-    lines.add(hit.lineIndex);
-    group.chosen.set(hit.sectionIndex, lines);
+    const lines = group.chosen.get(item.sectionIndex) ?? new Set<number>();
+    lines.add(item.lineIndex);
+    group.chosen.set(item.sectionIndex, lines);
   }
   return [...groups.values()];
 }
@@ -661,7 +671,7 @@ export async function loadPagesForMessage(input: {
           today: input.today,
           skip: new Set(pages.map(page => `${page.kind}/${page.slug}`)),
         });
-  for (const { hit, chosen } of groupHits(hits)) {
+  for (const { item: hit, chosen } of groupByPage(hits)) {
     stats.candidates += 1;
     const shown = withoutLines(pageWithLines({ page: hit.page, chosen }), skipLine);
     if (!shown.sections.some(section => section.lines.length > 0)) {
@@ -694,6 +704,56 @@ export async function loadPagesForMessage(input: {
       readLines: rendered.filter(line => line.side === 'read').map(line => line.text),
       estimatedTokens,
     });
+  }
+
+  // Neither a name nor meaning found a page: fall back to the statements' own words. A word match is
+  // a weak signal, so it is offered only in that case, capped at four statements inside the same
+  // token budget the meaning groups share. A gate that judged the message and found it not about
+  // something remembered is a measured no, and a word match does not override it; the fallback is
+  // for when meaning could not judge (no model ready, or too little to judge against).
+  const gateJudgedClosed = input.gate?.state === 'judged' && !input.gate.open;
+  if (pages.length === 0 && input.today !== undefined && !gateJudgedClosed) {
+    const candidates = await statementWordCandidates({
+      vaultDirs: input.vaultDirs,
+      message: input.message,
+      today: input.today,
+      limit: MAX_WORD_CANDIDATES,
+      skipLine,
+    });
+    for (const { item: candidate, chosen } of groupByPage(candidates)) {
+      stats.candidates += 1;
+      const shown = withoutLines(pageWithLines({ page: candidate.page, chosen }), skipLine);
+      if (!shown.sections.some(section => section.lines.length > 0)) {
+        continue;
+      }
+      const rendered = renderPageLines({
+        title: candidate.title,
+        page: shown,
+        today: input.today,
+        nameIsOwn: pageNameIsOwn(candidate.page),
+      });
+      const text = rendered.map(line => line.text).join('\n');
+      const estimatedTokens = estimateTokens(text);
+      if (overBudget || usedTokens + estimatedTokens > input.maxTokens) {
+        stats.dropped_over_budget += 1;
+        continue;
+      }
+      usedTokens += estimatedTokens;
+      pages.push({
+        vaultDir: candidate.vaultDir,
+        kind: candidate.kind,
+        slug: candidate.slug,
+        title: singleLine(candidate.title),
+        reason: 'words',
+        page: shown,
+        text,
+        drafting: [],
+        holdsOutsideText: pageHoldsOutsideText(shown),
+        ownLines: rendered.filter(line => line.side === 'own').map(line => line.text),
+        readLines: rendered.filter(line => line.side === 'read').map(line => line.text),
+        estimatedTokens,
+      });
+    }
   }
   stats.loaded = pages.length;
   return { pages, stats, skippedFiles };

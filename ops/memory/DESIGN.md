@@ -421,6 +421,31 @@ it carries on without this step and never waits for a download.
   no drafting lines. A group counts as a loaded page in the turn's memory event and shares the page token
   limit; one that does not fit is dropped whole.
 
+#### Single statements found by words
+
+When neither the named pages nor the meaning search found any page, the host looks once more, at the
+statements' own words. This needs no meaning model, so it also runs while the model is not ready, and
+when there is too little to judge meaning against. One exception: when the meaning gate judged the
+message and found it not about something remembered, that measured no stands, and the weaker word
+signal does not override it. It considers the same statements the meaning search indexes, under the
+same rule for statements that have ended, and leaves out the lines the chat has pulled out.
+
+- **How a word counts.** The message and each statement are split into words, folded as names are
+  folded. Words of two letters or fewer, and the words that carry no topic (the function words recall
+  queries skip, and the words that add nothing to a saved fact), do not count. A word counts only when
+  it is not in most of the statements that may be shown: a word nearly
+  every statement holds cannot say which one the message means. Among the words that count, the rarer
+  one weighs more, so a statement matched by a distinctive word stands above one matched by a common
+  one.
+- **What is shown.** The best 4 statements by weight, grouped by page and drawn by the same code as
+  statements found by meaning, inside the same page token limit. A statement on a person page is shown
+  under that person page; it does not become a matter.
+- **What a match means.** A shared word is a weak signal. It can offer the page as a candidate, or
+  support asking the person which page they mean. It never by itself authorizes writing to that page.
+  The search is exported as `statementWordCandidates`, so a caller that needs to ask a clarifying
+  question works from the same bounded list, with each statement's page and, for a marked fact, its
+  fact id.
+
 #### Log notes by meaning
 
 The daily log is searched under the same two rules, from the whole log: a note's age never decides whether
