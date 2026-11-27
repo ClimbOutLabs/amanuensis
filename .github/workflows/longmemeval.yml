@@ -1,0 +1,96 @@
+name: LongMemEval
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/longmemeval.yml'
+      - 'scripts/longmemeval/**'
+      - 'scripts/eval-models/providers.mjs'
+      - 'scripts/eval-models/judge.mjs'
+      - 'packages/trueforge/scripts/longmemeval.ts'
+      - 'packages/trueforge/src/runtime/memory/**'
+      - 'packages/trueforge-core/src/core/memory/**'
+      - 'packages/trueforge-core/src/core/capabilities/builtins/ChatProvenance.ts'
+      - 'packages/trueforge/evals/eval-providers.json'
+      - 'packages/trueforge/package.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  schedule:
+    - cron: '19 10 * * 1'
+  workflow_dispatch:
+    inputs:
+      full:
+        type: boolean
+        description: Run all 500 questions (up to 1000 model calls)
+        default: false
+permissions:
+  contents: read
+env:
+  MODE: ${{ (github.event_name == 'pull_request' || inputs.full) && 'full' || 'panel' }}
+jobs:
+  retrieval:
+    name: Check Markdown memory retrieval
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @truefoundry/trueforge-core build:gen && pnpm --filter @truefoundry/trueforge build:gen
+      - name: Download and verify benchmark, then run recall
+        run: |
+          dir="$RUNNER_TEMP/longmemeval"
+          mkdir -p "$dir/grading"
+          curl --fail --location --retry 3 --output "$dir/dataset.json" 'https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json?download=true'
+          args=()
+          if [[ "$MODE" == full ]]; then args+=(--full); fi
+          python3 scripts/longmemeval/select.py "$dir/dataset.json" "$dir/history.jsonl" "$dir/grading/questions.jsonl" "${args[@]}"
+          pnpm eval:longmemeval "$dir/history.jsonl" "$dir/grading/recalls.jsonl"
+          node scripts/longmemeval/score.mjs "$dir/grading/questions.jsonl" "$dir/grading/recalls.jsonl" "$dir/results" "$MODE"
+      - name: Keep retrieval scores
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: longmemeval-retrieval
+          path: ${{ runner.temp }}/longmemeval/results/scores.json
+          if-no-files-found: error
+      - name: Pass benchmark inputs to the grader
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: longmemeval-grading-input
+          path: ${{ runner.temp }}/longmemeval/grading
+          retention-days: 1
+  grade:
+    name: Grade memory answers
+    needs: retrieval
+    permissions:
+      contents: read
+      actions: read
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    environment: model-evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: '.nvmrc'
+      - name: Read this run's benchmark inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" -n longmemeval-grading-input -D "$RUNNER_TEMP/grading"
+      - name: Generate and judge answers
+        env:
+          LONGMEMEVAL_GRADE: '1'
+          META_API_KEY: ${{ secrets.MODEL_EVAL_META_API_KEY }}
+        run: node scripts/longmemeval/score.mjs "$RUNNER_TEMP/grading/questions.jsonl" "$RUNNER_TEMP/grading/recalls.jsonl" "$RUNNER_TEMP/results" "$MODE"
+      - name: Keep answer scores and hypotheses
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: longmemeval-answers
+          path: ${{ runner.temp }}/results
+          if-no-files-found: error

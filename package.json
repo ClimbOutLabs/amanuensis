@@ -70,6 +70,7 @@
     "eval:tokens": "node scripts/eval-tokens.mjs",
     "eval:spaces": "node scripts/eval-spaces.mjs",
     "eval:models": "node scripts/eval-models.mjs",
+    "eval:longmemeval": "pnpm --filter @truefoundry/trueforge eval:longmemeval",
     "eval:models:fresh": "node scripts/eval-models-fresh.mjs",
     "smoke:down": "node scripts/require-smoke-env.mjs && node scripts/compose-smoke.mjs down",
     "smoke:logs": "node scripts/require-smoke-env.mjs && node scripts/compose-smoke.mjs logs",
