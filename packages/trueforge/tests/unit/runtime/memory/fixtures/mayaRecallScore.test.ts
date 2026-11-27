@@ -222,8 +222,11 @@ const PAGES_SORTED_BY_MEANING: Condition = {
   meaning: true,
   scores: PAGES_SORTED_BY_MEANING_SCORES,
   misses: PAGES_SORTED_BY_MEANING_MISSES,
-  unrelatedShown: 'shown a memory 19/300',
-  unrelatedShownAt: '1, 5, 20, 62, 73, 78, 102, 112, 121, 124, 125, 136, 138, 141, 177, 200, 218, 238, 258',
+  // Position 53 ("List the planets in order of size") is shown the Zoe page by the word fallback:
+  // the meaning gate judged the message, and the statement "Zoe wants a book about planets for her
+  // birthday" shares the distinctive word planets. A true topical match, recorded on purpose.
+  unrelatedShown: 'shown a memory 20/300',
+  unrelatedShownAt: '1, 5, 20, 53, 62, 73, 78, 102, 112, 121, 124, 125, 136, 138, 141, 177, 200, 218, 238, 258',
 };
 
 function scoreLine(score: RecallScore): string {

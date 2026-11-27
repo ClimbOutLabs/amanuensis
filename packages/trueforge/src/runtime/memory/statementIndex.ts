@@ -50,6 +50,8 @@ interface StatementLine {
   text: string;
   /** The statement as the page words it. */
   statement: string;
+  /** The marked fact's id when the line is a marked fact; a hand-typed bullet has none. */
+  factId: string | undefined;
   sectionIndex: number;
   lineIndex: number;
   until: string | undefined;
@@ -116,6 +118,7 @@ function statementLines({ key, page }: { key: string; page: MemoryPage }): State
         id,
         text: statementEmbedText({ title, summary, statement }),
         statement,
+        factId: line.kind === 'fact' ? line.fact.marker.id : undefined,
         sectionIndex,
         lineIndex,
         until: line.kind === 'fact' ? line.fact.marker.until : undefined,
@@ -292,13 +295,90 @@ function sameStatement(a: StatementHit, b: StatementHit): boolean {
   return a.vaultDir === b.vaultDir && a.kind === b.kind && a.slug === b.slug && a.text === b.text;
 }
 
-function mayShow({ statement, today, past }: { statement: IndexedStatement; today: string; past: boolean }): boolean {
-  const { until } = statement;
-  const ended = statement.inEarlier || (until !== undefined && endedBefore({ until, today }));
+/**
+ * Whether a statement may be shown for a message today: one that has not ended always may; one that
+ * ended may only when the message asks about the past, or it ended within the last month. The one
+ * owner of this rule, for the meaning search and the word search alike.
+ */
+export function statementMayShow({
+  until,
+  inEarlier,
+  today,
+  past,
+}: {
+  until: string | undefined;
+  inEarlier: boolean;
+  today: string;
+  past: boolean;
+}): boolean {
+  const ended = inEarlier || (until !== undefined && endedBefore({ until, today }));
   if (!ended || past) {
     return true;
   }
   return until !== undefined && endedRecently({ until, today });
+}
+
+function mayShow({ statement, today, past }: { statement: IndexedStatement; today: string; past: boolean }): boolean {
+  return statementMayShow({ until: statement.until, inEarlier: statement.inEarlier, today, past });
+}
+
+/** One statement of a page, with the page it sits on: the extraction every statement search shares. */
+export interface PageStatement {
+  vaultDir: string;
+  kind: PageKind;
+  slug: string;
+  title: string;
+  page: MemoryPage;
+  sectionIndex: number;
+  lineIndex: number;
+  /** The statement as the page words it. */
+  statement: string;
+  /** The marked fact's id when the statement is a marked fact; a hand-typed bullet has none. */
+  factId: string | undefined;
+  until: string | undefined;
+  inEarlier: boolean;
+}
+
+/**
+ * Every statement of every page in a vault that a search may find, read from the pages as they stand.
+ * The same extraction and section rules the meaning index uses, without the meaning model, so a word
+ * search sees exactly the statements the meaning search would. Never throws: a vault or page that
+ * cannot be read contributes nothing.
+ */
+export async function collectPageStatements({ vaultDir }: { vaultDir: string }): Promise<PageStatement[]> {
+  try {
+    const listings = await listMemoryPages(vaultDir);
+    const pages = await Promise.all(
+      listings.map(async listing => ({
+        listing,
+        page: await readMemoryPage({ vaultDir, ...listing }).catch(() => undefined),
+      })),
+    );
+    const statements: PageStatement[] = [];
+    for (const { listing, page } of pages) {
+      if (page === undefined) {
+        continue;
+      }
+      for (const line of statementLines({ key: pageKeyOf(listing), page })) {
+        statements.push({
+          vaultDir,
+          kind: listing.kind,
+          slug: listing.slug,
+          title: page.frontMatter.title,
+          page,
+          sectionIndex: line.sectionIndex,
+          lineIndex: line.lineIndex,
+          statement: line.statement,
+          factId: line.factId,
+          until: line.until,
+          inEarlier: line.inEarlier,
+        });
+      }
+    }
+    return statements;
+  } catch {
+    return [];
+  }
 }
 
 /**
