@@ -178,6 +178,7 @@ export function statementWith({
   since,
   until,
   seen,
+  receipt,
 }: {
   text: string;
   id: string;
@@ -185,11 +186,13 @@ export function statementWith({
   since?: FactMarker['since'];
   until?: FactMarker['until'];
   seen?: FactMarker['seen'];
+  receipt?: FactMarker['receipt'];
 }): { text: string; marker: FactMarker } {
   return {
     text,
     marker: FactMarkerSchema.parse({
       kind: 'fact',
+      ...(receipt === undefined ? {} : { receipt }),
       id,
       src,
       ...(since === undefined ? {} : { since }),

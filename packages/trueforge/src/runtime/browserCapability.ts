@@ -229,8 +229,9 @@ async function postSidecar<Schema extends z.ZodType>(input: {
   const timeout = setTimeout(() => {
     controller.abort();
   }, configuration.BROWSER_NAV_TIMEOUT_MS);
+  let response: Response | undefined;
   try {
-    const response = await fetch(`${baseUrl}${input.path}`, {
+    response = await fetch(`${baseUrl}${input.path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-browser-secret': secret },
       body: JSON.stringify(input.payload),
@@ -245,13 +246,15 @@ async function postSidecar<Schema extends z.ZodType>(input: {
       };
     }
     return { ok: true, body: parsed.data };
-  } catch (error) {
+  } catch {
+    if (controller.signal.aborted) {
+      return { ok: false, message: "Aman's browser did not reply in time. Try again in a moment." };
+    }
     return {
       ok: false,
-      message:
-        error instanceof Error && error.name === 'AbortError'
-          ? 'The page took too long to open. Try again, or try a different page.'
-          : "Aman's browser could not be reached. Try again in a moment.",
+      message: response
+        ? "Aman's browser returned an unreadable reply. Try again in a moment."
+        : "Aman's browser could not be reached. Try again in a moment.",
     };
   } finally {
     clearTimeout(timeout);

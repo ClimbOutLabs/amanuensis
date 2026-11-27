@@ -1,4 +1,5 @@
 import {
+  EventType,
   createSentinelHostContext,
   defaultSentinelServices,
   execFileRunner,
@@ -211,6 +212,35 @@ describe('remember_fact', () => {
 });
 
 describe('update_fact', () => {
+  it('refuses an unsupported replacement and a polarity reversal, then reloads the original facts', async () => {
+    const before = 'The loom is paused. Keep the original work slip for the audit.';
+    const seed = build(baseDir, { said: 'Loom repair. ' + before });
+    await call(seed.tools, 'remember_fact', { about: 'Loom repair', kind: 'matter', text: before });
+    const watch = watchAfterMail({
+      said: 'Loom repair. The workshop has not received the replacement belt.',
+      mail: 'Request timed out.',
+    });
+    const { tools } = build(baseDir, { watch });
+    for (const after of ['The workshop has received the replacement belt.', 'Inspection fees were paid.']) {
+      const result = await call(tools, 'update_fact', { about: 'Loom repair', old_text: before, new_text: after });
+      expect(result.isError).toBe(true);
+    }
+    const personUpdate = 'The workshop has not received the replacement belt.';
+    const accepted = await call(tools, 'update_fact', {
+      about: 'Loom repair',
+      old_text: before,
+      new_text: personUpdate,
+    });
+    expect(accepted.isError).toBe(false);
+    const file = await pageText(baseDir, 'matter', 'loom-repair');
+    expect(file).toMatch(/The workshop has not received the replacement belt\. <!-- fact: id=\w+ src=you_said/);
+    const reopened = build(baseDir);
+    const read = await call(reopened.tools, 'read_page', { about: 'Loom repair' });
+    expect(read.text).toContain(before);
+    expect(read.text).not.toContain('Inspection fees');
+    expect(read.text).not.toContain('has received');
+  });
+
   it('moves the old line to Earlier with until=today and adds the new one as you_said', async () => {
     const { tools, audit } = build(baseDir);
     await writePageFile({ vaultDir: baseDir, kind: 'matter', slug: 'the-madrid-move', content: MADRID });
@@ -660,38 +690,73 @@ describe('words that are not the persons own', () => {
     );
   });
 
-  it('leaves a line of their own as it is when the new words are not theirs, and adds the new line beside it', async () => {
-    const { tools } = build(baseDir, { said: 'Update the school for Leo.' });
-    await writePageFile({ vaultDir: baseDir, kind: 'matter', slug: 'the-madrid-move', content: MADRID });
-
-    const out = await call(tools, 'update_fact', {
-      about: 'the move',
-      old_text: 'Which school for Leo.',
-      new_text: 'Leo goes to the Colegio Sur.',
-    });
-
-    expect(out.text).toContain('"saved":true');
-    expect(out.text).toContain('kept their earlier line');
-    expect(await pageText(baseDir, 'matter', 'the-madrid-move')).toContain(
-      '## Open\n- Which school for Leo. <!-- fact: id=f_12 src=you_said since=2026-10-22 -->\n- Leo goes to the Colegio Sur. <!-- fact: id=f_n1 src=read_content since=2026-11-06 -->',
-    );
+  it('keeps an earlier owner line when a successful read supplies a subject-specific update', async () => {
+    const watch = new TurnReadWatch();
+    const text = 'Loom repair has reached the workshop.';
+    const id = 'workshop-read';
+    const said = 'Save the update about Loom repair.';
+    const watchResult = { role: 'tool', tool_call_id: id, content: text } as const;
+    watch.observeResults([
+      {
+        message: watchResult,
+        rawContent: text,
+        disposition: 'executed_ok',
+        failure: false,
+        screen: undefined,
+        images: [],
+        isStructuredContent: false,
+        completedAt: NOW.toISOString(),
+        memoized: false,
+        repeatCount: 1,
+        blockedPrivateFallback: false,
+        repeatedSideEffect: false,
+        verificationReceiptCandidate: undefined,
+        remediation: undefined,
+        admissionProvenance: { source: 'automatic' },
+        toolCallInfo: {
+          type: 'mcp',
+          effect: 'inspect',
+          mcp_server_id: 'workshop',
+          mcp_server_name: 'workshop',
+          original_tool_name: 'read_status',
+        },
+      },
+    ]);
+    const before = 'Loom repair requires the original work slip.';
+    const seed = build(baseDir, { said: before });
+    await call(seed.tools, 'remember_fact', { about: 'Loom repair', kind: 'matter', text: before });
+    const { tools } = build(baseDir, { watch });
+    for (const disposition of ['executed_nonzero', 'executed_ok']) {
+      watch.observe([
+        { role: 'user', content: said },
+        {
+          ...watchResult,
+          content: JSON.stringify({
+            schema_version: EventType.TOOL_RESPONSE_V2,
+            outcome: { disposition },
+            result: text,
+          }),
+        },
+      ]);
+      const result = await call(tools, 'update_fact', { about: 'Loom repair', old_text: before, new_text: text });
+      expect(result.isError).toBe(disposition !== 'executed_ok');
+    }
+    const page = await pageText(baseDir, 'matter', 'loom-repair');
+    expect(page).toContain(before);
+    expect(page).toContain(text);
+    expect(page).toContain('receipt=workshop-read');
   });
 
-  it('replaces a line that came from something read with words that are not theirs', async () => {
+  it('keeps a previously read line when a replacement has no source', async () => {
+    const { tools } = build(baseDir, { said: 'Update the trip note.' });
     await writePageFile({ vaultDir: baseDir, kind: 'person', slug: 'nora', content: NORA });
-    const { tools } = build(baseDir, { said: 'Update that.' });
-
     const out = await call(tools, 'update_fact', {
       about: 'Nora',
       old_text: 'Might be travelling the week of Nov 16.',
       new_text: 'Travelling the week of Nov 23.',
     });
-
-    expect(out.text).toContain('"saved":true');
-    const page = await pageText(baseDir, 'person', 'nora');
-    expect(page).toContain('- Travelling the week of Nov 23. <!-- fact: id=f_n1 src=read_content since=2026-11-06 -->');
-    expect(page).toContain('- Might be travelling the week of Nov 16. <!-- fact: id=f_03 src=read_content');
-    expect(page.indexOf('## Earlier')).toBeLessThan(page.indexOf('Might be travelling'));
+    expect(out.isError).toBe(true);
+    expect(await pageText(baseDir, 'person', 'nora')).toBe(NORA);
   });
 });
 

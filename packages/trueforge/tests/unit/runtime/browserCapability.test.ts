@@ -168,6 +168,34 @@ describe('browser capability', () => {
     expect(textOf(again)).not.toContain('browser_open');
   });
 
+  it('reports an unreadable browser reply without claiming the browser was unreachable', async () => {
+    const { call } = mount(() => ({ json: {} }));
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('private upstream text', { status: 502 }));
+    const result = await call('browser_read');
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toBe("Aman's browser returned an unreadable reply. Try again in a moment.");
+  });
+
+  it('reports a host deadline without attributing it to the site', async () => {
+    jest.useFakeTimers();
+    try {
+      const { call } = mount(() => ({ json: {} }));
+      jest.spyOn(globalThis, 'fetch').mockImplementation(
+        async (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new Error('transport stopped')));
+          }),
+      );
+      const pending = call('browser_read');
+      await jest.advanceTimersByTimeAsync(configuration.BROWSER_NAV_TIMEOUT_MS);
+      const result = await pending;
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toBe("Aman's browser did not reply in time. Try again in a moment.");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('says why a step failed with a fixed reason, never the error text a page could write', async () => {
     const { call } = mount(() => ({
       status: 500,
