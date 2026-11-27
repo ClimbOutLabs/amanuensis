@@ -80,7 +80,6 @@ export function standInApprovalCard({
     parsed_command: null,
     outbound_text: argumentLines(shownArgs),
     destination_host: null,
-    outbound_truncated: false,
     email: null,
     calendar_event: null,
     schedule: null,

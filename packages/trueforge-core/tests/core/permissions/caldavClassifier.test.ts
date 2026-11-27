@@ -217,7 +217,6 @@ describe('CalDAV changes', () => {
       expect(text).toContain(field);
     }
     expect(text).toContain(description.trim());
-    expect(decision.card?.outbound_truncated).toBe(false);
   });
 
   it('lists the change fields of an update and leaves the confirm token out', async () => {
@@ -257,17 +256,19 @@ describe('CalDAV changes', () => {
     expect(decision.card?.outbound_text).toContain('calendar_id');
   });
 
-  it('gives the generic card when the arguments are too long to show in full', async () => {
+  it('shows a long description whole on its own card', async () => {
+    const description = `${'x'.repeat(25_000)}LAST-WORDS`;
     const decision = await classifyTier(
       caldavAction('create_event', {
         calendar_id: 'work',
         summary: 'Team sync',
         start: '2026-10-23T09:30:00+02:00',
-        description: 'x'.repeat(25_000),
+        description,
       }),
       makeCtx(),
     );
-    expect(decision.card?.plain_what).not.toMatch(/^Add /);
+    expect(decision.card?.plain_what).toMatch(/^Add /);
+    expect(decision.card?.outbound_text).toContain(description);
   });
 
   it('names the guests an update would email, so the person sees who is told', async () => {
@@ -329,13 +330,16 @@ describe('CalDAV changes', () => {
     );
   });
 
-  it('gives the generic card when a change would email more guests than the card can name', async () => {
-    const attendees = Array.from({ length: 21 }, (_, index) => `guest${String(index)}@example.com`);
+  it('names every guest a change would email, however many there are', async () => {
+    const attendees = Array.from({ length: 40 }, (_, index) => `guest${String(index)}@example.com`);
     const decision = await classifyTier(
       caldavAction('update_event', { ...EVENT_ID, summary: 'Moved' }, { caldav_event: { ...DENTIST, attendees } }),
       makeCtx(),
     );
-    expect(decision.card?.plain_what).not.toMatch(/^Change /);
+    expect(decision.card?.plain_what).toMatch(/^Change /);
+    for (const guest of attendees) {
+      expect(decision.card?.plain_what).toContain(guest);
+    }
   });
 
   it('shows a delete card that names the guests and says a cancellation cannot be unsent', async () => {

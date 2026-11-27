@@ -57,7 +57,6 @@ export function browserOpenCard(input: {
     parsed_command: null,
     outbound_text: input.url,
     destination_host: input.host,
-    outbound_truncated: false,
   };
 }
 
@@ -192,9 +191,8 @@ function commitClickCard(review: BrowserElementReview): Tier3Card {
     recipient: null,
     amount: null,
     parsed_command: null,
-    outbound_text: outbound.text,
+    outbound_text: outbound,
     destination_host: review.site,
-    outbound_truncated: outbound.truncated,
   };
 }
 
@@ -213,9 +211,8 @@ function prepareCard(input: { review: BrowserElementReview; verb: 'Type' | 'Pick
     recipient: null,
     amount: null,
     parsed_command: null,
-    outbound_text: outbound.text,
+    outbound_text: outbound,
     destination_host: input.review.site,
-    outbound_truncated: outbound.truncated,
   };
 }
 

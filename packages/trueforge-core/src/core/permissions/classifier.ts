@@ -105,7 +105,6 @@ import {
   extractCardFields,
   isCalendarChangeToolName,
   renderOutboundArguments,
-  SEND_VALUE_MAX_CHARS,
   type ExtractedCardFields,
   type ExtractionResult,
 } from './extractorRegistry';
@@ -1098,7 +1097,6 @@ async function classifySkillScript(action: SentinelAction, ctx: ClassifyContext)
       parsed_command: shown,
       outbound_text: null,
       destination_host: null,
-      outbound_truncated: false,
     },
     reason: 'arbitrary_code_execution',
     reason_detail: askReason,
@@ -1131,7 +1129,6 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         parsed_command: command,
         outbound_text: null,
         destination_host: null,
-        outbound_truncated: false,
       },
       reason: 'env_overrides_present',
       reason_detail: 'Custom environment variables require approval.',
@@ -1196,7 +1193,6 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           parsed_command: command,
           outbound_text: null,
           destination_host: null,
-          outbound_truncated: false,
         },
         reason: 'tracked_check_unresolvable',
         reason_detail: 'The executed operand could not be resolved; failing closed.',
@@ -1246,7 +1242,6 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             parsed_command: command,
             outbound_text: null,
             destination_host: null,
-            outbound_truncated: false,
           },
           reason: 'tracked_executable_unapproved',
           reason_detail: 'No matching approval grant for this (content, argv) pair.',
@@ -1286,7 +1281,6 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             parsed_command: command,
             outbound_text: null,
             destination_host: null,
-            outbound_truncated: false,
           },
           reason: 'workspace_unknown',
           reason_detail: 'There is no workspace to keep the command inside.',
@@ -1314,7 +1308,6 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             parsed_command: command,
             outbound_text: null,
             destination_host: null,
-            outbound_truncated: false,
           },
           reason: 'cwd_outside_workspace',
           reason_detail: 'The working directory is outside the workspace.',
@@ -1343,7 +1336,6 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             parsed_command: command,
             outbound_text: null,
             destination_host: null,
-            outbound_truncated: false,
           },
           reason: 'file_outside_workspace',
           reason_detail: 'A file operand resolves outside the workspace.',
@@ -1411,7 +1403,6 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       parsed_command: form.raw_command,
       outbound_text: null,
       destination_host: null,
-      outbound_truncated: false,
     },
     reason: 'shell_not_allowlisted',
     reason_detail: 'The command is not on the server-side safe list.',
@@ -1444,7 +1435,6 @@ function writeCard(input: { plain_what: string; cannot_be_undone: string; ctx: C
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
   };
 }
 
@@ -1644,7 +1634,6 @@ function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierD
       parsed_command: `pnpm ${workflowName}`,
       outbound_text: null,
       destination_host: null,
-      outbound_truncated: false,
     },
     reason: 'runner_workflow',
     reason_detail: `Run the \`${workflowName}\` workflow requires approval.`,
@@ -1680,7 +1669,6 @@ async function decideTier2(input: {
     parsed_command: input.parsed_command,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
   };
   const base = {
     kind: input.kind,
@@ -1783,7 +1771,7 @@ function searchPlumbingText(input: {
       hidden[key] = value;
     }
   }
-  return renderOutboundArguments(hidden).text;
+  return renderOutboundArguments(hidden);
 }
 
 /**
@@ -1839,7 +1827,6 @@ async function holdSearchCall(input: {
       }),
       // The card's "Sends to" line names the provider, not the host it is reached on.
       destination_host: provider ?? SEARCH_SERVER_FALLBACK,
-      outbound_truncated: fields.outbound_truncated,
     },
     reason: input.reason,
     reason_detail: input.say,
@@ -1924,8 +1911,7 @@ async function classifySearchProviderTool(input: {
       params: masked,
       fields: {
         ...extraction.fields,
-        outbound_text: outbound === undefined ? `query: ${HIDDEN_QUERY}` : outbound.text,
-        outbound_truncated: outbound?.truncated ?? false,
+        outbound_text: outbound === undefined ? `query: ${HIDDEN_QUERY}` : outbound,
       },
     });
   };
@@ -2335,7 +2321,7 @@ function mailArgumentMailboxes(value: unknown): Tier3Mailbox[] | null {
  */
 function hostMailMessage(input: { action: SentinelAction; draft: boolean }): {
   email: Tier3Email;
-  rest: { text: string | null; truncated: boolean };
+  rest: string | null;
 } | null {
   const { action, draft } = input;
   if (!isHostMailDraft(action) && !isHostMailSend(action)) {
@@ -2388,9 +2374,7 @@ function hostMailMessage(input: { action: SentinelAction; draft: boolean }): {
               attachments: attached ? forward.attachments.map(name => escapeDisplayText(name)) : [],
             },
     },
-    rest: renderOutboundArguments(Object.fromEntries(Object.entries(params).filter(([key]) => !shown.has(key))), {
-      valueMaxChars: SEND_VALUE_MAX_CHARS,
-    }),
+    rest: renderOutboundArguments(Object.fromEntries(Object.entries(params).filter(([key]) => !shown.has(key)))),
   };
 }
 
@@ -2401,11 +2385,11 @@ function hostMailMessage(input: { action: SentinelAction; draft: boolean }): {
 function mailMessageCardFields(input: {
   message: ReturnType<typeof hostMailMessage>;
   fields: ExtractedCardFields;
-}): Pick<Tier3Card, 'outbound_text' | 'outbound_truncated'> & { email?: Tier3Email } {
+}): Pick<Tier3Card, 'outbound_text'> & { email?: Tier3Email } {
   const { message, fields } = input;
   return message === null
-    ? { outbound_text: fields.outbound_text, outbound_truncated: fields.outbound_truncated }
-    : { outbound_text: message.rest.text, outbound_truncated: message.rest.truncated, email: message.email };
+    ? { outbound_text: fields.outbound_text }
+    : { outbound_text: message.rest, email: message.email };
 }
 
 /**
@@ -2558,7 +2542,6 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
     schedule: {
       action: review.action,
       name: show(review.name),
@@ -2599,7 +2582,6 @@ function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | 
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
     persona: {
       name: show(review.name),
       description: show(review.description),
@@ -2672,7 +2654,6 @@ function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
     skill: {
       name: show(review.name),
       description: show(review.description),
@@ -2775,7 +2756,6 @@ function sentenceCard(input: {
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
   };
 }
 
@@ -3043,7 +3023,6 @@ async function classifyDocumentTool(action: SentinelAction, ctx: ClassifyContext
       parsed_command: null,
       outbound_text: null,
       destination_host: null,
-      outbound_truncated: false,
     },
     reason: 'document_outside_workspace',
     reason_detail: 'A document outside the project folder asks before it is read.',
@@ -3244,7 +3223,6 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // naming each new address. A draft naming a new address asks with the same card in draft words:
   // approving adds the addresses to this account's list and saves the draft, and nothing is sent.
   const mailFacts = await mailCardFacts({ action, ctx });
-  // A request already too long to show whole keeps its plain listing, which says what was cut.
   // A message goes out in two steps, each with its own card: the draft first, then the send. A send
   // that matches no draft the person approved is not a send yet. A new message is refused, because
   // the draft tool saves it first; a forward has no draft tool, so its first card keeps it as a draft.
@@ -3263,7 +3241,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
   const draft = isHostMailDraft(action) || (isHostMailSend(action) && !draftApproved);
-  const mailMessage = extraction.fields.outbound_truncated ? null : hostMailMessage({ action, draft });
+  const mailMessage = hostMailMessage({ action, draft });
   const newMailRecipients = mailFacts.new_recipients;
   if (newMailRecipients.length > 0) {
     const { fields } = extraction;
@@ -3471,7 +3449,6 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         parsed_command: null,
         outbound_text: fields.outbound_text,
         destination_host: hostMailCall ? null : fields.destination_host,
-        outbound_truncated: fields.outbound_truncated,
       },
       // A send keeps its own reason whatever the annotations say, so no chat-wide answer ever covers it.
       reason: extraction.sends ? 'connector_send' : destructiveHint ? 'mcp_destructive_hint' : 'mcp_open_world_hint',
@@ -3520,7 +3497,6 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         parsed_command: null,
         outbound_text: fields.outbound_text,
         destination_host: fields.destination_host,
-        outbound_truncated: fields.outbound_truncated,
       },
       reason: namedSend ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
       reason_detail: 'Name-based Tier 3 class.',
@@ -3849,7 +3825,6 @@ function connectorApprovalCard(input: {
     parsed_command: null,
     outbound_text: fields.outbound_text,
     destination_host: isHostMailCall(action) ? null : fields.destination_host,
-    outbound_truncated: fields.outbound_truncated,
   };
 }
 
@@ -3909,9 +3884,8 @@ async function classifyNotesFolderToolCall(action: SentinelAction, ctx: Classify
       recipient: null,
       amount: null,
       parsed_command: null,
-      outbound_text: outbound.text,
+      outbound_text: outbound,
       destination_host: null,
-      outbound_truncated: outbound.truncated,
     },
     reason: CONTENT_STEERED_REASON,
     reason_detail: say,
@@ -4078,7 +4052,6 @@ async function classifyBranch(action: SentinelAction, ctx: ClassifyContext): Pro
           parsed_command: name === 'run_code' ? runCodeCardText(action.canonical_params, ctx) : null,
           outbound_text: null,
           destination_host: null,
-          outbound_truncated: false,
         },
         reason: name === 'run_code' ? 'arbitrary_code_execution' : 'plan_submission',
         reason_detail: 'Always Tier 3 by policy.',
@@ -4135,9 +4108,8 @@ async function classifyBranch(action: SentinelAction, ctx: ClassifyContext): Pro
           recipient: null,
           amount: null,
           parsed_command: null,
-          outbound_text: outbound.text,
+          outbound_text: outbound,
           destination_host: action.maps_hosts === undefined ? null : mapsDestinationHosts(action.maps_hosts),
-          outbound_truncated: outbound.truncated,
         },
         reason: verdict.ok ? MAPS_ASK_REASON : MAPS_HOLD_REASON,
         reason_detail: mapsReason,

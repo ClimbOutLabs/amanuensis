@@ -7890,7 +7890,6 @@ function withPackageDownloadCard(input: {
       parsed_command: input.parsedCommand,
       outbound_text: null,
       destination_host: null,
-      outbound_truncated: false,
     };
   }
   return {

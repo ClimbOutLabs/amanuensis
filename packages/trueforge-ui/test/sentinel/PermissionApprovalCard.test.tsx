@@ -17,7 +17,6 @@ function baseCard(): SentinelApprovalCard {
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
     email: null,
     calendar_event: null,
     schedule: null,
@@ -225,13 +224,12 @@ describe('PermissionApprovalCard', () => {
     expect(screen.getByText(/says: Looking up a listing\.$/)).toBeInTheDocument();
   });
 
-  it('shows one plain line above the payload when part of it is cut', () => {
-    renderCard({ outbound_text: 'body: x ... (5 more characters not shown)', outbound_truncated: true });
-    expect(screen.getByText('Part of what will be sent is not shown in full.')).toBeInTheDocument();
-  });
-
-  it('shows no cut line when nothing was cut', () => {
-    renderCard({ outbound_text: 'body: x', outbound_truncated: false });
+  it('shows a long payload as a preview, and Show all opens every character of it', () => {
+    const body = `body: ${'x'.repeat(3000)}LAST-WORDS`;
+    renderCard({ outbound_text: body });
+    expect(screen.queryByText(/LAST-WORDS/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Show all/ }));
+    expect(screen.getByText(body)).toBeInTheDocument();
     expect(screen.queryByText(/not shown in full/)).not.toBeInTheDocument();
   });
 

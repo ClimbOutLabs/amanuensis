@@ -88,7 +88,6 @@ export function buildSkillNetworkCard(input: {
       parsed_command: null,
       outbound_text: null,
       destination_host: singleSite,
-      outbound_truncated: false,
       skill_network,
     };
   }
@@ -106,7 +105,6 @@ export function buildSkillNetworkCard(input: {
       parsed_command: null,
       outbound_text: null,
       destination_host: singleSite,
-      outbound_truncated: false,
       skill_network,
     };
   }
@@ -123,7 +121,6 @@ export function buildSkillNetworkCard(input: {
     parsed_command: null,
     outbound_text: null,
     destination_host: singleSite,
-    outbound_truncated: false,
     skill_network,
   };
 }

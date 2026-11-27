@@ -14,7 +14,6 @@ const BASE_CARD: Tier3Card = {
   parsed_command: null,
   outbound_text: null,
   destination_host: null,
-  outbound_truncated: false,
 };
 
 export function sendReplyCard(body = 'Thursday at three works for me. See you then.'): Tier3Card {
@@ -124,7 +123,6 @@ export const typedOnlyCards: [string, Tier3Card][] = [
     },
   ],
   ['exact connector arguments', { ...BASE_CARD, outbound_text: 'to: bob\nbody: hello' }],
-  ['a cut-off connector argument', { ...BASE_CARD, outbound_truncated: true }],
   ['a changed event', { ...BASE_CARD, calendar_event: { ...dentist, action: 'change' } }],
   ['a repeating event', { ...BASE_CARD, calendar_event: { ...dentist, one_of_repeating: true } }],
   [

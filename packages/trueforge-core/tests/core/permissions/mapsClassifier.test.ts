@@ -144,7 +144,6 @@ describe('maps classifier branch', () => {
     );
     expect(decision.card?.outbound_text).toContain('from_place: Madrid');
     expect(decision.card?.outbound_text).toContain('to_place: Barcelona');
-    expect(decision.card?.outbound_truncated).toBe(false);
   });
 
   it('binds the approval to the configured hosts', async () => {

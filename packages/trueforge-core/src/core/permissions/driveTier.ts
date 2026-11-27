@@ -33,7 +33,6 @@ function driveWriteCard(input: { review: DriveWriteReview; agent_intent: string 
     amount: null,
     parsed_command: null,
     destination_host: null,
-    outbound_truncated: false,
   };
   if (review.action === 'create_doc') {
     const headline = `Create a Google Doc named ${cardSubject(review.file_name)} in your Google Drive?`;

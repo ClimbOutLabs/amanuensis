@@ -1076,7 +1076,6 @@ describe('ToolCallContainer', () => {
         parsed_command: null,
         outbound_text: 'text: hello',
         destination_host: host,
-        outbound_truncated: false,
         email: null,
         calendar_event: null,
         schedule: null,
@@ -1172,7 +1171,6 @@ describe('ToolCallContainer: held search request', () => {
       parsed_command: null,
       outbound_text: 'query: how do I rotate ws••••••3x safely',
       destination_host: null,
-      outbound_truncated: false,
       email: null,
       calendar_event: null,
       schedule: null,
@@ -1280,7 +1278,6 @@ describe('a send that has ended', () => {
         parsed_command: null,
         outbound_text: null,
         destination_host: null,
-        outbound_truncated: false,
         email: {
           action: 'send',
           to: [grace],

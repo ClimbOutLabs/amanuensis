@@ -74,7 +74,6 @@ export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   parsed_command: 'empty',
   outbound_text: 'empty',
   destination_host: 'empty',
-  outbound_truncated: 'empty',
   outbound_plumbing_text: 'empty',
   email: 'shape',
   calendar_event: 'shape',

@@ -14694,15 +14694,11 @@
             ]
           },
           "outbound_text": {
-            "description": "Exact arguments sent to a connector, one \"name: value\" line each. Long values are cut with a marker.",
+            "description": "Exact arguments sent to a connector, one \"name: value\" line each, every value whole.",
             "type": [
               "string",
               "null"
             ]
-          },
-          "outbound_truncated": {
-            "description": "True when part of outbound_text is cut and not shown in full.",
-            "type": "boolean"
           },
           "parsed_command": {
             "description": "Server-parsed command structure for shell actions, or null.",
@@ -14797,8 +14793,7 @@
           "amount",
           "parsed_command",
           "outbound_text",
-          "destination_host",
-          "outbound_truncated"
+          "destination_host"
         ],
         "type": "object"
       },

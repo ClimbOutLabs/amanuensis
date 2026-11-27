@@ -147,7 +147,6 @@ export const TELEGRAM_SHOWN_CARD_FIELDS = [
   'parsed_command',
   'outbound_text',
   'destination_host',
-  'outbound_truncated',
   'outbound_plumbing_text',
   'email',
   'calendar_event',
@@ -257,20 +256,24 @@ function cardHasUnshownField(card: Tier3Card): boolean {
 }
 
 /**
- * How much of a skill's own instruction file Telegram sends: three messages' worth. A longer file is
- * cut, and like a cut request it cannot be approved from Telegram.
+ * How much of one long text (a skill's instruction file, a request's exact arguments) Telegram
+ * sends: three messages' worth. A longer text is cut, and a card with a cut text cannot be
+ * approved from Telegram, because the person would decide without seeing all of it.
  */
-export const TELEGRAM_SKILL_INSTRUCTIONS_CHARS = 3 * TELEGRAM_MAX_MESSAGE_CHARS;
+export const TELEGRAM_LONG_TEXT_CHARS = 3 * TELEGRAM_MAX_MESSAGE_CHARS;
 const SKILL_INSTRUCTIONS_CUT_LINE = "Part of the skill's instructions is not shown in full.";
+const OUTBOUND_TEXT_CUT_LINE = 'Part of this request is not shown in full.';
 
-function skillInstructionsCut(instructions: string): boolean {
-  return instructions.length > TELEGRAM_SKILL_INSTRUCTIONS_CHARS;
+function textCut(text: string): boolean {
+  return text.length > TELEGRAM_LONG_TEXT_CHARS;
 }
 
-/** True when part of what the card shows was cut for Telegram, or was already cut on the card. */
+/** True when part of what the card shows was cut for Telegram. */
 function cardIsCut(card: Tier3Card): boolean {
   const instructions = card.skill?.instructions ?? null;
-  return card.outbound_truncated || (instructions !== null && skillInstructionsCut(instructions));
+  return (
+    (card.outbound_text !== null && textCut(card.outbound_text)) || (instructions !== null && textCut(instructions))
+  );
 }
 
 /**
@@ -487,9 +490,9 @@ function approvalCardLines(card: Tier3Card): string[] {
     }
     if (skill.instructions !== null) {
       lines.push('Instructions:');
-      if (skillInstructionsCut(skill.instructions)) {
+      if (textCut(skill.instructions)) {
         lines.push(SKILL_INSTRUCTIONS_CUT_LINE);
-        lines.push(skill.instructions.slice(0, TELEGRAM_SKILL_INSTRUCTIONS_CHARS));
+        lines.push(skill.instructions.slice(0, TELEGRAM_LONG_TEXT_CHARS));
       } else {
         lines.push(skill.instructions);
       }
@@ -518,10 +521,12 @@ function approvalCardLines(card: Tier3Card): string[] {
   if (card.outbound_text !== null) {
     // Beside an email shown in full, these lines are only what else the call carries.
     lines.push(email === null ? 'Full request:' : 'Also sent with this email:');
-    if (card.outbound_truncated) {
-      lines.push('Part of this request is not shown in full.');
+    if (textCut(card.outbound_text)) {
+      lines.push(OUTBOUND_TEXT_CUT_LINE);
+      lines.push(card.outbound_text.slice(0, TELEGRAM_LONG_TEXT_CHARS));
+    } else {
+      lines.push(card.outbound_text);
     }
-    lines.push(card.outbound_text);
   }
   const consequence = copy === null ? card.cannot_be_undone : copy.consequence;
   if (consequence !== null) {

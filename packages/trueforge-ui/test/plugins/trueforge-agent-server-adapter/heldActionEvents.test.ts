@@ -23,7 +23,6 @@ const CARD = {
   parsed_command: null,
   outbound_text: 'body: Lunch at noon?',
   destination_host: null,
-  outbound_truncated: false,
 };
 
 function approvalEvent(toolCalls: Record<string, unknown>[]): Record<string, unknown> {

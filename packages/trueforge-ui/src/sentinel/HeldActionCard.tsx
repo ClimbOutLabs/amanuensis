@@ -180,11 +180,6 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
         {card.outbound_text !== null && !outboundRepeatsFacts(card, card.outbound_text) && (
           <div className="rounded border border-border bg-primary-bg px-3 py-2">
             <p className="mb-1 font-medium text-text-secondary">Full request</p>
-            {card.outbound_truncated && (
-              <p className="mb-1 font-medium text-text-primary" data-role="held-action-truncated">
-                Part of this is not shown in full. Check it before you approve.
-              </p>
-            )}
             <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-text-primary">
               {card.outbound_text}
             </pre>

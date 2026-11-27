@@ -165,7 +165,6 @@ describe('checkHeldReplay for a skill network card', () => {
       parsed_command: 'curl https://uploads.example.com',
       outbound_text: null,
       destination_host: null,
-      outbound_truncated: false,
       ...overrides,
     };
   }

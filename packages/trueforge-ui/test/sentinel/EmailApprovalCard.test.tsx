@@ -35,7 +35,6 @@ function cardWith(emailOverrides: Partial<SentinelApprovalEmail> = {}): Sentinel
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
-    outbound_truncated: false,
     email: email(emailOverrides),
     calendar_event: null,
     schedule: null,

@@ -6,8 +6,6 @@ import { createWebSearchTurnState } from '../../../src/core/permissions/webSearc
 
 const HIDDEN_REFUSAL =
   'This contains hidden characters that would not show on the approval card, so it cannot be approved. Remove them and try again.';
-const LONG_KEY_REFUSAL =
-  'An argument name is too long to show in full, so this cannot be approved. Use shorter argument names.';
 
 function makeCtx(): ClassifyContext {
   return {
@@ -237,7 +235,7 @@ describe('other sends show hidden characters as codes instead of refusing', () =
   });
 
   test.each(BLANK_FILLERS)('%s is shown as its code', (_name, filler) => {
-    const text = renderOutboundArguments({ text: `a${filler}b` }).text ?? '';
+    const text = renderOutboundArguments({ text: `a${filler}b` }) ?? '';
     const code = (filler.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0');
     expect(text).toBe(`text: a\\u{${code}}b`);
   });
@@ -247,7 +245,7 @@ describe('other sends show hidden characters as codes instead of refusing', () =
     ['a supplementary variation selector', '\u{E0100}', 'E0100'],
     ['a tag character', '\u{E0041}', 'E0041'],
   ])('%s is shown as its code', (_name, character, code) => {
-    expect(renderOutboundArguments({ text: `a${character}b` }).text).toBe(`text: a\\u{${code}}b`);
+    expect(renderOutboundArguments({ text: `a${character}b` })).toBe(`text: a\\u{${code}}b`);
   });
 
   test('a recipient with hidden characters is refused whatever the send type', async () => {
@@ -269,40 +267,22 @@ describe('other sends show hidden characters as codes instead of refusing', () =
 describe('long keys', () => {
   const keyOf = (length: number) => 'k'.repeat(length);
 
-  test('a key cut on the card sets truncated', () => {
-    const plain = renderOutboundArguments({ [keyOf(201)]: 'v' });
-    expect(plain.truncated).toBe(true);
-    expect(plain.text).toContain('...');
-    const quoted = renderOutboundArguments({ [`${keyOf(200)} x`]: 'v' });
-    expect(quoted.truncated).toBe(true);
+  test('a key is shown whole, however long', () => {
+    expect(renderOutboundArguments({ [keyOf(500)]: 'v' })).toBe(`${keyOf(500)}: v`);
+    expect(renderOutboundArguments({ [`${keyOf(500)} x`]: 'v' })).toBe(`"${keyOf(500)} x": v`);
   });
 
-  test('a key at the limit is not cut', () => {
-    expect(renderOutboundArguments({ [keyOf(200)]: 'v' })).toEqual({ text: `${keyOf(200)}: v`, truncated: false });
-  });
-
-  test('the limit counts code points', () => {
-    expect(renderOutboundArguments({ ['😀'.repeat(200)]: 'v' }).truncated).toBe(false);
-    expect(renderOutboundArguments({ ['😀'.repeat(201)]: 'v' }).truncated).toBe(true);
-  });
-
-  test('a send with a key the card would cut is refused', async () => {
-    const { decision, refused } = await denial('post_message', { channel: '#general', [keyOf(201)]: 'hello' });
-    expect(refused).toBe(true);
-    expect(decision.reason_detail).toBe(LONG_KEY_REFUSAL);
-  });
-
-  test('a send with a key at the limit is carded in full', async () => {
-    const { decision, refused } = await denial('post_message', { channel: '#general', [keyOf(200)]: 'hello' });
+  test('a send with a long key is carded with the whole key, not refused', async () => {
+    const { decision, refused } = await denial('post_message', { channel: '#general', [keyOf(500)]: 'hello' });
     expect(refused).toBe(false);
-    expect(decision.card?.outbound_truncated).toBe(false);
+    expect(decision.card?.outbound_text).toContain(`${keyOf(500)}: hello`);
   });
 
-  test('a call that sends nothing is carded and marked cut, not refused', async () => {
+  test('a call that sends nothing is carded with the whole key, not refused', async () => {
     // The mailbox anchors the call in the connector's own store, so the carried-payload refusal
-    // does not claim it and the long key is still shown cut on its card.
+    // does not claim it and the long key is shown on its card.
     const { decision, refused } = await denial('frobnicate', { mailbox: 'Depot', [keyOf(201)]: 'x' });
     expect(refused).toBe(false);
-    expect(decision.card?.outbound_truncated).toBe(true);
+    expect(decision.card?.outbound_text).toContain(`${keyOf(201)}: x`);
   });
 });

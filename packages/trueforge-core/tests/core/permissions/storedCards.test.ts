@@ -46,7 +46,6 @@ const CARD = {
   parsed_command: null,
   outbound_text: null,
   destination_host: null,
-  outbound_truncated: false,
   email: OLDER_EMAIL,
   calendar_event: null,
   schedule: null,

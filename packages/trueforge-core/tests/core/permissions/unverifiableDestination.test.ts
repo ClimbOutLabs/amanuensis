@@ -82,15 +82,17 @@ describe('an invented send tool with no listed name', () => {
     expect(decision.card?.destination).toBe('#general');
   });
 
-  it('is refused when part of what it delivers to a named destination sits under a key the card would cut', async () => {
+  it('asks with every part it delivers to a named destination on the card, however long a key is', async () => {
+    const key = 'k'.repeat(201);
     const decision = await classifyTier(
       connectorCall({
         tool_name: 'blast_notice',
-        params: { channel: '#general', ['k'.repeat(201)]: 'hello' },
+        params: { channel: '#general', [key]: 'hello' },
       }),
       makeCtx(),
     );
-    expect(decision).toMatchObject({ tier: 3, auto_deny: 'incomplete_send_card', card: null });
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null });
+    expect(decision.card?.outbound_text).toContain(`${key}: hello`);
   });
 
   it('only names a mailbox, a folder in the connector store, so it is carded, not denied', async () => {
