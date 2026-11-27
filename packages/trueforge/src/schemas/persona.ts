@@ -4,6 +4,7 @@ import {
   PERSONA_ACTIVATION_SOURCES,
   PERSONA_CONTEXT_VERSION,
 } from '../personas/persona';
+import { VoiceIdSchema } from './voice';
 
 const UnsafeCdataSequence = ']]>';
 
@@ -52,6 +53,13 @@ const PersonaModelNameSchema = z
   .max(256)
   .describe('Fully qualified model name (`provider/model`) selected when this persona is active.');
 
+/** Null means replies from this persona are read in the voice the person picked for all replies. */
+const PersonaVoiceSchema = VoiceIdSchema.nullable()
+  .describe(
+    'Voice id used to read this persona’s replies aloud, e.g. `af_bella`. Null uses the person’s own voice choice.',
+  )
+  .openapi({ example: 'af_bella' });
+
 const PersonaAccountListSchema = z.array(z.string().trim().min(3).max(320)).max(16).optional();
 
 const PersonaContentBaseSchema = z
@@ -67,6 +75,7 @@ const PersonaContentBaseSchema = z
       'Concise role for the persona. Added as one section of the system prompt; it cannot replace harness policy.',
     ),
     model_name: PersonaModelNameSchema,
+    voice: PersonaVoiceSchema,
     mail_accounts: PersonaAccountListSchema.describe(
       'Email accounts this persona may use, by address. Omitted means every connected account.',
     ),
@@ -99,8 +108,18 @@ export function validatePersonaContentNames(
   });
 }
 
-export const PersonaContentSchema =
-  PersonaContentBaseSchema.superRefine(validatePersonaContentNames).openapi('PersonaContent');
+export const PersonaContentSchema = PersonaContentBaseSchema.superRefine(validatePersonaContentNames).openapi(
+  'PersonaContent',
+  {
+    example: {
+      display_name: 'Zara',
+      aliases: ['Z'],
+      instructions: 'Answer as a careful archivist.',
+      model_name: 'openai/gpt-4.1',
+      voice: 'af_bella',
+    },
+  },
+);
 
 export const PersonaSchema = z
   .object({
@@ -156,6 +175,17 @@ export const SetSessionPersonaRequestSchema = z
   .strict()
   .openapi('SetSessionPersonaRequest', { example: { persona_id: 'persona-id' } });
 
+export const TurnPersonaSchema = z
+  .object({
+    persona_id: z
+      .string()
+      .min(1)
+      .nullable()
+      .describe('Persona that answered this turn, or null when the default assistant answered.'),
+  })
+  .strict()
+  .openapi('TurnPersona');
+
 export const PersonaContextSchema = z
   .object({
     version: z.literal(PERSONA_CONTEXT_VERSION),
@@ -173,6 +203,7 @@ export const DeletePersonaResponseSchema = z.object({}).openapi('DeletePersonaRe
 export const GetSessionPersonaResponseSchema = z
   .object({ data: z.union([PersonaActivationSchema, z.null()]) })
   .openapi('GetSessionPersonaResponse');
+export const GetTurnPersonaResponseSchema = z.object({ data: TurnPersonaSchema }).openapi('GetTurnPersonaResponse');
 export const GetPersonaContextResponseSchema = z
   .object({ data: PersonaContextSchema })
   .openapi('GetPersonaContextResponse');

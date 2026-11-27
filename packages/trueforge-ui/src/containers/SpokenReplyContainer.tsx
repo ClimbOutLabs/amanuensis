@@ -5,6 +5,7 @@ import { useAuiState } from '@assistant-ui/react';
 import { useEffect, useRef } from 'react';
 
 import { useSpokenReply } from '../components/SpokenReplyContext.js';
+import { useSpeakReply } from '../hooks/useSpeakReply.js';
 import { cardHeadline } from '../sentinel/approvalCopy.js';
 import { useOptionalSentinelState, type SentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useReadWholeMessages, useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
@@ -22,7 +23,14 @@ type SpeakableMessage = {
   readonly role: string;
   readonly status?: { readonly type: string };
   readonly content: readonly SpeechContentPart[];
+  readonly metadata?: { readonly custom?: Readonly<Record<string, unknown>> };
 };
+
+/** The turn a reply belongs to; the runtime sets it on live and replayed messages alike. */
+function turnIdOf(message: SpeakableMessage): string | undefined {
+  const value = message.metadata?.custom?.['turnId'];
+  return typeof value === 'string' ? value : undefined;
+}
 
 function lastMessageWithRole(messages: readonly SpeakableMessage[], role: string): SpeakableMessage | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -56,6 +64,8 @@ export function SpokenReplyContainer() {
   const sentinel = useOptionalSentinelState();
   const messages = useAuiState(s => s.thread.messages);
   const threadId = useAuiState(s => s.threadListItem.id);
+  const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
+  const speakReply = useSpeakReply();
   const { enabled } = useSpeakVoiceReplies();
   const { enabled: readWholeEnabled } = useReadWholeMessages();
   const spokenReply = useSpokenReply();
@@ -69,16 +79,25 @@ export function SpokenReplyContainer() {
   // message is final, because the runtime still holds the optimistic running message in the render
   // where the turn ends.
   const replyDue = useRef(false);
+  // Bumped whenever a reading must not start, so a voice lookup that answers late reads nothing.
+  const readGeneration = useRef(0);
 
   // Switching chats ends a reply in progress and any voice send still waiting.
   useEffect(() => {
     disarmSpokenReply();
     replyDue.current = false;
+    readGeneration.current += 1;
     spokenReply.stop();
   }, [threadId, spokenReply]);
 
   // Leaving the chat view ends a reply in progress.
-  useEffect(() => () => spokenReply.stop(), [spokenReply]);
+  useEffect(
+    () => () => {
+      readGeneration.current += 1;
+      spokenReply.stop();
+    },
+    [spokenReply],
+  );
 
   // A new user message is either the voice send's own message or the end of that send.
   useEffect(() => {
@@ -108,8 +127,15 @@ export function SpokenReplyContainer() {
     if (runThreadId.current !== threadId || !enabled || !spokenReply.canSpeak()) return;
     const sentinelLine = approvalLine(message.content, sentinel);
     const text = sentinelLine ?? answerReadoutText(finalAnswerSpeech(message.content), { readWhole: readWholeEnabled });
-    void spokenReply.speak(text, { key: message.id }).catch(() => undefined);
-  }, [isRunning, messages, enabled, readWholeEnabled, sentinel, threadId, spokenReply]);
+    const generation = ++readGeneration.current;
+    void speakReply({
+      text,
+      key: message.id,
+      sessionId,
+      turnId: turnIdOf(message),
+      stillWanted: () => readGeneration.current === generation,
+    }).catch(() => undefined);
+  }, [isRunning, messages, enabled, readWholeEnabled, sentinel, threadId, sessionId, spokenReply, speakReply]);
 
   return null;
 }

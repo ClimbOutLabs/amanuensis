@@ -36,6 +36,7 @@ function toPersona(row: Selectable<PersonaTable>): Persona {
     aliases: row.aliases,
     instructions: row.instructions,
     model_name: row.model_name,
+    voice: row.voice,
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
     updated_by: row.updated_by,
@@ -112,6 +113,7 @@ export class PostgresPersonaStore implements IPersonaStore<Transaction<Database>
           aliases: json(content.aliases),
           instructions: content.instructions,
           model_name: content.model_name,
+          voice: content.voice,
           created_at: now(),
           updated_at: now(),
           updated_by: input.updated_by,
@@ -146,6 +148,7 @@ export class PostgresPersonaStore implements IPersonaStore<Transaction<Database>
           aliases: json(content.aliases),
           instructions: content.instructions,
           model_name: content.model_name,
+          voice: content.voice,
           updated_at: now(),
           updated_by: input.updated_by,
         })

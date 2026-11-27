@@ -12,8 +12,8 @@ import {
   type Persona,
   type PersonaActivation,
   type PersonaActivationSource,
-  type PersonaContent,
   type PersonaContext,
+  type PersonaNames,
 } from '../personas/persona';
 import { isUnambiguousDirectPersonaInvocation } from './personaIntent';
 import type { PersonaSwitchNotice } from './PersonaTurnResourceResolver';
@@ -88,10 +88,10 @@ function turnInvocationTexts(input: TurnInputItem[] | undefined): string[] {
  * names a configured persona is dropped — the persona wins, matching the
  * validator's collision rule.
  */
-function defaultAssistantInvocationContent(input: {
+function defaultAssistantInvocationNames(input: {
   defaultAssistantName: string | null | undefined;
   personas: Persona[];
-}): PersonaContent | undefined {
+}): PersonaNames | undefined {
   const personaKeys = new Set(input.personas.flatMap(persona => personaNameKeys(persona)));
   const names: string[] = [];
   for (const candidate of [input.defaultAssistantName, 'default']) {
@@ -108,7 +108,7 @@ function defaultAssistantInvocationContent(input: {
   if (displayName === undefined) {
     return undefined;
   }
-  return { display_name: displayName, aliases, instructions: '', model_name: '' };
+  return { display_name: displayName, aliases };
 }
 
 /**
@@ -227,7 +227,7 @@ export async function resolveTurnPersona(input: {
     return undefined;
   }
 
-  const defaultContent = defaultAssistantInvocationContent({
+  const defaultContent = defaultAssistantInvocationNames({
     defaultAssistantName: input.defaultAssistantName,
     personas,
   });

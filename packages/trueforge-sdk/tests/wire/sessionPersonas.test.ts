@@ -311,4 +311,83 @@ describe("SessionPersonasClient", () => {
             return await client.sessionPersonas.listActivations("session_id");
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
+
+    test("get_turn (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { data: { persona_id: "persona_id" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/turns/turn_id/persona")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.sessionPersonas.getTurn("session_id", "turn_id");
+        expect(response).toEqual({
+            data: {
+                personaId: "persona_id",
+            },
+        });
+    });
+
+    test("get_turn (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/turns/turn_id/persona")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.sessionPersonas.getTurn("session_id", "turn_id");
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("get_turn (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/turns/turn_id/persona")
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.sessionPersonas.getTurn("session_id", "turn_id");
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+
+    test("get_turn (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/sessions/session_id/turns/turn_id/persona")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.sessionPersonas.getTurn("session_id", "turn_id");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
 });

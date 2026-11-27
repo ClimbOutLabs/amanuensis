@@ -24,7 +24,7 @@ function namesOf(json: unknown): { display_name: string; aliases: string[] }[] {
 /** Every repaired persona must pass the same content check an app-created persona does. */
 function expectAcceptedByAppRules(json: unknown): void {
   for (const { display_name, aliases } of namesOf(json)) {
-    const content = { display_name, aliases, instructions: 'Keep notes.', model_name: 'provider/model' };
+    const content = { display_name, aliases, instructions: 'Keep notes.', model_name: 'provider/model', voice: null };
     expect(PersonaContentSchema.safeParse(content).success).toBe(true);
   }
 }

@@ -8,6 +8,7 @@ const persona = {
   aliases: ['Z'],
   instructions: 'Answer as a careful archivist.',
   model_name: 'anthropic/haiku',
+  voice: 'af_bella',
 };
 
 const draft = {
@@ -15,6 +16,7 @@ const draft = {
   aliases: persona.aliases,
   instructions: persona.instructions,
   model_name: persona.model_name,
+  voice: persona.voice,
 };
 
 function recordingApi() {
@@ -23,6 +25,9 @@ function recordingApi() {
     const request = new Request(new URL(String(input), 'http://localhost'), init);
     requests.push(request);
     const path = new URL(request.url).pathname;
+    if (path.endsWith('/turns/turn-1/persona')) {
+      return Response.json({ data: { persona_id: persona.id } });
+    }
     if (request.method === 'GET' && path === '/api/v1/personas') {
       return Response.json({ data: [persona] });
     }
@@ -57,6 +62,7 @@ test('persona API speaks the server’s snake_case wire shape on every route', a
   await api.deletePersona(persona.id);
   await api.getSessionPersona('sess-1');
   await api.setSessionPersona('sess-1', persona.id);
+  assert.deepEqual(await api.getTurnPersona({ sessionId: 'sess-1', turnId: 'turn-1' }), { persona_id: persona.id });
 
   assert.deepEqual(
     requests.map(request => [request.method, new URL(request.url).pathname]),
@@ -67,6 +73,7 @@ test('persona API speaks the server’s snake_case wire shape on every route', a
       ['DELETE', '/api/v1/personas/p-zara'],
       ['GET', '/api/v1/sessions/sess-1/persona'],
       ['PUT', '/api/v1/sessions/sess-1/persona'],
+      ['GET', '/api/v1/sessions/sess-1/turns/turn-1/persona'],
     ],
   );
 
@@ -118,6 +125,15 @@ test('persona API reads a chat that never left the default assistant as null', a
 test('persona API rejects a malformed persona rather than handing it to the UI', async () => {
   const api = createPersonaApi(async () => Response.json({ data: [{ ...persona, aliases: 'Z' }] }));
   await assert.rejects(api.listPersonas(), /persona response was invalid/i);
+  const noVoice = createPersonaApi(async () => Response.json({ data: [{ ...persona, voice: 7 }] }));
+  await assert.rejects(noVoice.listPersonas(), /persona response was invalid/i);
+});
+
+test('persona API reads a turn the main assistant answered, and rejects a malformed answer', async () => {
+  const main = createPersonaApi(async () => Response.json({ data: { persona_id: null } }));
+  assert.deepEqual(await main.getTurnPersona({ sessionId: 's', turnId: 't' }), { persona_id: null });
+  const broken = createPersonaApi(async () => Response.json({ data: { persona_id: 3 } }));
+  await assert.rejects(broken.getTurnPersona({ sessionId: 's', turnId: 't' }), /turn persona response was invalid/i);
 });
 
 test('persona API surfaces the server’s conflict message for a duplicate alias', async () => {

@@ -10,6 +10,7 @@ const ZARA = {
   aliases: ['Z', 'Zara Quinn'],
   instructions: 'Answer as a careful archivist.',
   model_name: 'scripted/alt-model',
+  voice: null,
 };
 
 export function runPersonaStoreContractSuite(getStore: () => IPersonaStore): void {
@@ -43,6 +44,15 @@ export function runPersonaStoreContractSuite(getStore: () => IPersonaStore): voi
     // The refused writes left nothing behind.
     const personas = await store.listPersonas(OWNER);
     expect(personas.map(persona => persona.display_name)).toEqual(['Milo', 'Zara']);
+  });
+
+  it('keeps a reading voice per persona, and clears it back to none', async () => {
+    const store = getStore();
+    expect((await store.createPersona(ZARA)).voice).toBeNull();
+    expect((await store.updatePersona({ ...ZARA, voice: 'af_bella' }))?.voice).toBe('af_bella');
+    expect((await store.getPersona({ ...OWNER, id: 'p-zara' }))?.voice).toBe('af_bella');
+    expect((await store.listPersonas(OWNER))[0]?.voice).toBe('af_bella');
+    expect((await store.updatePersona({ ...ZARA, voice: null }))?.voice).toBeNull();
   });
 
   it('lets a persona keep its own names while being edited', async () => {

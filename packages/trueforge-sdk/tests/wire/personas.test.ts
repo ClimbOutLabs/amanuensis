@@ -23,6 +23,7 @@ describe("PersonasClient", () => {
                     model_name: "model_name",
                     updated_at: "2024-01-15T09:30:00Z",
                     updated_by: "updated_by",
+                    voice: "af_bella",
                 },
             ],
         };
@@ -44,6 +45,7 @@ describe("PersonasClient", () => {
                     modelName: "model_name",
                     updatedAt: new Date("2024-01-15T09:30:00.000Z"),
                     updatedBy: "updated_by",
+                    voice: "af_bella",
                 },
             ],
         });
@@ -67,10 +69,11 @@ describe("PersonasClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
             persona: {
-                aliases: ["aliases"],
+                aliases: ["Z"],
                 display_name: "Zara",
-                instructions: "instructions",
-                model_name: "model_name",
+                instructions: "Answer as a careful archivist.",
+                model_name: "openai/gpt-4.1",
+                voice: "af_bella",
             },
         };
         const rawResponseBody = {
@@ -86,6 +89,7 @@ describe("PersonasClient", () => {
                 model_name: "model_name",
                 updated_at: "2024-01-15T09:30:00Z",
                 updated_by: "updated_by",
+                voice: "af_bella",
             },
         };
 
@@ -100,10 +104,11 @@ describe("PersonasClient", () => {
 
         const response = await client.personas.create({
             persona: {
-                aliases: ["aliases"],
+                aliases: ["Z"],
                 displayName: "Zara",
-                instructions: "instructions",
-                modelName: "model_name",
+                instructions: "Answer as a careful archivist.",
+                modelName: "openai/gpt-4.1",
+                voice: "af_bella",
             },
         });
         expect(response).toEqual({
@@ -119,6 +124,7 @@ describe("PersonasClient", () => {
                 modelName: "model_name",
                 updatedAt: new Date("2024-01-15T09:30:00.000Z"),
                 updatedBy: "updated_by",
+                voice: "af_bella",
             },
         });
     });
@@ -127,7 +133,13 @@ describe("PersonasClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
+            persona: {
+                aliases: ["aliases", "aliases"],
+                display_name: "x",
+                instructions: "x",
+                model_name: "x",
+                voice: null,
+            },
         };
         const rawResponseBody = { error: { message: "message" } };
 
@@ -147,6 +159,7 @@ describe("PersonasClient", () => {
                     displayName: "x",
                     instructions: "x",
                     modelName: "x",
+                    voice: null,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.BadRequestError);
@@ -156,7 +169,13 @@ describe("PersonasClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
+            persona: {
+                aliases: ["aliases", "aliases"],
+                display_name: "x",
+                instructions: "x",
+                model_name: "x",
+                voice: null,
+            },
         };
         const rawResponseBody = { error: { message: "message" } };
 
@@ -176,6 +195,7 @@ describe("PersonasClient", () => {
                     displayName: "x",
                     instructions: "x",
                     modelName: "x",
+                    voice: null,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
@@ -185,7 +205,13 @@ describe("PersonasClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
+            persona: {
+                aliases: ["aliases", "aliases"],
+                display_name: "x",
+                instructions: "x",
+                model_name: "x",
+                voice: null,
+            },
         };
         const rawResponseBody = { error: { message: "message" } };
 
@@ -205,6 +231,7 @@ describe("PersonasClient", () => {
                     displayName: "x",
                     instructions: "x",
                     modelName: "x",
+                    voice: null,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.ConflictError);
@@ -214,7 +241,13 @@ describe("PersonasClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
+            persona: {
+                aliases: ["aliases", "aliases"],
+                display_name: "x",
+                instructions: "x",
+                model_name: "x",
+                voice: null,
+            },
         };
         const rawResponseBody = { error: { message: "message" } };
 
@@ -234,6 +267,7 @@ describe("PersonasClient", () => {
                     displayName: "x",
                     instructions: "x",
                     modelName: "x",
+                    voice: null,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
@@ -244,10 +278,11 @@ describe("PersonasClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
             persona: {
-                aliases: ["aliases"],
+                aliases: ["Z"],
                 display_name: "Zara",
-                instructions: "instructions",
-                model_name: "model_name",
+                instructions: "Answer as a careful archivist.",
+                model_name: "openai/gpt-4.1",
+                voice: "af_bella",
             },
         };
         const rawResponseBody = {
@@ -263,6 +298,7 @@ describe("PersonasClient", () => {
                 model_name: "model_name",
                 updated_at: "2024-01-15T09:30:00Z",
                 updated_by: "updated_by",
+                voice: "af_bella",
             },
         };
 
@@ -277,10 +313,11 @@ describe("PersonasClient", () => {
 
         const response = await client.personas.update("persona_id", {
             persona: {
-                aliases: ["aliases"],
+                aliases: ["Z"],
                 displayName: "Zara",
-                instructions: "instructions",
-                modelName: "model_name",
+                instructions: "Answer as a careful archivist.",
+                modelName: "openai/gpt-4.1",
+                voice: "af_bella",
             },
         });
         expect(response).toEqual({
@@ -296,6 +333,7 @@ describe("PersonasClient", () => {
                 modelName: "model_name",
                 updatedAt: new Date("2024-01-15T09:30:00.000Z"),
                 updatedBy: "updated_by",
+                voice: "af_bella",
             },
         });
     });
@@ -304,7 +342,13 @@ describe("PersonasClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
+            persona: {
+                aliases: ["aliases", "aliases"],
+                display_name: "x",
+                instructions: "x",
+                model_name: "x",
+                voice: null,
+            },
         };
         const rawResponseBody = { error: { message: "message" } };
 
@@ -324,6 +368,7 @@ describe("PersonasClient", () => {
                     displayName: "x",
                     instructions: "x",
                     modelName: "x",
+                    voice: null,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.BadRequestError);
@@ -333,7 +378,13 @@ describe("PersonasClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
+            persona: {
+                aliases: ["aliases", "aliases"],
+                display_name: "x",
+                instructions: "x",
+                model_name: "x",
+                voice: null,
+            },
         };
         const rawResponseBody = { error: { message: "message" } };
 
@@ -353,6 +404,7 @@ describe("PersonasClient", () => {
                     displayName: "x",
                     instructions: "x",
                     modelName: "x",
+                    voice: null,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
@@ -362,7 +414,13 @@ describe("PersonasClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
+            persona: {
+                aliases: ["aliases", "aliases"],
+                display_name: "x",
+                instructions: "x",
+                model_name: "x",
+                voice: null,
+            },
         };
         const rawResponseBody = { error: { message: "message" } };
 
@@ -382,6 +440,7 @@ describe("PersonasClient", () => {
                     displayName: "x",
                     instructions: "x",
                     modelName: "x",
+                    voice: null,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
@@ -391,7 +450,13 @@ describe("PersonasClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
+            persona: {
+                aliases: ["aliases", "aliases"],
+                display_name: "x",
+                instructions: "x",
+                model_name: "x",
+                voice: null,
+            },
         };
         const rawResponseBody = { error: { message: "message" } };
 
@@ -411,6 +476,7 @@ describe("PersonasClient", () => {
                     displayName: "x",
                     instructions: "x",
                     modelName: "x",
+                    voice: null,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.ConflictError);
@@ -420,7 +486,13 @@ describe("PersonasClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
+            persona: {
+                aliases: ["aliases", "aliases"],
+                display_name: "x",
+                instructions: "x",
+                model_name: "x",
+                voice: null,
+            },
         };
         const rawResponseBody = { error: { message: "message" } };
 
@@ -440,6 +512,7 @@ describe("PersonasClient", () => {
                     displayName: "x",
                     instructions: "x",
                     modelName: "x",
+                    voice: null,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);

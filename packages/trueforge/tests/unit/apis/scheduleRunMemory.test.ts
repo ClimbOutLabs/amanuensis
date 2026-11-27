@@ -70,6 +70,7 @@ const ZARA: Persona = {
   aliases: [],
   instructions: 'Answer as a careful archivist.',
   model_name: 'test-provider/test-model',
+  voice: null,
 };
 
 /** Minimal fake; resolving a summarization context never dereferences the store. */

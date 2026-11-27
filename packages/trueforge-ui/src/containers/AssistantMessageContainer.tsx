@@ -23,6 +23,7 @@ import { TurnImages } from '../chatImages/ChatImages.js';
 import { ChatImageScope, ChatTurnWithoutImages, useChatImagesPort } from '../chatImages/chatImageScope.js';
 import { AmanBrief } from '../components/AmanBrief.js';
 import { useSpeakingKey, useSpokenReply } from '../components/SpokenReplyContext.js';
+import { useSpeakReply } from '../hooks/useSpeakReply.js';
 import { ReminderNotificationPrompt } from '../reminders/ReminderNotificationPrompt.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
@@ -186,6 +187,7 @@ export function AssistantMessageContainer() {
   const messageContent = useAuiState(s => s.message.content);
   const spokenReply = useSpokenReply();
   const speakingKey = useSpeakingKey();
+  const speakReply = useSpeakReply();
   // A brief replaces the answer once its JSON block is complete and parses. While it is being written one quiet
   // line shows instead of the raw text. A finished answer that holds JSON but cannot be drawn shows its words
   // without the JSON; a finished answer with no JSON shows as normal markdown.
@@ -465,14 +467,14 @@ export function AssistantMessageContainer() {
                   ? {
                       speaking: speakingKey === messageId,
                       onSpeak: () => {
-                        void spokenReply.speak(
-                          answerReadoutText(finalAnswerSpeech(messageContent), {
+                        void speakReply({
+                          text: answerReadoutText(finalAnswerSpeech(messageContent), {
                             readWhole: readReadWholeMessages(),
                           }),
-                          {
-                            key: messageId,
-                          },
-                        );
+                          key: messageId,
+                          sessionId,
+                          turnId,
+                        });
                       },
                       onStop: spokenReply.stop,
                     }

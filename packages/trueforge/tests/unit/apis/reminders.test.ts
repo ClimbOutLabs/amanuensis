@@ -35,6 +35,7 @@ const MANNIE: Persona = {
   aliases: [],
   instructions: 'You are Mannie.',
   model_name: 'test/model',
+  voice: null,
 };
 
 let recordSeq = 0;

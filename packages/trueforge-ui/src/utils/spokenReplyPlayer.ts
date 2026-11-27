@@ -27,9 +27,15 @@ export class ServerVoiceRefusal extends Error {
 /** Which voice read the reply: the computer's own, the browser's built-in one, or none at all. */
 export type SpokenReplyVoice = 'server' | 'browser' | 'none';
 
+export type SpeakOptions = { key?: string | undefined; voice?: ServerVoiceId | undefined };
+
 export type SpokenReplyPlayer = {
-  /** Reads the text aloud and resolves when it finishes or is stopped. The key names what is being read, such as a message id. */
-  speak: (text: string, options?: { key?: string }) => Promise<SpokenReplyVoice>;
+  /**
+   * Reads the text aloud and resolves when it finishes or is stopped. The key names what is being read, such as a
+   * message id. The voice, such as the one picked for the persona that wrote the reply, replaces the person's own
+   * voice choice for this one reading.
+   */
+  speak: (text: string, options?: SpeakOptions) => Promise<SpokenReplyVoice>;
   /** Stops whatever is being read. */
   stop: () => void;
   /** False when neither the computer's voice nor the browser's voice can read aloud. */
@@ -190,7 +196,11 @@ export function createSpokenReplyPlayer(deps: SpokenReplyPlayerDeps): SpokenRepl
     setKey(null);
   };
 
-  const speakPieces = async (text: string, controller: AbortController): Promise<SpokenReplyVoice> => {
+  const speakPieces = async (
+    text: string,
+    controller: AbortController,
+    chosenVoice: ServerVoiceId | undefined,
+  ): Promise<SpokenReplyVoice> => {
     const { signal } = controller;
     const pieces = splitForSpeech(text);
     const server = deps.serverVoice;
@@ -198,7 +208,7 @@ export function createSpokenReplyPlayer(deps: SpokenReplyPlayerDeps): SpokenRepl
       return readWithBrowser(text, signal);
     }
     // One voice for the whole reply, even if the choice changes while it is read.
-    const voice = readServerVoice();
+    const voice = chosenVoice ?? readServerVoice();
     const fetchPiece = (index: number): Promise<Blob> => {
       const piece = pieces[index];
       return piece === undefined
@@ -265,14 +275,14 @@ export function createSpokenReplyPlayer(deps: SpokenReplyPlayerDeps): SpokenRepl
         listeners.delete(listener);
       };
     },
-    async speak(text: string, options?: { key?: string }): Promise<SpokenReplyVoice> {
+    async speak(text: string, options?: SpeakOptions): Promise<SpokenReplyVoice> {
       stop();
       const controller = new AbortController();
       active = controller;
       const myRun = runId;
       setKey(options?.key ?? null);
       try {
-        return await speakPieces(text, controller);
+        return await speakPieces(text, controller, options?.voice);
       } finally {
         // A newer speak or a stop has already replaced this one; only the latest run clears the key.
         if (runId === myRun) {

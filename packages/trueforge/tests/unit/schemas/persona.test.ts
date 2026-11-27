@@ -26,7 +26,13 @@ function emittedPersonaContent() {
 }
 
 function personaContent(displayName: string) {
-  return { display_name: displayName, aliases: [], instructions: 'Answer plainly.', model_name: 'scripted/model' };
+  return {
+    display_name: displayName,
+    aliases: [],
+    instructions: 'Answer plainly.',
+    model_name: 'scripted/model',
+    voice: null,
+  };
 }
 
 describe('persona name validation', () => {

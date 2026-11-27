@@ -4,10 +4,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { PersonaProvider, type Persona, type PersonaApi } from '@/components/PersonaContext.js';
+import { SpokenReplyProvider } from '@/components/SpokenReplyContext.js';
 import PersonaSettings from '@/containers/SettingsBuilder/PersonaSettings.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { ModelSelection } from '@/server/types.js';
-import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
+import type { ServerVoiceApi } from '@/utils/spokenReplyPlayer.js';
+import { personaApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer } from '../../server/mockServer.js';
 
 const models: ModelSelection[] = [
@@ -21,6 +23,7 @@ const ZARA: Persona = {
   aliases: ['Z'],
   instructions: 'Answer as a careful archivist.',
   model_name: 'anthropic/haiku',
+  voice: null,
 };
 
 async function unavailable(): Promise<never> {
@@ -30,9 +33,10 @@ async function unavailable(): Promise<never> {
 function renderSettings(
   api: Partial<PersonaApi> & Pick<PersonaApi, 'listPersonas'>,
   getModels: () => Promise<ModelSelection[]> = async () => models,
+  serverVoice?: ServerVoiceApi,
 ) {
   const full: PersonaApi = {
-    ...personaKnowledgeApiStubs,
+    ...personaApiStubs,
     createPersona: unavailable,
     updatePersona: unavailable,
     deletePersona: unavailable,
@@ -40,18 +44,91 @@ function renderSettings(
     setSessionPersona: async () => null,
     ...api,
   };
-  return render(
+  const settings = (
     <ServerProvider server={createMockAgentUIServer({ getModels })}>
       <DraftCatalogProvider>
         <PersonaProvider api={full}>
           <PersonaSettings />
         </PersonaProvider>
       </DraftCatalogProvider>
-    </ServerProvider>,
+    </ServerProvider>
+  );
+  return render(
+    serverVoice === undefined ? (
+      settings
+    ) : (
+      <SpokenReplyProvider serverVoice={serverVoice}>{settings}</SpokenReplyProvider>
+    ),
   );
 }
 
+function voiceServer(): ServerVoiceApi & { voices: string[] } {
+  const voices: string[] = [];
+  return {
+    voices,
+    speak: ({ voice }) => {
+      voices.push(voice);
+      return Promise.reject(new Error('no audio in tests'));
+    },
+  };
+}
+
 describe('PersonaSettings', () => {
+  it('gives a persona its own voice, plays a sample of it, and saves it', async () => {
+    const updatePersona = vi.fn(async () => ({ ...ZARA, voice: 'af_bella' }));
+    const server = voiceServer();
+    renderSettings({ listPersonas: async () => [ZARA], updatePersona }, undefined, server);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Zara' }));
+    const picker = screen.getByLabelText('Voice');
+    expect(picker).toHaveValue('');
+    fireEvent.change(picker, { target: { value: 'af_bella' } });
+    await waitFor(() => expect(server.voices).toEqual(['af_bella']));
+    fireEvent.click(screen.getByRole('button', { name: 'Save persona' }));
+
+    await waitFor(() => {
+      expect(updatePersona).toHaveBeenCalledWith('p-zara', {
+        display_name: 'Zara',
+        aliases: ['Z'],
+        instructions: 'Answer as a careful archivist.',
+        model_name: 'anthropic/haiku',
+        voice: 'af_bella',
+      });
+    });
+  });
+
+  it('shows a persona’s own voice, and lets it go back to the person’s voice setting', async () => {
+    const updatePersona = vi.fn(async () => ZARA);
+    renderSettings(
+      { listPersonas: async () => [{ ...ZARA, voice: 'am_michael' }], updatePersona },
+      undefined,
+      voiceServer(),
+    );
+
+    expect(await screen.findByText(/Voice: Michael, a man/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Zara' }));
+    expect(screen.getByLabelText('Voice')).toHaveValue('am_michael');
+    fireEvent.change(screen.getByLabelText('Voice'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save persona' }));
+
+    await waitFor(() => {
+      expect(updatePersona).toHaveBeenCalledWith('p-zara', expect.objectContaining({ voice: null }));
+    });
+  });
+
+  it('hides the voice picker without the computer’s voice, and keeps the voice a persona already has', async () => {
+    const updatePersona = vi.fn(async () => ZARA);
+    renderSettings({ listPersonas: async () => [{ ...ZARA, voice: 'af_bella' }], updatePersona });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Zara' }));
+    expect(screen.queryByLabelText('Voice')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save persona' }));
+
+    await waitFor(() => {
+      expect(updatePersona).toHaveBeenCalledWith('p-zara', expect.objectContaining({ voice: 'af_bella' }));
+    });
+  });
+
   it('shows a persona with its aliases and its assigned model, not hidden in prompt text', async () => {
     renderSettings({ listPersonas: async () => [ZARA] });
 
@@ -77,6 +154,7 @@ describe('PersonaSettings', () => {
         aliases: ['Z', 'Zara Quinn'],
         instructions: 'Answer as a careful archivist.',
         model_name: 'anthropic/haiku',
+        voice: null,
       });
     });
   });
@@ -105,6 +183,7 @@ describe('PersonaSettings', () => {
         aliases: [],
         instructions: '',
         model_name: 'openai/gpt-4.1',
+        voice: null,
       });
     });
   });
@@ -141,6 +220,7 @@ describe('PersonaSettings', () => {
         aliases: ['Z'],
         instructions: 'Answer briefly.',
         model_name: 'anthropic/haiku',
+        voice: null,
       });
     });
 
