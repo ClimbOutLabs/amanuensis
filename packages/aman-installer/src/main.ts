@@ -12,6 +12,7 @@ import { isSetupProgramName } from './release/assetNames.ts';
 import { fetchBytesFromNetwork } from './release/download.ts';
 import { SystemProcessRunner } from './runner/processRunner.ts';
 import { storeForHost } from './state/storeFor.ts';
+import { openSetupWindow } from './window/launch.ts';
 import { shouldHoldWindow } from './windowHold.ts';
 
 // The one entry point the single executable is built from.
@@ -195,6 +196,11 @@ void runCli(args, {
   hostName: hostname(),
   ask: askLine,
   askSecret: askSecretLine,
+  // The setup window is for a person at a Windows computer; a pipe or
+  // a scheduled run has no one to look at it.
+  ...(host.kind === 'windows' && process.stdin.isTTY
+    ? { openWindow: () => openSetupWindow({ systemRoot: config.systemRoot, env: config.windowEnv }) }
+    : {}),
 })
   .then(
     exitCode => exitCode,

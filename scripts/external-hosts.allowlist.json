@@ -446,6 +446,11 @@
       "reason": "Name of Google's full mailbox permission in the Gmail server's list of permissions."
     },
     {
+      "host": "schemas.microsoft.com",
+      "category": "identifier",
+      "reason": "Windows window description namespace names in the Aman Setup window."
+    },
+    {
       "host": "schemas.openxmlformats.org",
       "category": "identifier",
       "reason": "Office document namespace names read when opening Word and Excel files."
