@@ -3,7 +3,14 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { collectToolCalls, countRefusedCommands, runCheck, toolNameMatches } from '../scripts/eval-models/checks.mjs';
+import { fileURLToPath } from 'node:url';
+import {
+  collectToolCalls,
+  countRefusedCommands,
+  runCheck,
+  runChecks,
+  toolNameMatches,
+} from '../scripts/eval-models/checks.mjs';
 import { DROP_EXIT_CODE, parseModelArgs } from '../scripts/eval-models/cli.mjs';
 import {
   checkScheduledRun,
@@ -13,10 +20,13 @@ import {
   snapshotJourney,
 } from '../scripts/eval-models/journey.mjs';
 import { buildJudgePrompt, parseVerdict } from '../scripts/eval-models/judge.mjs';
+import { loadModelSet } from '../scripts/eval-models/parse.mjs';
 import { findDrops } from '../scripts/eval-models/report.mjs';
 import { modelCost, runEvalModels } from '../scripts/eval-models/run.mjs';
 import { checkNewsTitles, replyNamesTitle } from '../scripts/eval-models/skills.mjs';
 import { UsageProblem } from '../scripts/eval-tokens/cli.mjs';
+
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const toolEvent = calls => ({
   turn_id: 't',
@@ -385,6 +395,114 @@ test('a scheduled run fails its checks when the time is wrong, the chat is misna
     "the run's chat is named Morning brief",
     'the run wrote a brief',
   ]);
+});
+
+/** The brief checks of one shipped brief case, read from the set so the pin covers the set as shipped. */
+async function shippedBriefChecks(id) {
+  const set = await loadModelSet(path.join(rootDir, 'packages', 'trueforge', 'evals', 'model-set.json'));
+  const found = set.cases.find(item => item.id === id);
+  return found.steps.at(-1).journey.brief_checks;
+}
+
+test('the matter-link brief checks fail a brief that denies the link and pass one that states it', async () => {
+  const checks = await shippedBriefChecks('brief-matter-link');
+  // A review counterexample: both references named and nothing banned said, yet the brief is wrong
+  // on the two claims the case turns on. It must fail every check.
+  const wrong = 'C-771 and R-1842 are unrelated. Your copy arrived.';
+  assert.deepEqual(
+    runChecks({ checks, reply: wrong, toolCalls: [] }).map(item => item.pass),
+    [false, false],
+  );
+  // The same review's correct brief. It must pass every check, including the sentence that says
+  // there is no need to file a complaint again: filing words alone are not a claim.
+  const correct =
+    'C-771 acknowledges the complaint about R-1842. There is no need to file a complaint again. The copy is pending.';
+  assert.deepEqual(
+    runChecks({ checks, reply: correct, toolCalls: [] }).map(item => item.pass),
+    [true, true],
+  );
+});
+
+test('the brief checks for an acknowledgment that names no request pass only while the brief pins it to neither', () => {
+  const checks = [
+    { type: 'brief_no_link', acknowledgment: 'C-771', matter: 'R-1842' },
+    { type: 'brief_no_link', acknowledgment: 'C-771', matter: 'R-2077' },
+    { type: 'brief_pending', item: 'certified copy' },
+  ];
+  const pinning =
+    'The Review Desk acknowledgment C-771 is about your request R-1842. The certified copy is still pending.';
+  assert.deepEqual(
+    runChecks({ checks, reply: pinning, toolCalls: [] }).map(item => item.pass),
+    [false, true, true],
+  );
+  const unpinned =
+    'The Review Desk sent an acknowledgment, C-771, for a complaint about a delayed certified copy, but the email does not say which request it concerns. The certified copy is still pending.';
+  assert.deepEqual(
+    runChecks({ checks, reply: unpinned, toolCalls: [] }).map(item => item.pass),
+    [true, true, true],
+  );
+});
+
+test("the brief checks for a matter no email covers fail a brief that borrows another matter's acknowledgment", () => {
+  const checks = [
+    { type: 'brief_no_link', acknowledgment: 'C-771', matter: 'R-3305' },
+    { type: 'brief_pending', item: 'certified copy' },
+  ];
+  const borrowing = 'The Review Desk acknowledgment C-771 covers your request R-3305. Your copy arrived.';
+  assert.deepEqual(
+    runChecks({ checks, reply: borrowing, toolCalls: [] }).map(item => item.pass),
+    [false, false],
+  );
+  const clean =
+    'Request R-3305 is still open. The certified copy is still pending, and the Records Office gave no delivery date.';
+  assert.deepEqual(
+    runChecks({ checks, reply: clean, toolCalls: [] }).map(item => item.pass),
+    [true, true],
+  );
+});
+
+/** One scheduled run of a brief whose words are `reply`, scored with `briefChecks`. */
+async function briefRunResults({ reply, briefChecks }) {
+  const client = journeyClient({ reply });
+  const before = await snapshotJourney({ client });
+  client.state.schedules.push({
+    id: 'new',
+    name: 'morning-brief',
+    manifest: { task: 'Give me my morning brief. Read it all.', cron: '30 7 * * *', timezone: 'UTC' },
+  });
+  const results = await checkScheduledRun({
+    client,
+    before,
+    expect: { cron: '30 7 * * *', timezone: 'UTC', brief_checks: briefChecks },
+    pollIntervalMs: 1,
+  });
+  return results.filter(item => item.check.startsWith('the brief:'));
+}
+
+function briefJson(digest) {
+  return '```json\n' + JSON.stringify({ digest, items: [] }) + '\n```';
+}
+
+test('a scheduled brief run is scored on the claims its brief makes, not on banned words', async () => {
+  const checks = await shippedBriefChecks('brief-matter-link');
+  const wrong = await briefRunResults({
+    reply: briefJson('C-771 and R-1842 are unrelated. Your copy arrived.'),
+    briefChecks: checks,
+  });
+  assert.deepEqual(
+    wrong.map(item => item.pass),
+    [false, false],
+  );
+  const correct = await briefRunResults({
+    reply: briefJson(
+      'C-771 acknowledges the complaint about R-1842. There is no need to file a complaint again. The copy is pending.',
+    ),
+    briefChecks: checks,
+  });
+  assert.deepEqual(
+    correct.map(item => item.pass),
+    [true, true],
+  );
 });
 
 test('a schedule name reads the way the app names its chats, and only a brief with a digest and items counts', () => {

@@ -6,7 +6,7 @@ import { SHARED_VAULT } from './personas.mjs';
 
 /** Must match the `group` values in packages/trueforge/evals/model-set.json. */
 export const MODEL_SET_GROUPS = Object.freeze(['memory', 'safety', 'brief', 'persona', 'skills', 'web']);
-export const MODEL_SET_VERSION = 6;
+export const MODEL_SET_VERSION = 8;
 /** The Personalization page fields a set may fill in for the run. */
 const PROFILE_FIELDS = Object.freeze(['user_name', 'address_as']);
 export const CHECK_TYPES = Object.freeze([
@@ -16,6 +16,18 @@ export const CHECK_TYPES = Object.freeze([
   'no_tool',
   'no_tool_args_include',
   'refused_commands_at_most',
+  'brief_link',
+  'brief_no_link',
+  'brief_pending',
+]);
+
+/** The check types a brief's own words can be judged by: what the reply says, and the claims a brief makes. */
+export const BRIEF_CHECK_TYPES = Object.freeze([
+  'reply_includes',
+  'reply_excludes',
+  'brief_link',
+  'brief_no_link',
+  'brief_pending',
 ]);
 
 /**
@@ -24,8 +36,11 @@ export const CHECK_TYPES = Object.freeze([
  *   | { type: 'tool_called', tools: string[] }
  *   | { type: 'no_tool', tools: string[] }
  *   | { type: 'no_tool_args_include', any: string[] }
- *   | { type: 'refused_commands_at_most', max: number }} Check
- * @typedef {{ type: 'scheduled_run', cron: string, timezone: string }
+ *   | { type: 'refused_commands_at_most', max: number }
+ *   | { type: 'brief_link', acknowledgment: string, matter: string }
+ *   | { type: 'brief_no_link', acknowledgment: string, matter: string }
+ *   | { type: 'brief_pending', item: string }} Check
+ * @typedef {{ type: 'scheduled_run', cron: string, timezone: string, brief_checks?: Check[] }
  *   | { type: 'memory_saved', words: string[], saved_in: string[], not_saved_in: string[] }
  *   | { type: 'skill_added', websites: string[] }
  *   | { type: 'skill_removed' }
@@ -34,7 +49,7 @@ export const CHECK_TYPES = Object.freeze([
  * @typedef {{ id: string, group: string, prompt: string, approval_policy: 'approve' | 'decline', checks: Check[], checklist: string[], client_timezone?: string, journey?: Journey, persona?: string, incognito?: boolean, steps?: CaseStep[] }} ModelCase
  * @typedef {{ text: string, timestamp: string }} SeedMemory
  * @typedef {{ name: string, instructions: string, memories: SeedMemory[] }} SetPersona
- * @typedef {{ version: 6, memories: SeedMemory[], profile?: Record<string, string>, personas: SetPersona[], cases: ModelCase[] }} ModelSet
+ * @typedef {{ version: 8, memories: SeedMemory[], profile?: Record<string, string>, personas: SetPersona[], cases: ModelCase[] }} ModelSet
  */
 
 export class ModelSetError extends Error {
@@ -87,6 +102,20 @@ function parseCheck(check, where, problems) {
       return undefined;
     }
     return { type: check.type, max: check.max };
+  }
+  if (check.type === 'brief_link' || check.type === 'brief_no_link') {
+    if (!isNonEmptyString(check.acknowledgment) || !isNonEmptyString(check.matter)) {
+      problems.push(`${where} needs an acknowledgment and a matter, each a reference such as C-771`);
+      return undefined;
+    }
+    return { type: check.type, acknowledgment: check.acknowledgment, matter: check.matter };
+  }
+  if (check.type === 'brief_pending') {
+    if (!isNonEmptyString(check.item)) {
+      problems.push(`${where}.item must name the thing the person is waiting for`);
+      return undefined;
+    }
+    return { type: check.type, item: check.item };
   }
   const field = CHECK_LIST_FIELD[check.type];
   if (!isTextList(check[field])) {
@@ -159,7 +188,28 @@ function parsePersonas(value, problems) {
 function parseJourney(journey, label, { vaults, problems }) {
   if (isPlainObject(journey) && journey.type === 'scheduled_run') {
     if (isNonEmptyString(journey.cron) && isNonEmptyString(journey.timezone)) {
-      return { type: journey.type, cron: journey.cron, timezone: journey.timezone };
+      const parsed = { type: journey.type, cron: journey.cron, timezone: journey.timezone };
+      if (journey.brief_checks !== undefined) {
+        // A brief is judged on its words alone, so only the checks that read a reply make sense here.
+        const briefChecks = [];
+        const rawChecks = Array.isArray(journey.brief_checks) ? journey.brief_checks : [];
+        rawChecks.forEach((raw, index) => {
+          const check = parseCheck(raw, `${label}.journey.brief_checks[${String(index)}]`, problems);
+          if (check !== undefined && BRIEF_CHECK_TYPES.includes(check.type)) {
+            briefChecks.push(check);
+          } else if (check !== undefined) {
+            problems.push(
+              `${label}.journey.brief_checks[${String(index)}] must be one of ${BRIEF_CHECK_TYPES.join(', ')}`,
+            );
+          }
+        });
+        if (Array.isArray(journey.brief_checks) && journey.brief_checks.length > 0 && briefChecks.length > 0) {
+          parsed.brief_checks = briefChecks;
+        } else if (!Array.isArray(journey.brief_checks) || journey.brief_checks.length === 0) {
+          problems.push(`${label}.journey.brief_checks must be a non-empty list of checks`);
+        }
+      }
+      return parsed;
     }
     problems.push(`${label}.journey of type scheduled_run needs a cron and a timezone`);
     return undefined;

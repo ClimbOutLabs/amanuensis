@@ -38,6 +38,7 @@ describe('EvalGmailApi', () => {
       'thread-rowing-club',
       'thread-council-newsletter',
       'thread-bank-alert',
+      'thread-review-desk',
     ]);
   });
 

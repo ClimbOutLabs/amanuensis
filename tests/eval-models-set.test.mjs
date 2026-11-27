@@ -17,7 +17,7 @@ const evalsDir = path.join(rootDir, 'packages', 'trueforge', 'evals');
 
 function validSet() {
   return {
-    version: 6,
+    version: 8,
     memories: [{ text: 'My dentist is Dr. Example.', timestamp: '2026-08-04T09:10:00Z' }],
     cases: [
       {
@@ -48,7 +48,7 @@ function problemsOf(value) {
   assert.fail('expected the set to be rejected');
 }
 
-test('the shipped set has 15 memory questions, 11 safety cases, one brief, 10 persona checks, 2 skills and one web case', async () => {
+test('the shipped set has 15 memory questions, 11 safety cases, four brief cases, 10 persona checks, 2 skills and one web case', async () => {
   const set = await loadModelSet(path.join(evalsDir, 'model-set.json'));
   assert.equal(set.cases.filter(item => item.group === 'memory').length, 15);
   assert.equal(set.cases.filter(item => item.group === 'safety').length, 11);
@@ -60,9 +60,32 @@ test('the shipped set has 15 memory questions, 11 safety cases, one brief, 10 pe
   assert.ok(web[0].checks.some(check => check.type === 'tool_called'));
   assert.ok(web[0].checks.some(check => check.type === 'no_tool' && check.tools.includes('browser_open')));
   const briefs = set.cases.filter(item => item.group === 'brief');
-  assert.equal(briefs.length, 1);
-  assert.equal(briefs[0].journey?.type, 'scheduled_run');
-  assert.equal(briefs[0].client_timezone, briefs[0].journey?.timezone);
+  assert.equal(briefs.length, 4);
+  const weekdays = briefs.find(item => item.id === 'brief-morning-weekdays');
+  assert.equal(weekdays.journey?.type, 'scheduled_run');
+  assert.equal(weekdays.client_timezone, weekdays.journey?.timezone);
+  const matterLink = briefs.find(item => item.id === 'brief-matter-link');
+  const matterRun = matterLink.steps.at(-1).journey;
+  assert.equal(matterRun?.type, 'scheduled_run');
+  assert.deepEqual(
+    matterRun.brief_checks.map(check => check.type),
+    ['brief_link', 'brief_pending'],
+  );
+  const ambiguousRun = briefs.find(item => item.id === 'brief-matter-link-ambiguous').steps.at(-1).journey;
+  assert.deepEqual(
+    ambiguousRun.brief_checks.map(check => check.type),
+    ['brief_link', 'brief_no_link', 'brief_pending'],
+  );
+  assert.deepEqual(
+    ambiguousRun.brief_checks.map(check => check.matter).filter(matter => matter !== undefined),
+    ['R-1842', 'R-2077'],
+  );
+  const noneRun = briefs.find(item => item.id === 'brief-matter-link-none').steps.at(-1).journey;
+  assert.deepEqual(
+    noneRun.brief_checks.map(check => check.type),
+    ['brief_no_link', 'brief_pending'],
+  );
+  assert.equal(noneRun.brief_checks[0].matter, 'R-3305');
   assert.ok(set.memories.length > 0);
   assert.equal(set.cases.filter(item => item.group === 'persona').length, 10);
   assert.deepEqual(
@@ -162,6 +185,43 @@ test('a brief case keeps its time zone and journey, and a journey without a time
   assert.equal(set.cases[0].journey, undefined);
   value.cases[2].journey = { type: 'scheduled_run', timezone: 'Europe/London' };
   assert.match(problemsOf(value).join('\n'), /scheduled_run needs a cron and a timezone/);
+});
+
+test('brief checks may tie two references together or keep them apart, and a brief check that names nothing is refused', () => {
+  const value = validSet();
+  value.cases.push({
+    id: 'brief-b',
+    group: 'brief',
+    prompt: 'Set up a morning brief at 7:30.',
+    approval_policy: 'approve',
+    client_timezone: 'UTC',
+    journey: {
+      type: 'scheduled_run',
+      cron: '30 7 * * *',
+      timezone: 'UTC',
+      brief_checks: [
+        { type: 'brief_link', acknowledgment: 'C-1', matter: 'R-2' },
+        { type: 'brief_no_link', acknowledgment: 'C-1', matter: 'R-3' },
+        { type: 'brief_pending', item: 'certified copy' },
+      ],
+    },
+    checks: [{ type: 'tool_called', tools: ['create_schedule'] }],
+  });
+  const set = parseModelSet(value);
+  assert.deepEqual(set.cases[2].journey.brief_checks, [
+    { type: 'brief_link', acknowledgment: 'C-1', matter: 'R-2' },
+    { type: 'brief_no_link', acknowledgment: 'C-1', matter: 'R-3' },
+    { type: 'brief_pending', item: 'certified copy' },
+  ]);
+  value.cases[2].journey.brief_checks = [
+    { type: 'brief_link', acknowledgment: 'C-1' },
+    { type: 'brief_pending' },
+    { type: 'tool_called', tools: ['create_schedule'] },
+  ];
+  const problems = problemsOf(value).join('\n');
+  assert.match(problems, /needs an acknowledgment and a matter/);
+  assert.match(problems, /item must name the thing/);
+  assert.match(problems, /must be one of reply_includes, reply_excludes, brief_link, brief_no_link, brief_pending/);
 });
 
 test('a case of several messages parses each step, and joins its prompts for the report', () => {
