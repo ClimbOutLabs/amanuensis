@@ -6,7 +6,7 @@ name: Docs site
 # weekly look-over to pick up their pictures.
 on:
   workflow_run:
-    workflows: [Nightly, UI look-over]
+    workflows: [Nightly, Weekly CI, UI look-over]
     types: [completed]
     branches: [main]
   push:

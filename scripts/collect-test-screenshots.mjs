@@ -30,7 +30,7 @@ export const SECTION = 'test-screenshots';
 /** Where each kind of run comes from, and how many of them the site keeps. */
 export const SOURCES = {
   nightly: { workflow: 'nightly.yml', artifact: 'screenshots', keep: 14 },
-  weekly: { workflow: 'ui-sweep.yml', artifact: 'ui-sweep', keep: 4 },
+  weekly: { workflow: 'model-evals.yml', earlierWorkflow: 'ui-sweep.yml', artifact: 'ui-sweep', keep: 4 },
 };
 const API = 'https://api.github.com';
 
@@ -358,13 +358,19 @@ async function unzipInto({ zip, folder }) {
 
 /** Fetches the stored pictures of one kind of run into `folder`. A run with nothing stored is passed over. */
 async function fetchKind({ github, source, folder, unzip }) {
-  const runs = pickRuns({ runs: await github.listRuns(source.workflow), keep: source.keep });
-  for (const each of runs) {
+  const runs = [...(await github.listRuns(source.workflow))];
+  if (source.earlierWorkflow) {
+    runs.push(...(await github.listRuns(source.earlierWorkflow)));
+  }
+  let collected = 0;
+  for (const each of pickRuns({ runs, keep: runs.length })) {
     const stored = (await github.listArtifacts(each.id)).find(
       artifact => artifact.name === source.artifact && !artifact.expired,
     );
     if (stored !== undefined) {
       await unzip({ zip: await github.downloadZip(stored.id), folder });
+      collected += 1;
+      if (collected === source.keep) break;
     }
   }
 }

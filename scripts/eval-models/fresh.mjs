@@ -9,7 +9,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { URLSearchParams } from 'node:url';
 import { DEFAULT_ROOT_DIR } from '../eval-tokens/cli.mjs';
+import { createInstanceClient } from '../eval-tokens/client.mjs';
 import { main as runModels } from './cli.mjs';
+import { seedProductCases } from './product-cases.mjs';
 import { addEvalProviders, loadEvalProviders, providerPrices } from './providers.mjs';
 
 const START_TIMEOUT_MS = 5 * 60 * 1000;
@@ -175,8 +177,12 @@ export async function main({ argv, env = process.env, stdout, stderr, rootDir = 
     stderr(
       `Eval instance ready at ${origin}${added.length > 0 ? `, with ${added.map(provider => provider.name).join(', ')}` : ''}.\n`,
     );
+    const productCases = args.includes('--product-journeys')
+      ? await seedProductCases(createInstanceClient({ baseUrl: origin, token }))
+      : [];
     return await runModels({
-      argv: ['--instance', origin, ...args],
+      productCases,
+      argv: ['--instance', origin, ...args.filter(arg => arg !== '--product-journeys')],
       env: { ...keyFree, TRUEFORGE_TOKEN: token },
       stdout,
       stderr,

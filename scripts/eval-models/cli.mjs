@@ -43,6 +43,7 @@ Options:
   --history <file>       Score history file to compare against and add this run to
   --max-drop <points>    Fail when a model's pass rate falls by more than this many points (default ${String(DEFAULT_MAX_DROP_POINTS)})
   --out <dir>            Output folder (default eval-results/<label>-<time>/)
+  --require-pass         Fail the run when a model has zero cases or any case fails
   --skills               Also add, run and remove skills. Needs an instance started with a sandbox and AMAN_EVAL_SKILLS=true
   -h, --help             Show this help
 
@@ -75,6 +76,7 @@ export function parseModelArgs(argv) {
         'max-drop': { type: 'string' },
         out: { type: 'string' },
         skills: { type: 'boolean' },
+        'require-pass': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
     });
@@ -141,7 +143,13 @@ export function parseModelArgs(argv) {
     maxDrop,
     outDir: values.out,
     skills: values.skills === true,
+    requirePass: values['require-pass'] === true,
   };
+}
+
+/** A completed strict run must have a passing result for every evaluated model and case. */
+export function allCasesPassed(scores) {
+  return scores.length > 0 && scores.every(score => score.total > 0 && score.passed === score.total);
 }
 
 /** Reads the optional prices file. Each entry needs both prices as numbers of zero or more. */
@@ -190,7 +198,7 @@ async function readHistory(file) {
 
 /**
  * Runs the command. Returns the exit code: 0 ok, 1 failure, 2 usage, 3 a model scored worse than before.
- * @param {{ argv: readonly string[], env?: Record<string, string | undefined>, stdout: (text: string) => void, stderr: (text: string) => void, now?: Date, rootDir?: string, fetchImpl?: typeof fetch, pollIntervalMs?: number, memorySettleMs?: number, extraPrices?: Record<string, { input_per_million: number, output_per_million: number }> }} options
+ * @param {{ argv: readonly string[], env?: Record<string, string | undefined>, stdout: (text: string) => void, stderr: (text: string) => void, now?: Date, rootDir?: string, fetchImpl?: typeof fetch, pollIntervalMs?: number, memorySettleMs?: number, productCases?: import('./parse.mjs').ModelCase[], extraPrices?: Record<string, { input_per_million: number, output_per_million: number }> }} options
  */
 export async function main({
   argv,
@@ -203,6 +211,7 @@ export async function main({
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   memorySettleMs,
   extraPrices = {},
+  productCases = [],
 }) {
   let args;
   try {
@@ -233,6 +242,7 @@ export async function main({
     const result = await runEvalModels({
       client,
       tokenSet,
+      productCases,
       modelSet,
       space,
       models: args.models,
@@ -252,6 +262,10 @@ export async function main({
       stdout(`${score.model}: ${String(score.passed)}/${String(score.total)} passed\n`);
     }
     let code = 0;
+    if (args.requirePass && !allCasesPassed(result.report.json.scores)) {
+      stderr('Some cases failed or did not run. See the per-case results in summary.md.\n');
+      code = 1;
+    }
     if (args.historyPath !== undefined) {
       const history = await readHistory(args.historyPath);
       const drops = findDrops({ history, entry: result.report.json, maxDropPoints: args.maxDrop });

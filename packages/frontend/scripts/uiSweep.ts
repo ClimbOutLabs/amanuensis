@@ -29,6 +29,7 @@ interface Finding {
   size: string;
   problems: string[];
   picture: string;
+  reached: boolean;
 }
 
 function slug(words: string): string {
@@ -93,6 +94,7 @@ async function look({
       );
     }
   });
+  let reached = false;
   const picture = join(outDir, `${surface.name}-${size.label}.png`);
   try {
     for (const step of surface.steps) {
@@ -103,13 +105,17 @@ async function look({
     const testWords = TEST_WORDS.filter(word => shown.includes(word));
     if (testWords.length > 0) problems.push(`The screen shows test text (${testWords.join(', ')}).`);
     problems.push(...(await measure({ page, phone: size.phone })));
+    reached = true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     problems.push(`The screen could not be reached: ${message.split('\n')[0] ?? message}`);
   }
-  await page.screenshot({ path: picture, animations: 'disabled', caret: 'hide' }).catch(() => undefined);
+  await page.screenshot({ path: picture, animations: 'disabled', caret: 'hide' }).catch((error: unknown) => {
+    reached = false;
+    problems.push(`Could not save the picture: ${error instanceof Error ? error.message : String(error)}`);
+  });
   await context.close();
-  return { surface: surface.name, size: size.label, problems: [...new Set(problems)], picture };
+  return { surface: surface.name, size: size.label, reached, problems: [...new Set(problems)], picture };
 }
 
 function report(findings: readonly Finding[]): string {
@@ -169,6 +175,10 @@ async function main(): Promise<void> {
     )}\n`,
   );
   console.log(`Pictures of ${String(findings.length)} screens are in ${outDir}. What to look at is in ${reportPath}.`);
+  const missing = findings.filter(finding => !finding.reached);
+  if (missing.length > 0) {
+    throw new Error(`Could not inspect and capture ${String(missing.length)} screen visits. See report.md.`);
+  }
 }
 
 await main();

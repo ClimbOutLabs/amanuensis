@@ -75,7 +75,8 @@ test('the section lists every stored night and weekly look-over, newest first', 
   const { github, unzip } = standInGithub({
     runs: {
       [SOURCES.nightly.workflow]: [finishedRun({ id: 11, day: '13' }), finishedRun({ id: 12, day: '14' })],
-      [SOURCES.weekly.workflow]: [finishedRun({ id: 21, day: '14' })],
+      [SOURCES.weekly.workflow]: [finishedRun({ id: 23, day: '15' })],
+      'ui-sweep.yml': [finishedRun({ id: 21, day: '14' })],
     },
     stored: {
       11: [{ id: 101, name: 'screenshots', files: nightFiles({ folder: '2026/11/13/1715', pictures: 40, failed: 2 }) }],

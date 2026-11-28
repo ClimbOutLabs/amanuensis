@@ -323,7 +323,7 @@ async function runCase({
     if (isRunStopping(caught)) {
       throw caught;
     }
-    status = status ?? 'request_failed';
+    status = 'request_failed';
     error = caught instanceof Error ? caught.message : 'Unknown request failure.';
   } finally {
     if (scheduleBefore !== undefined) {
@@ -405,6 +405,7 @@ export function rowPasses(row) {
  *   client: ReturnType<import('../eval-tokens/client.mjs').createInstanceClient>,
  *   tokenSet: import('../eval-tokens/parse.mjs').TokenSet,
  *   modelSet: import('./parse.mjs').ModelSet,
+ *   productCases?: import('./parse.mjs').ModelCase[],
  *   space: Record<string, string>,
  *   models: string[],
  *   judgeModel: string,
@@ -425,6 +426,7 @@ export async function runEvalModels({
   client,
   tokenSet,
   modelSet,
+  productCases = [],
   space,
   models,
   judgeModel,
@@ -443,7 +445,7 @@ export async function runEvalModels({
   const resolved = await resolveModels({ client, names: [...new Set([...models, judgeModel])] });
   const testedModels = resolved.filter(model => models.includes(model.name));
   const judge = resolved.find(model => model.name === judgeModel);
-  const cases = orderedCases({ modelSet, tokenSet, skills });
+  const cases = [...orderedCases({ modelSet, tokenSet, skills }), ...productCases];
   if (skills) {
     await requireSandbox(client);
   }

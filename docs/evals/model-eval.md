@@ -30,7 +30,7 @@ Use one fixed judge when you compare runs over time. A model that judges its own
 
 ## The weekly run
 
-The workflow `Model evals` builds the sandbox from `main`, starts a throwaway Aman in eval mode on a GitHub runner with that sandbox, runs the models, and posts a score table on the run page. By default it runs Meta's Muse Spark 1.1, which also judges the checklist items. To change the weekly models or the judge, edit `WEEKLY_MODELS` and `JUDGE_MODEL` at the top of `.github/workflows/model-evals.yml`.
+The workflow `Weekly CI` builds the sandbox from `main`, starts a throwaway Aman in eval mode on a GitHub runner with that sandbox, runs the models, and posts a score table on the run page. By default it runs Meta's Muse Spark 1.1, which also judges the checklist items. To change the weekly models or the judge, edit `WEEKLY_MODELS` and `JUDGE_MODEL` at the top of `.github/workflows/model-evals.yml`.
 
 Models outside Token Factory are listed in `packages/trueforge/evals/eval-providers.json`: the provider's address, the name of the environment variable that holds its key, its models and their prices. Meta's API takes the same requests as OpenAI's, so it is added as a custom provider, the same way a person adds one in Settings. To try another Meta model, add it to that file.
 
@@ -49,6 +49,8 @@ The weekly run also checks co-browse in a real browser, with no model and no rea
 ### What a run costs
 
 One run of Muse Spark 1.1 on all 58 cases, with Muse as the judge, should cost about 2 to 3 US dollars at Meta's list price of $1.25 per million input tokens and $4.25 per million output tokens. That is an estimate: the run page shows the cost of each run. It counts the tokens of the eval's chats, so Aman's background work, such as saving memories, can add a little more on the Meta bill.
+
+Weekly CI keeps the per-case results and fails when any evaluated case fails. The score history still shows changes between runs. The same workflow includes the product suites, UI look-over, sandbox, co-browse, upgrade, Obsidian and LongMemEval.
 
 ### Add the model key once
 
@@ -70,7 +72,7 @@ Every file the run keeps is checked for the keys before it is saved. If a key is
 
 ### Run it now, with other models
 
-On GitHub, open **Actions**, then **Model evals**, then **Run workflow**. You can name other models, and add one more Token Factory model by its id. A Token Factory model needs the Token Factory key.
+On GitHub, open **Actions**, then **Weekly CI**, then **Run workflow**. You can name other models, and add one more Token Factory model by its id. A Token Factory model needs the Token Factory key.
 
 Or from the command line:
 
@@ -110,6 +112,8 @@ The eval adds its made-up memories before each model and removes them, and every
 - `--runs` runs each case up to 5 times. More runs give steadier scores and cost more.
 - `--history <file>` compares this run with the last one in the file, and adds this run to it.
 - `--max-drop <points>` sets how far a pass rate may fall before the run fails. The default is 10.
+- `--require-pass` fails the run if any model has no cases or any case fails. Weekly CI uses this option.
+- `--product-journeys` on the fresh instance seeds a goal and a Space with fresh codes. The weekly cases check whether Aman reads each record and gives the code in its reply.
 - `--skills` also runs the skill cases. It needs an instance with a sandbox, started with `AMAN_EVAL_SKILLS=true`. The throwaway instance sets that for you.
 - `--prices <file>` gives prices for models that are not on Token Factory, in US dollars per million tokens, for example `{"spark/deepseek": {"input_per_million": 0, "output_per_million": 0}}`.
 
