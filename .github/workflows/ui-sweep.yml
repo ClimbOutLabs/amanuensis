@@ -4,9 +4,7 @@ name: UI look-over
 # size, once a week, and stores the pictures with a list of what looked wrong. It is a look, not a
 # test: it passes whatever it finds. The Docs site workflow puts the pictures on the website.
 on:
-  schedule:
-    # Saturday 07:17 UTC, late Friday night in the Americas; off the hour, when scheduled runs start late.
-    - cron: '17 7 * * 6'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -49,5 +47,5 @@ jobs:
         with:
           name: ui-sweep
           path: ${{ runner.temp }}/ui-sweep
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 35

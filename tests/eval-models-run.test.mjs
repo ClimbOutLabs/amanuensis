@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { collectToolCalls, countRefusedCommands, runCheck, toolNameMatches } from '../scripts/eval-models/checks.mjs';
-import { DROP_EXIT_CODE, parseModelArgs } from '../scripts/eval-models/cli.mjs';
+import { allCasesPassed, DROP_EXIT_CODE, parseModelArgs } from '../scripts/eval-models/cli.mjs';
 import {
   checkScheduledRun,
   cleanUpJourney,
@@ -13,6 +13,7 @@ import {
   snapshotJourney,
 } from '../scripts/eval-models/journey.mjs';
 import { buildJudgePrompt, parseVerdict } from '../scripts/eval-models/judge.mjs';
+import { seedProductCases } from '../scripts/eval-models/product-cases.mjs';
 import { findDrops } from '../scripts/eval-models/report.mjs';
 import { modelCost, runEvalModels } from '../scripts/eval-models/run.mjs';
 import { checkNewsTitles, replyNamesTitle } from '../scripts/eval-models/skills.mjs';
@@ -852,4 +853,53 @@ test('skill cases run only when the instance has a sandbox for them', async () =
   const result = await runSkillSet({ client, skills: false });
   assert.equal(result.rows.length, 0);
   assert.deepEqual(client.state.skills, [{ name: 'kept' }]);
+});
+
+test('strict weekly scores reject an empty set and a partial pass without needing a previous run', () => {
+  assert.equal(allCasesPassed([]), false);
+  assert.equal(allCasesPassed([{ passed: 0, total: 0 }]), false);
+  assert.equal(allCasesPassed([{ passed: 39, total: 58 }]), false);
+  assert.equal(
+    allCasesPassed([
+      { passed: 2, total: 2 },
+      { passed: 0, total: 1 },
+    ]),
+    false,
+  );
+  assert.equal(allCasesPassed([{ passed: 58, total: 58 }]), true);
+  const args = ['--instance', 'http://localhost:8800', '--models', 'a/b', '--label', 'test'];
+  assert.equal(parseModelArgs(args).requirePass, false);
+  assert.equal(parseModelArgs([...args, '--require-pass']).requirePass, true);
+});
+
+test('a judge must grade each actual checklist number once', () => {
+  const verdict = numbers => JSON.stringify({ items: numbers.map(n => ({ n, pass: true })) });
+  for (const numbers of [[1, 1], [1, 3], [1, 2, 3], [1]]) {
+    assert.equal(parseVerdict({ count: 2, text: verdict(numbers) }), undefined);
+  }
+  assert.equal(parseVerdict({ count: 2, text: verdict([2, 1]) })?.length, 2);
+});
+
+test('weekly product questions withhold each fresh stored answer from the prompt', async () => {
+  let outcome;
+  let body;
+  const cases = await seedProductCases({
+    async createGoalDraft(goal) {
+      outcome = goal.outcome;
+    },
+    async listSpaces() {
+      return { aggregate_revision: 0 };
+    },
+    async createSpace(input) {
+      body = input.space.body;
+      return { space: { id: 'exhibit', revision: 1 } };
+    },
+  });
+  for (const [index, source] of [outcome, body].entries()) {
+    const item = cases[index];
+    const code = source.match(/[a-f0-9]{12}/)[0];
+    assert.ok(!item.prompt.includes(code));
+    assert.ok(item.checks.some(check => check.type === 'reply_includes' && check.any.includes(code)));
+    assert.ok(item.checks.some(check => check.type === 'tool_called'));
+  }
 });

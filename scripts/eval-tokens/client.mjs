@@ -341,6 +341,14 @@ export function createInstanceClient({ baseUrl, token, fetchImpl = fetch }) {
       }
       throw new Error('The chat has more events than the eval can read. Run a shorter prompt.');
     },
+    async createGoalDraft({ title, outcome }) {
+      const body = await request('POST', '/api/v1/goals', { title, outcome });
+      const goal = body?.data?.goal;
+      if (goal?.lifecycle !== 'draft' || goal.title !== title || goal.outcome !== outcome) {
+        throw new Error('The instance did not store the requested goal draft.');
+      }
+      return goal;
+    },
     /** Every space, read page by page. The aggregate revision guards each continuation page. */
     async listAllSpaces() {
       const spaces = [];

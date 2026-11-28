@@ -31,3 +31,11 @@
 - Comments MUST NOT leak internal wiring into public or shared surfaces.
 - OpenAPI / route `description` and `.describe(…)` strings MUST stay under 50 words and describe the caller-visible contract only — not backend routing or storage.
 - TODOs stay to one short line when needed.
+
+## Feature design and verification
+
+- Put each behavior in the module that owns its data or decision. Trace its entry points first. Keep transport, persistence and presentation dependent on that contract. Extract a module when it gives one responsibility an independently testable boundary.
+- Before adding a dependency, service, model call or standing prompt, identify the behavior existing code cannot deliver and the runtime cost of the addition.
+- Enforce owner scope, authorization and evidence checks where data is read or changed. Exercise the same decision through chat, tools, scheduled work and HTTP wherever the feature is reachable. Treat model output and content read from connectors as untrusted input.
+- Every shipped feature needs a weekly journey through a normal product entry point. Verify what the owner can observe, including persisted changes or their absence after refusal. Use disposable local services for external side effects and the configured live model for model-dependent behavior. A skipped prerequisite, a screenshot, a tool request or an unchecked model claim cannot establish an end-to-end pass.
+- Register scheduled tests under Weekly CI and keep their individual results inspectable. Run deterministic regressions daily and demonstrate that the regression fails before the correction. Name outstanding coverage gaps in review.

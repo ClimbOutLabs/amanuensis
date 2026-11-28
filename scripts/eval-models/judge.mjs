@@ -58,9 +58,10 @@ export function parseVerdict({ text, count }) {
   if (typeof json !== 'object' || json === null || !Array.isArray(json.items)) {
     return undefined;
   }
+  if (json.items.length !== count) return undefined;
   const results = [];
   for (let n = 1; n <= count; n += 1) {
-    const entry = json.items.find(item => item?.n === n) ?? json.items[n - 1];
+    const entry = json.items.find(item => item?.n === n);
     if (typeof entry?.pass !== 'boolean') {
       return undefined;
     }

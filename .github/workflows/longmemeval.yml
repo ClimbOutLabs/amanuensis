@@ -14,8 +14,7 @@ on:
       - 'packages/trueforge/package.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
-  schedule:
-    - cron: '19 10 * * 1'
+  workflow_call:
   workflow_dispatch:
     inputs:
       full:
